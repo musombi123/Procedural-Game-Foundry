@@ -20,7 +20,9 @@ The Blender automation, full asset catalogue, NPC/quest editors, multiplayer, pa
 
 PGF now includes a rights-gated, persisted seven-stage movie-to-game pipeline manifest and creator approval panel. The workflow captures explicit video/photo rights, likeness consent and original-assets-only confirmation. Stages are locked until the previous stage is approved; regenerating a stage resets its downstream approvals and revisions. See [the pipeline architecture](docs/architecture/movie-to-game-pipeline.md) and [third-party license register](LICENSES.md).
 
-**Current boundary:** rights-gated uploads and a local FFmpeg/FFprobe analysis worker are implemented. The worker writes metadata, scene-cut candidates, sampled keyframes and an optional faster-whisper transcript for creator review. Vision-language story synthesis, Blender automation, generated assets, the browser game runtime and APK packaging remain follow-up work.
+**Implemented:** rights-gated uploads; local FFmpeg/FFprobe metadata and keyframe extraction; optional faster-whisper transcription; local Ollama vision analysis of movie frames and the creator portrait; and local language-model synthesis of an original game brief, player concept, cast, locations, enemies, items, missions and level progression. The creator can edit and persist the title, logline, mission outlines and level progression before approving the analysis stage. See [local story intelligence setup](docs/architecture/story-intelligence.md).
+
+**Current boundary:** Ollama models must be installed locally and configured; the subsystem never calls hosted inference APIs or downloads model weights. Semantic results are model-generated proposals requiring creator review. Blender automation, generated 3D assets, the browser game runtime, gameplay synthesis and APK packaging remain follow-up work.
 
 ## Quick start
 Python 3.11+:
