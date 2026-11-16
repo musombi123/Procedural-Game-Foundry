@@ -25,7 +25,7 @@ POST /api/projects/PROJECT_ID/movie-pipeline/stages/analysis/intelligence/run
 
 Poll the returned job using `GET /api/jobs/JOB_ID`. The worker writes `vision-analysis.json` and `storyboard.json` alongside the media manifest. The analysis stage remains in creator REVIEW after completion; the creator can inspect and approve or regenerate it.
 
-The vision prompt samples up to 12 keyframes and records visual evidence, recurring figures, locations, objects and events. The story planner creates an original game concept with a player character, supporting cast, factions, enemies, items, 4-8 missions and 3-7 levels. The model output is a proposal, not verified film canon. Review and edit it before downstream asset generation.
+The vision prompt samples up to 12 keyframes and records visual evidence, recurring figures, locations, objects and events. It separately analyzes the creator's uploaded full-body portrait for visible silhouette, clothing, color palette, pose and non-identifying visual details, then supplies that portrait reference to the story planner for the player-avatar concept. The story planner creates an original game concept with a player character grounded in the portrait reference, supporting cast, factions, enemies, items, 4-8 missions and 3-7 levels. The creator can edit and persist the game title, logline, mission titles/objectives and level names/challenges from the creator panel. The model output is a proposal, not verified film canon. Review and edit it before downstream asset generation.
 
 ## Hardware and licensing
 
