@@ -15,6 +15,13 @@ PGF is a local-first game creation studio. It converts a versioned Foundry Proje
 
 The Blender automation, full asset catalogue, NPC/quest editors, multiplayer, paired local bridge, cloud collaboration, Android signing and complete cross-platform export presets remain planned extensions. A directory or interface is not considered a finished subsystem.
 
+
+## Movie-to-game production workflow (foundation)
+
+PGF now includes a rights-gated, persisted seven-stage movie-to-game pipeline manifest and creator approval panel. The workflow captures explicit video/photo rights, likeness consent and original-assets-only confirmation. Stages are locked until the previous stage is approved; regenerating a stage resets its downstream approvals and revisions. See [the pipeline architecture](docs/architecture/movie-to-game-pipeline.md) and [third-party license register](LICENSES.md).
+
+**Current boundary:** this commit establishes the stage lifecycle and creator UI. Secure media ingestion, local inference workers, Blender automation, asset generation, the browser game runtime and APK packaging are not yet implemented. The API reports local model workers as unavailable rather than pretending processing has completed.
+
 ## Quick start
 Python 3.11+:
 ```bash
