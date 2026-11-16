@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -348,7 +349,7 @@ def save_movie_intelligence(pid: str, request: StoryEditRequest):
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["story"] = story
-        payload["creator_edited_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        payload["creator_edited_at"] = datetime.now(timezone.utc).isoformat()
         temporary = path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         temporary.replace(path)
