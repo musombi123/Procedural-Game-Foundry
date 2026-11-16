@@ -5,7 +5,7 @@ The first executable worker for the movie-to-game pipeline uses local FFmpeg too
 ## Requirements
 
 - FFmpeg and FFprobe available on PATH.
-- Optional transcription: install `faster-whisper` and set `PGF_WHISPER_MODEL` to an already-installed model identifier/path. Device and compute type can be selected with `PGF_WHISPER_DEVICE` and `PGF_WHISPER_COMPUTE_TYPE`. The first run may download model weights if the selected identifier is not cached; use a local model directory for strictly offline operation.
+- Optional transcription: install with `pip install -e ".[media]"`, then set `PGF_WHISPER_MODEL` to an already-installed model identifier/path. Device and compute type can be selected with `PGF_WHISPER_DEVICE` and `PGF_WHISPER_COMPUTE_TYPE`. The first run may download model weights if the selected identifier is not cached; use a local model directory for strictly offline operation.
 
 ## Run
 
