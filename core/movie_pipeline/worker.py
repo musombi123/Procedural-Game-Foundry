@@ -26,7 +26,7 @@ def _run(command: list[str], timeout: int = 180, include_stderr: bool = False) -
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or str(exc))[-3000:]
         raise MediaAnalysisError(f"{command[0]} failed: {detail}") from exc
-    return result.stdout + "\n" + result.stderr
+    return result.stdout + (result.stderr if include_stderr else "")
 
 def _probe(video: Path) -> dict[str, Any]:
     raw = _run(["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", str(video)], timeout=60)
