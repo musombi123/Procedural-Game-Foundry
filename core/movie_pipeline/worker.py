@@ -26,7 +26,7 @@ def _run(command: list[str], timeout: int = 180) -> str:
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or str(exc))[-3000:]
         raise MediaAnalysisError(f"{command[0]} failed: {detail}") from exc
-    return result.stdout + "\\n" + result.stderr
+    return result.stdout + "\n" + result.stderr
 
 def _probe(video: Path) -> dict[str, Any]:
     raw = _run(["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", str(video)], timeout=60)
@@ -58,7 +58,7 @@ def _scene_times(video: Path, duration: float, limit: int = 24) -> tuple[list[fl
     expression = "select='gt(scene,0.35)',showinfo"
     try:
         output = _run([ffmpeg, "-hide_banner", "-i", str(video), "-vf", expression, "-an", "-f", "null", "-"], timeout=max(180, int(duration * 2)))
-        times = [float(value) for value in re.findall(r"pts_time:([0-9]+(?:\\.[0-9]+)?)", output)]
+        times = [float(value) for value in re.findall(r"pts_time:([0-9]+(?:\.[0-9]+)?)", output)]
         method = "ffmpeg_scene_score"
     except MediaAnalysisError:
         times, method = [], "even_interval_fallback"
