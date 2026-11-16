@@ -57,6 +57,10 @@ class StageDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     note: str = Field(default="", max_length=2000)
 
+class StoryEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    story: dict
+
 def new_pipeline(project_id: str, rights: RightsDeclaration) -> PipelineDocument:
     stages = [StageRecord(stage=stage, state=StageState.READY if index == 0 else StageState.LOCKED,
                           summary="Ready for local processing" if index == 0 else "Waiting for previous stage approval")
