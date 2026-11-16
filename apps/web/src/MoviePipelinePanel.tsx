@@ -108,10 +108,10 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       {pipeline.stages.map((stage) => <article key={stage.stage} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: 13, border: "1px solid #2b3a4e", borderRadius: 10, background: "#142235" }}>
         <div style={{ minWidth: 180, flex: 1 }}><b>{stageNames[stage.stage] ?? stage.stage}</b><div style={{ fontSize: 12, color: "#9fb0c4", marginTop: 5 }}>{stage.summary} · revision {stage.revision + 1}</div>{stage.error && <div style={{ color: "#ef9696", fontSize: 12 }}>{stage.error}</div>}</div>
         <span style={{ color: statusColor[stage.state], fontSize: 11, fontWeight: 800, letterSpacing: .8 }}>{stage.state}</span>
-        {stage.stage === "analysis" && stage.state === "READY" && pipeline.source_video && <button disabled={busy} onClick={() => void runAnalysis()}>Run local analysis</button>}\n        {stage.state === "REVIEW" && <button disabled={busy} onClick={() => stageAction(stage.stage, "approve")}>Approve</button>}
+        {stage.stage === "analysis" && stage.state === "READY" && pipeline.source_photo && pipeline.source_video && <button disabled={busy} onClick={() => void runAnalysis()}>Run local analysis</button>}\n        {stage.state === "REVIEW" && <button disabled={busy} onClick={() => stageAction(stage.stage, "approve")}>Approve</button>}
         {["REVIEW", "FAILED", "APPROVED"].includes(stage.state) && <button disabled={busy} onClick={() => stageAction(stage.stage, "regenerate")}>Regenerate</button>}
       </article>)}
-      <p style={{ margin: "6px 0 0", color: "#e3c58b", fontSize: 13 }}>Media worker: FFmpeg / FFprobe analysis is available when installed locally. Vision-model synthesis and generated assets remain separate, optional workers.</p>
+      <p style={{ margin: "6px 0 0", color: "#e3c58b", fontSize: 13 }}>Media worker: FFmpeg / FFprobe analysis runs locally when installed. Both source inputs are required. Vision-model synthesis and generated assets remain separate, optional workers.</p>
     </div>}
     <p aria-live="polite" style={{ margin: "14px 0 0", color: "#9fb0c4", fontSize: 12 }}>{message}</p>
   </section>;
