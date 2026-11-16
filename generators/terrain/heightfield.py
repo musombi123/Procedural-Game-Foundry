@@ -30,3 +30,42 @@ def generate_heightfield(seed, width, depth, resolution, amplitude=9.0, frequenc
             row.append(round((base + detail + ridge) * amplitude, 4))
         rows.append(row)
     return rows
+
+
+def apply_terrain_edits(heights, width, depth, edits):
+    """Apply deterministic radial terrain sculpt strokes to a generated heightfield."""
+    if not edits:
+        return heights
+    rows, cols = len(heights), len(heights[0])
+    result = [list(row) for row in heights]
+    for edit in edits:
+        operation = edit.get("operation", "raise")
+        cx, cz = float(edit["x"]), float(edit["z"])
+        radius = float(edit.get("radius", 6.0))
+        strength = float(edit.get("strength", 2.0))
+        if radius <= 0:
+            continue
+        source = [list(row) for row in result] if operation == "smooth" else None
+        for iz in range(rows):
+            z = (iz / (rows - 1) - 0.5) * depth
+            for ix in range(cols):
+                x = (ix / (cols - 1) - 0.5) * width
+                distance_sq = (x - cx) ** 2 + (z - cz) ** 2
+                if distance_sq >= radius * radius:
+                    continue
+                weight = math.exp(-4.0 * distance_sq / (radius * radius))
+                if operation == "raise":
+                    result[iz][ix] += strength * weight
+                elif operation == "lower":
+                    result[iz][ix] -= strength * weight
+                elif operation == "smooth":
+                    neighbors = []
+                    for dz in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            nz, nx = iz + dz, ix + dx
+                            if 0 <= nz < rows and 0 <= nx < cols and (dx or dz):
+                                neighbors.append(source[nz][nx])
+                    if neighbors:
+                        blend = min(1.0, strength / 12.0) * weight
+                        result[iz][ix] = source[iz][ix] * (1.0 - blend) + (sum(neighbors) / len(neighbors)) * blend
+    return [[round(value, 4) for value in row] for row in result]

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from core.project_engine.models import ProjectDefinition, WorldDocument
-from generators.terrain.heightfield import generate_heightfield
+from generators.terrain.heightfield import generate_heightfield, apply_terrain_edits
 from generators.biomes.biome_map import generate_biome_map
 
 PROJECT = """config_version=5
@@ -264,10 +264,12 @@ def assemble_godot_project(definition: ProjectDefinition, destination: Path, wor
     document = WorldDocument.model_validate(world_state) if world_state else WorldDocument(seed=definition.project.seed, world=definition.world)
     settings = document.world
     heights = generate_heightfield(document.seed, settings.width, settings.depth, settings.resolution, settings.amplitude, settings.frequency)
+    heights = apply_terrain_edits(heights, settings.width, settings.depth, [item.model_dump(mode="json") for item in document.terrain_edits])
     biomes = generate_biome_map(document.seed, heights)
     spawn_height = _sample_height(heights, settings.width, settings.depth, 0.0, 18.0)
     terrain_data = {
         "seed": document.seed, "width": settings.width, "depth": settings.depth,
+        "terrain_edits": [item.model_dump(mode="json") for item in document.terrain_edits],
         "heights": heights, "biomes": biomes, "spawn_height": spawn_height,
         "sun_angle": document.sun_angle, "fog": document.fog, "water_level": document.water_level,
     }
