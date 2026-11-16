@@ -101,6 +101,19 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Local intelligence failed"); }
     finally { setBusy(false); }
   }
+  async function saveStory() {
+    if (!story) return;
+    setBusy(true);
+    try {
+      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/analysis/intelligence", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ story })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "Could not save story edits");
+      setStory(data.story); setMessage("Creator edits saved to the project storyboard");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not save story edits"); }
+    finally { setBusy(false); }
+  }
   async function stageAction(stage: string, action: "approve" | "regenerate") {
     setBusy(true);
     try {
@@ -136,19 +149,29 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       {pipeline.stages.map((stage) => <article key={stage.stage} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: 13, border: "1px solid #2b3a4e", borderRadius: 10, background: "#142235" }}>
         <div style={{ minWidth: 180, flex: 1 }}><b>{stageNames[stage.stage] ?? stage.stage}</b><div style={{ fontSize: 12, color: "#9fb0c4", marginTop: 5 }}>{stage.summary} · revision {stage.revision + 1}</div>{stage.error && <div style={{ color: "#ef9696", fontSize: 12 }}>{stage.error}</div>}</div>
         <span style={{ color: statusColor[stage.state], fontSize: 11, fontWeight: 800, letterSpacing: .8 }}>{stage.state}</span>
-        {stage.stage === "analysis" && stage.state === "READY" && pipeline.source_photo && pipeline.source_video && <button disabled={busy} onClick={() => void runAnalysis()}>Run local analysis</button>}\n        {stage.stage === "analysis" && stage.state === "REVIEW" && <button disabled={busy} onClick={() => void runIntelligence()}>Generate story & missions with local AI</button>}
+        {stage.stage === "analysis" && stage.state === "READY" && pipeline.source_photo && pipeline.source_video && <button disabled={busy} onClick={() => void runAnalysis()}>Run local analysis</button>}
+        {stage.stage === "analysis" && stage.state === "REVIEW" && <button disabled={busy} onClick={() => void runIntelligence()}>Generate story & missions with local AI</button>}
         {stage.state === "REVIEW" && <button disabled={busy} onClick={() => stageAction(stage.stage, "approve")}>Approve</button>}
         {["REVIEW", "FAILED", "APPROVED"].includes(stage.state) && <button disabled={busy} onClick={() => stageAction(stage.stage, "regenerate")}>Regenerate</button>}
       </article>)}
-      {story && <article style={{ padding: 16, border: "1px solid #49627d", borderRadius: 12, background: "#0d1725" }}>
-        <h3 style={{ margin: "0 0 6px" }}>{story.title}</h3>
-        <p style={{ color: "#b8c8d9", marginTop: 0 }}>{story.logline}</p>
+      {story && <article style={{ padding: 16, border: "1px solid #49627d", borderRadius: 12, background: "#0d1725", display: "grid", gap: 9 }}>
+        <h3 style={{ margin: "0 0 2px" }}>Editable game brief</h3>
+        <label>Game title<input value={story.title ?? ""} onChange={event => setStory((current: any) => current ? { ...current, title: event.target.value } : current)} style={{ display: "block", width: "100%", marginTop: 4 }}/></label>
+        <label>Logline<textarea value={story.logline ?? ""} onChange={event => setStory((current: any) => current ? { ...current, logline: event.target.value } : current)} rows={2} style={{ display: "block", width: "100%", marginTop: 4 }}/></label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#9fb0c4" }}><span>{story.genre}</span><span>· {story.missions?.length ?? 0} missions</span><span>· {story.level_progression?.length ?? 0} levels</span></div>
-        <h4>Mission outline</h4>
-        <ol>{(story.missions ?? []).map((mission: any, index: number) => <li key={mission.id ?? index} style={{ marginBottom: 6 }}><b>{mission.title ?? mission.id ?? "Mission " + (index + 1)}</b> — {mission.objective}</li>)}</ol>
-        <h4>Level progression</h4>
-        <ol>{(story.level_progression ?? []).map((level: any, index: number) => <li key={level.level ?? index}><b>{level.name ?? "Level " + (index + 1)}</b> — {level.primary_challenge}</li>)}</ol>
-        <small style={{ color: "#e3c58b" }}>AI-generated proposal · review and approve before asset production</small>
+        {story.player_character && <p style={{ margin: 0, color: "#b8c8d9" }}><b>Player:</b> {story.player_character.name} — {story.player_character.role}. {story.player_character.visual_design}</p>}
+        <h4 style={{ marginBottom: 0 }}>Mission outline</h4>
+        {(story.missions ?? []).map((mission: any, index: number) => <div key={mission.id ?? index} style={{ display: "grid", gap: 4 }}>
+          <input aria-label={"Mission " + (index + 1) + " title"} value={mission.title ?? ""} onChange={event => setStory((current: any) => current ? { ...current, missions: current.missions.map((item: any, i: number) => i === index ? { ...item, title: event.target.value } : item) } : current)}/>
+          <textarea aria-label={"Mission " + (index + 1) + " objective"} rows={2} value={mission.objective ?? ""} onChange={event => setStory((current: any) => current ? { ...current, missions: current.missions.map((item: any, i: number) => i === index ? { ...item, objective: event.target.value } : item) } : current)}/>
+        </div>)}
+        <h4 style={{ marginBottom: 0 }}>Level progression</h4>
+        {(story.level_progression ?? []).map((level: any, index: number) => <div key={level.level ?? index} style={{ display: "grid", gap: 4 }}>
+          <input aria-label={"Level " + (index + 1) + " name"} value={level.name ?? ""} onChange={event => setStory((current: any) => current ? { ...current, level_progression: current.level_progression.map((item: any, i: number) => i === index ? { ...item, name: event.target.value } : item) } : current)}/>
+          <textarea aria-label={"Level " + (index + 1) + " challenge"} rows={2} value={level.primary_challenge ?? ""} onChange={event => setStory((current: any) => current ? { ...current, level_progression: current.level_progression.map((item: any, i: number) => i === index ? { ...item, primary_challenge: event.target.value } : item) } : current)}/>
+        </div>)}
+        <button disabled={busy} onClick={() => void saveStory()}>Save creator edits</button>
+        <small style={{ color: "#e3c58b" }}>AI-generated proposal · creator edits are saved before stage approval and asset production</small>
       </article>}
       <p style={{ margin: "6px 0 0", color: "#e3c58b", fontSize: 13 }}>Media worker: FFmpeg / FFprobe analysis runs locally when installed. Both source inputs are required. Vision and story synthesis use local Ollama models; generated assets remain a separate production stage.</p>
     </div>}
