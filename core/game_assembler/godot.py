@@ -66,7 +66,7 @@ func _ready() -> void:
     var player = CharacterBody3D.new()
     player.name = "Player"
     player.set_script(Player)
-    player.position = Vector3(0, float(data.get("spawn_height", 3.0)) + 2.0, 18)
+    player.position = Vector3(0, float(data.get("spawn_height", 0.0)) + 1.0, 18)
     add_child(player)
 
     var camera = Camera3D.new()
@@ -150,6 +150,12 @@ var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 @onready var camera: Camera3D = $Camera3D
 
 func _ready() -> void:
+    var collider = CollisionShape3D.new()
+    var capsule = CapsuleShape3D.new()
+    capsule.radius = 0.42
+    capsule.height = 1.8
+    collider.shape = capsule
+    add_child(collider)
     Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -165,7 +171,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
     if not is_on_floor():
         velocity.y -= gravity * delta
-    elif Input.is_key_just_pressed(KEY_SPACE):
+    elif Input.is_action_just_pressed("ui_accept"):
         velocity.y = jump_velocity
 
     var input_axis = Vector2.ZERO
@@ -259,10 +265,10 @@ def assemble_godot_project(definition: ProjectDefinition, destination: Path, wor
     settings = document.world
     heights = generate_heightfield(document.seed, settings.width, settings.depth, settings.resolution, settings.amplitude, settings.frequency)
     biomes = generate_biome_map(document.seed, heights)
-    center_height = float(heights[len(heights) // 2][len(heights[0]) // 2])
+    spawn_height = _sample_height(heights, settings.width, settings.depth, 0.0, 18.0)
     terrain_data = {
         "seed": document.seed, "width": settings.width, "depth": settings.depth,
-        "heights": heights, "biomes": biomes, "spawn_height": center_height + 1.8,
+        "heights": heights, "biomes": biomes, "spawn_height": spawn_height,
         "sun_angle": document.sun_angle, "fog": document.fog, "water_level": document.water_level,
     }
     scene_objects = []
