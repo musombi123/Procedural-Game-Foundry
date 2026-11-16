@@ -1,7 +1,7 @@
 import os
 import shutil
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.project_engine.models import ProjectCreate, WorldDocument
@@ -19,7 +19,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "product": "Procedural Game Foundry", "model_free": True}
+    return {"status": "ok", "product": "Procedural Game Foundry", "model_free": True, "staged_movie_pipeline": True, "local_model_workers_ready": False}
 
 @app.get("/api/capabilities")
 def capabilities():
@@ -134,3 +134,127 @@ def project_files(pid: str):
     if not root.is_dir():
         raise HTTPException(404, "Project not found")
     return {"files": [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]}
+
+
+# Movie-to-game pipeline: persisted, creator-approved stage state machine.
+from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, new_pipeline
+from core.movie_pipeline.service import PipelineError, PipelineStore
+from core.movie_pipeline.worker import analyze_project
+
+@app.post("/api/projects/{pid}/movie-pipeline", status_code=201)
+def create_movie_pipeline(pid: str, request: PipelineCreate):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+    except FileNotFoundError:
+        raise HTTPException(404, "Project not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    rights = request.rights
+    if not (rights.has_video_rights and rights.has_photo_rights and rights.likeness_consent and rights.accepts_original_assets_only):
+        raise HTTPException(400, "Confirm video rights, photo rights, likeness consent and original-asset generation before processing")
+    store = PipelineStore(folder)
+    if store.path.exists():
+        raise HTTPException(409, "A movie pipeline already exists for this project")
+    return store.save(new_pipeline(pid, rights)).model_dump(mode="json")
+
+@app.get("/api/projects/{pid}/movie-pipeline")
+def get_movie_pipeline(pid: str):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        return PipelineStore(folder).load().model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@app.post("/api/projects/{pid}/movie-pipeline/stages/{stage_id}/approve")
+def approve_movie_stage(pid: str, stage_id: StageId, request: StageDecision):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        result = PipelineStore(folder).approve(stage_id, request.note)
+        return result.model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except PipelineError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@app.post("/api/projects/{pid}/movie-pipeline/stages/{stage_id}/regenerate")
+def regenerate_movie_stage(pid: str, stage_id: StageId):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        result = PipelineStore(folder).regenerate(stage_id)
+        return result.model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except PipelineError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+from core.movie_pipeline.ingestion import UploadRejected, store_upload
+
+async def _attach_movie_input(pid: str, kind: str, upload: UploadFile):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        store = PipelineStore(folder)
+        document = store.load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    attribute = "source_photo" if kind == "photo" else "source_video"
+    if getattr(document, attribute):
+        raise HTTPException(409, f"A {kind} input is already attached; remove it before replacing")
+    try:
+        metadata = await store_upload(upload, kind, store.folder / "uploads")
+    except UploadRejected as exc:
+        raise HTTPException(400, str(exc)) from exc
+    setattr(document, attribute, metadata)
+    store.save(document)
+    return {"attached": True, "kind": kind, "metadata": metadata}
+
+@app.post("/api/projects/{pid}/movie-pipeline/source/photo", status_code=201)
+async def upload_player_portrait(pid: str, file: UploadFile = File(...)):
+    return await _attach_movie_input(pid, "photo", file)
+
+@app.post("/api/projects/{pid}/movie-pipeline/source/video", status_code=201)
+async def upload_source_movie(pid: str, file: UploadFile = File(...)):
+    return await _attach_movie_input(pid, "video", file)
+
+
+@app.post("/api/projects/{pid}/movie-pipeline/stages/analysis/run", status_code=202)
+def run_movie_analysis(pid: str, background: BackgroundTasks):
+    """Queue local FFmpeg analysis; poll the returned PGF job id for completion."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        pipeline = PipelineStore(folder).load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    analysis = next(item for item in pipeline.stages if item.stage == StageId.ANALYSIS)
+    if analysis.state.value != "READY":
+        raise HTTPException(409, "Analysis stage must be READY before it can run")
+    if not pipeline.source_video:
+        raise HTTPException(409, "Upload the movie video before starting analysis")
+    job = jobs.add(Job.create(pid))
+    background.add_task(run_movie_analysis_job, job.id, folder)
+    return job.as_dict()
+
+def run_movie_analysis_job(job_id: str, folder: Path):
+    try:
+        jobs.update(job_id, state=JobState.RUNNING, progress=5, message="Starting local media analysis")
+        result = analyze_project(folder)
+        jobs.update(job_id, state=JobState.COMPLETED, progress=100,
+                    message=f"Analysis ready for review ({len(result.get('keyframes', []))} keyframes)", error=None)
+    except Exception as exc:
+        jobs.update(job_id, state=JobState.FAILED, message="Movie analysis failed", error=str(exc))
