@@ -121,3 +121,24 @@ def test_story_edit_api_persists_creator_changes(tmp_path, monkeypatch):
     fetched = client.get(f"/api/projects/{pid}/movie-pipeline/stages/analysis/intelligence")
     assert fetched.status_code == 200
     assert fetched.json()["story"]["title"] == "Creator Original Game"
+
+
+def test_intelligence_api_queues_and_completes_local_job(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import services.api.main as api
+
+    monkeypatch.setattr(api, "manager", api.ProjectManager(tmp_path))
+    monkeypatch.setattr(api, "run_story_intelligence", lambda folder: {"story": {"title": "Local Story", "missions": [{}, {}, {}, {}], "level_progression": [{}, {}, {}]}})
+    client = TestClient(api.app)
+    project = client.post("/api/projects", json={"name": "Intelligence Job"}).json()
+    pid = project["id"]
+    client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS.model_dump(mode="json")})
+    store = PipelineStore(api.manager.path_for(pid))
+    document = store.load()
+    document.stages[0].state = StageState.REVIEW
+    store.save(document)
+    response = client.post(f"/api/projects/{pid}/movie-pipeline/stages/analysis/intelligence/run")
+    assert response.status_code == 202
+    job = client.get(f"/api/jobs/{response.json()['id']}")
+    assert job.status_code == 200
+    assert job.json()["state"] == "COMPLETED"
