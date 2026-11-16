@@ -28,6 +28,7 @@ def test_story_intelligence_writes_vision_and_story_outputs(tmp_path, monkeypatc
     movie = upload / "movie.mp4"
     movie.write_bytes(b"movie")
     doc.source_photo = {"storage_key": "movie_pipeline/uploads/portrait.jpg"}
+    (upload / "portrait.jpg").write_bytes(b"portrait-photo")
     doc.source_video = {"storage_key": "movie_pipeline/uploads/movie.mp4"}
     store.save(doc)
 
