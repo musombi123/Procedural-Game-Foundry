@@ -20,7 +20,7 @@ The Blender automation, full asset catalogue, NPC/quest editors, multiplayer, pa
 
 PGF now includes a rights-gated, persisted seven-stage movie-to-game pipeline manifest and creator approval panel. The workflow captures explicit video/photo rights, likeness consent and original-assets-only confirmation. Stages are locked until the previous stage is approved; regenerating a stage resets its downstream approvals and revisions. See [the pipeline architecture](docs/architecture/movie-to-game-pipeline.md) and [third-party license register](LICENSES.md).
 
-**Current boundary:** this commit establishes the stage lifecycle and creator UI. Secure media ingestion, local inference workers, Blender automation, asset generation, the browser game runtime and APK packaging are not yet implemented. The API reports local model workers as unavailable rather than pretending processing has completed.
+**Current boundary:** rights-gated uploads and a local FFmpeg/FFprobe analysis worker are implemented. The worker writes metadata, scene-cut candidates, sampled keyframes and an optional faster-whisper transcript for creator review. Vision-language story synthesis, Blender automation, generated assets, the browser game runtime and APK packaging remain follow-up work.
 
 ## Quick start
 Python 3.11+:
