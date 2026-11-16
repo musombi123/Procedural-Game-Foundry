@@ -57,3 +57,31 @@ def test_cannot_approve_stage_without_review_output(tmp_path):
         assert "REVIEW" in str(exc)
     else:
         raise AssertionError("Approval without a reviewed output must be rejected")
+
+
+def test_media_uploads_are_signature_checked_and_project_scoped(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "manager", api.ProjectManager(tmp_path))
+    client = TestClient(api.app)
+    project = client.post("/api/projects", json={"name": "Upload Test"}).json()
+    pid = project["id"]
+    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS})
+    assert created.status_code == 201
+
+    bad = client.post(f"/api/projects/{pid}/movie-pipeline/source/photo", files={"file": ("portrait.jpg", b"not an image", "image/jpeg")})
+    assert bad.status_code == 400
+
+    photo_bytes = b"\\xff\\xd8\\xff" + b"test-jpeg-payload"
+    photo = client.post(f"/api/projects/{pid}/movie-pipeline/source/photo", files={"file": ("portrait.jpg", photo_bytes, "image/jpeg")})
+    assert photo.status_code == 201
+    assert photo.json()["metadata"]["size_bytes"] == len(photo_bytes)
+
+    video_bytes = b"\\x00\\x00\\x00\\x18ftypmp42" + b"test-video-payload"
+    video = client.post(f"/api/projects/{pid}/movie-pipeline/source/video", files={"file": ("movie.mp4", video_bytes, "video/mp4")})
+    assert video.status_code == 201
+    assert video.json()["metadata"]["sha256"]
+    restored = client.get(f"/api/projects/{pid}/movie-pipeline").json()
+    assert restored["source_photo"]["filename"] == "player-portrait.jpg"
+    assert restored["source_video"]["filename"] == "source-movie.mp4"
+
+    duplicate = client.post(f"/api/projects/{pid}/movie-pipeline/source/photo", files={"file": ("another.jpg", photo_bytes, "image/jpeg")})
+    assert duplicate.status_code == 409
