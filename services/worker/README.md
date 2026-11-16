@@ -1,0 +1,1 @@
+The first local worker uses FastAPI BackgroundTasks and an in-memory thread-safe job registry. Before multi-user/cloud deployment, replace it with a durable queue and persisted job store. Never expose arbitrary shell execution.

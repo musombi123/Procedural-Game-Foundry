@@ -1,0 +1,1 @@
+Export tests require Godot 4, export templates and platform SDKs. Report unavailable toolchains separately from failed exports.

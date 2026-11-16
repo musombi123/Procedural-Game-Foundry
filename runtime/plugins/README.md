@@ -1,0 +1,1 @@
+Third-party plugins must be pinned, license-reviewed and opt-in. Never auto-run downloaded plugin installation scripts.

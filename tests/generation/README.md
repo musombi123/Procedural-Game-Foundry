@@ -1,0 +1,1 @@
+Test deterministic fixed-seed output, configuration bounds, version reproducibility and invalid-input rejection.

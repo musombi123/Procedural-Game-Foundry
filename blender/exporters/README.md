@@ -1,0 +1,1 @@
+Normalize scale, transforms, material references and texture paths. Every output needs license metadata and checksum.

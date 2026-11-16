@@ -1,0 +1,1 @@
+Planned directed-graph quest system with prerequisites, objective states, triggers, rewards and failure conditions.

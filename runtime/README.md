@@ -1,0 +1,1 @@
+Godot 4 is the authoritative runtime for playable output. Generated projects are self-contained and editable. Runtime templates must be versioned and validated.

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68","wheel"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "procedural-game-foundry"
+version = "0.1.0"
+description = "Model-free procedural game creation studio"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.110,<1","uvicorn[standard]>=0.27,<1","pydantic>=2.6,<3"]
+[project.optional-dependencies]
+dev = ["pytest>=8,<9","httpx>=0.27,<1"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*","services*","generators*"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

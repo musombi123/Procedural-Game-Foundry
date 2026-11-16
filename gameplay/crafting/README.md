@@ -1,0 +1,1 @@
+Planned recipe resolver with ingredient quantities, outputs and unlock conditions.

@@ -1,0 +1,1 @@
+Godot native physics is authoritative in games. PGF configures collision resources and validates required shapes.

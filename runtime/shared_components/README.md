@@ -1,0 +1,1 @@
+Promote stable generated scripts/scenes here when shared by multiple templates. Use typed configuration and avoid duplicate implementations.

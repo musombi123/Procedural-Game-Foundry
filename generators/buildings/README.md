@@ -1,0 +1,1 @@
+Building generation will emit deterministic modular geometry recipes (footprints, wall segments, openings, roof and material slots). Recipes can be materialized as Blender meshes and exported as GLB.

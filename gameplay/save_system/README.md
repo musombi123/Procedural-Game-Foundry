@@ -1,0 +1,1 @@
+Planned versioned JSON saves with migrations, atomic writes and validation. Not yet included in generated demo.

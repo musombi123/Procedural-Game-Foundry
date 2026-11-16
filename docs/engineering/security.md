@@ -1,0 +1,3 @@
+# Security and licensing
+
+Generated scripts are executable code: never auto-run untrusted imported projects. Keep project writes beneath PGF_DATA_DIR and validate project IDs. Browser-to-local access must be explicitly paired and authenticated. Imported plugins/assets require review. Every bundled asset must carry explicit provenance and license metadata; never infer commercial redistribution rights from a download being free.

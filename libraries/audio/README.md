@@ -1,0 +1,1 @@
+Only original, public-domain or properly licensed sounds may be bundled. Record author, source, license and redistribution rights.

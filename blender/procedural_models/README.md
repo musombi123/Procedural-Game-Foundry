@@ -1,0 +1,1 @@
+Reserved for procedural prop, architecture and modular sci-fi mesh recipes. Export GLB/glTF 2.0.

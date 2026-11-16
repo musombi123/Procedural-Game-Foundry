@@ -1,0 +1,1 @@
+Projects live under PGF_DATA_DIR (default .pgf-data/projects). Each project contains pgf.json, assets/, generated/ and game/. The manifest is authoritative; generated outputs can be rebuilt from manifest plus generator version.
