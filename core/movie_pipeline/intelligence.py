@@ -204,6 +204,7 @@ def run_story_intelligence(project_folder: Path) -> dict:
             "The game must be feasible for a small indie 3D action-adventure prototype.\n\n"
             f"MEDIA METADATA: {json.dumps(media, ensure_ascii=False)[:3000]}\n"
             f"VISUAL ANALYSIS: {json.dumps(vision, ensure_ascii=False)[:16000]}\n"
+            f"PLAYER PORTRAIT REFERENCE: {json.dumps(portrait_analysis, ensure_ascii=False)[:5000]}\\n"
             f"AVAILABLE TRANSCRIPT: {transcript}"
         )
         story = client.generate_json(story_model, story_prompt)
