@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 from pathlib import Path
@@ -137,7 +138,7 @@ def project_files(pid: str):
 
 
 # Movie-to-game pipeline: persisted, creator-approved stage state machine.
-from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, new_pipeline
+from core.movie_pipeline.models import PipelineCreate, StageDecision, StoryEditRequest, StageId, new_pipeline
 from core.movie_pipeline.service import PipelineError, PipelineStore
 from core.movie_pipeline.worker import analyze_project
 from core.movie_pipeline.intelligence import IntelligenceError, run_story_intelligence
@@ -311,6 +312,48 @@ def get_movie_intelligence(pid: str):
     if root not in path.parents or not path.is_file():
         raise HTTPException(404, "Story proposal file is missing")
     try:
-        return __import__("json").loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except ValueError as exc:
         raise HTTPException(500, "Story proposal JSON is invalid") from exc
+
+@app.put("/api/projects/{pid}/movie-pipeline/stages/analysis/intelligence")
+def save_movie_intelligence(pid: str, request: StoryEditRequest):
+    """Persist creator edits to the original game brief before stage approval."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        pipeline = PipelineStore(folder).load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    analysis = next(item for item in pipeline.stages if item.stage == StageId.ANALYSIS)
+    if analysis.state.value != "REVIEW":
+        raise HTTPException(409, "Story edits are only allowed while the analysis stage is in REVIEW")
+    relative = analysis.output.get("story_manifest")
+    if not relative:
+        raise HTTPException(404, "No story proposal exists to edit")
+    path = (folder / relative).resolve()
+    root = (folder / "movie_pipeline").resolve()
+    if root not in path.parents or not path.is_file():
+        raise HTTPException(404, "Story proposal file is missing")
+    story = request.story
+    required = ("missions", "level_progression", "supporting_characters", "locations", "enemies", "items")
+    if not isinstance(story.get("title"), str) or not story["title"].strip():
+        raise HTTPException(422, "A game title is required")
+    if any(not isinstance(story.get(key), list) for key in required):
+        raise HTTPException(422, "Story arrays are missing or invalid")
+    if not 4 <= len(story["missions"]) <= 8 or not 3 <= len(story["level_progression"]) <= 7:
+        raise HTTPException(422, "Keep 4-8 missions and 3-7 levels in the approved story")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["story"] = story
+        payload["creator_edited_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        temporary.replace(path)
+        analysis.output["creator_edited"] = True
+        PipelineStore(folder).save(pipeline)
+        return payload
+    except (OSError, ValueError) as exc:
+        raise HTTPException(500, "Could not persist creator story edits") from exc
