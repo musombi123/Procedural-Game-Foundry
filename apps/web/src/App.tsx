@@ -1,11 +1,227 @@
-import {useEffect,useState} from "react";
-type Project={id:string;project:{name:string;genre:string;dimension:string;seed:number}};
-const API=import.meta.env.VITE_PGF_API??"http://127.0.0.1:8000";
-export default function App(){
- const [projects,setProjects]=useState<Project[]>([]),[name,setName]=useState("Lost Planet"),[selected,setSelected]=useState(""),[busy,setBusy]=useState(false),[status,setStatus]=useState("Connecting to Foundry Core…");
- async function refresh(){try{const r=await fetch(API+"/api/projects");if(!r.ok)throw Error();setProjects(await r.json());setStatus("Foundry Core connected")}catch{setStatus("API offline — start the local Foundry Core")}}
- useEffect(()=>{void refresh()},[]);
- async function create(){setBusy(true);try{const r=await fetch(API+"/api/projects",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,genre:"science-fiction",dimension:"3d",seed:Math.floor(Math.random()*1000000)})});if(!r.ok)throw Error((await r.json()).detail??"Create failed");const p=await r.json();setSelected(p.id);await refresh();setStatus("Project created — ready to generate")}catch(e){setStatus(e instanceof Error?e.message:"Create failed")}finally{setBusy(false)}}
- async function generate(){if(!selected)return;setBusy(true);try{const r=await fetch(API+"/api/projects/"+selected+"/generate",{method:"POST"});if(!r.ok)throw Error("Generation request failed");const j=await r.json();let done=false;while(!done){await new Promise(ok=>setTimeout(ok,800));const current=await(await fetch(API+"/api/jobs/"+j.id)).json();setStatus(current.progress+"% · "+current.message);if(["COMPLETED","FAILED"].includes(current.state)){done=true;setStatus(current.state+": "+(current.error??current.message))}}}catch(e){setStatus(e instanceof Error?e.message:"Generation failed")}finally{setBusy(false)}}
- return <main className="layout"><aside><div className="brand"><b>PGF</b><small>PROCEDURAL GAME FOUNDRY</small></div><nav><span className="active">▦　Workspace</span><span>◈　World Foundry</span><span>⬡　Asset Library</span><span>⌘　Gameplay Lab</span><span>▤　Build Centre</span></nav><div className="foot">● MODEL-FREE ENGINE<br/><small>LOCAL-FIRST GENERATION</small></div></aside><section className="main"><header><small>PROJECT WORKSPACE / OVERVIEW</small><h1>Build worlds. Make games.</h1><p>Procedural creation tools for real, playable games.</p><label>{status}</label></header><section className="hero"><div><small>FOUNDRY CORE 0.1</small><h2>Your next universe<br/>starts here.</h2><p>Generate deterministic environments, assemble gameplay and launch a native Godot project.</p><div className="actions"><input value={name} onChange={e=>setName(e.target.value)} aria-label="Project name"/><button disabled={busy||!name.trim()} onClick={create}>＋ New project</button></div></div><div className="planet"/></section><div className="section"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="muted" onClick={refresh}>↻ Refresh</button></div><div className="projects">{projects.map(p=><button key={p.id} className={selected===p.id?"chosen":""} onClick={()=>setSelected(p.id)}><b>◉　{p.project.name}</b><small>{p.project.genre} · {p.project.dimension} · seed {p.project.seed}</small></button>)}{!projects.length&&<p className="empty">No projects yet. Create your first world.</p>}</div><section className="launch"><div><small>SELECTED PROJECT</small><h3>{projects.find(p=>p.id===selected)?.project.name??"Choose a project"}</h3><p>Generate terrain, scenes and a playable Godot project.</p></div><button disabled={busy||!selected} onClick={generate}>{busy?"Working…":"Generate playable world →"}</button></section><footer>PGF · Model-free by design · Godot is the authoritative gameplay runtime</footer></section></main>
+import { useEffect, useMemo, useState } from "react";
+import WorldEditor from "./WorldEditor";
+import type { ObjectKind, SceneObject, WorldDocument } from "./types";
+
+type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
+const API = import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8000";
+const initialWorld = (seed: number): WorldDocument => ({
+  seed,
+  world: { width: 96, depth: 96, resolution: 64, amplitude: 9, frequency: 0.055, biomes: ["rocky-desert", "alien-forest"], weather: true },
+  objects: [], sun_angle: -28, fog: true, water_level: -1.5
+});
+const labels: Record<ObjectKind, string> = { outpost: "Outpost", beacon: "Signal beacon", tree: "Alien tree", rock: "Rock formation", crate: "Cargo crate" };
+const colors: Record<ObjectKind, string> = { outpost: "#819db9", beacon: "#5b8da8", tree: "#4c846f", rock: "#8d8b84", crate: "#b18a5f" };
+type WorldPatch = Partial<Omit<WorldDocument, "world">> & { world?: Partial<WorldDocument["world"]> };
+
+export default function App() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [name, setName] = useState("Lost Planet");
+  const [selected, setSelected] = useState("");
+  const [view, setView] = useState<"workspace" | "world" | "scene">("workspace");
+  const [world, setWorld] = useState<WorldDocument>(initialWorld(784215));
+  const [selectedObject, setSelectedObject] = useState("");
+  const [placementType, setPlacementType] = useState<ObjectKind | null>(null);
+  const [mode, setMode] = useState<"edit" | "play">("edit");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("Connecting to Foundry Core…");
+  const selectedProject = useMemo(() => projects.find((project) => project.id === selected), [projects, selected]);
+  const activeObject = useMemo(() => world.objects.find((item) => item.id === selectedObject), [world.objects, selectedObject]);
+
+  async function refresh() {
+    try {
+      const response = await fetch(API + "/api/projects");
+      if (!response.ok) throw new Error("API returned " + response.status);
+      const data = await response.json() as Project[];
+      setProjects(data);
+      setStatus("Foundry Core connected · " + data.length + " project(s)");
+    } catch {
+      setStatus("Preview ready · start Foundry Core to save and build projects");
+    }
+  }
+  async function loadWorld(projectId: string) {
+    try {
+      const response = await fetch(API + "/api/projects/" + projectId + "/world");
+      if (!response.ok) throw new Error("World load unavailable");
+      const document = await response.json() as WorldDocument;
+      setWorld(document);
+      setSelectedObject("");
+      setStatus("World loaded · seed " + document.seed);
+    } catch {
+      const project = projects.find((item) => item.id === projectId);
+      setWorld(initialWorld(project?.project.seed ?? 784215));
+      setStatus("Local preview active · API unavailable");
+    }
+  }
+  useEffect(() => { void refresh(); }, []);
+
+  function changeProject(projectId: string) {
+    setSelected(projectId);
+    setView("world");
+    void loadWorld(projectId);
+  }
+  async function createProject() {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/projects", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, genre: "science-fiction", dimension: "3d", seed: Math.floor(Math.random() * 1000000) })
+      });
+      if (!response.ok) throw new Error((await response.json()).detail ?? "Project creation failed");
+      const project = await response.json() as Project;
+      await refresh();
+      setProjects((current) => current.some((item) => item.id === project.id) ? current : [project, ...current]);
+      setSelected(project.id);
+      setWorld(initialWorld(project.project.seed));
+      setView("world");
+      setStatus("Project created · shape your world");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Project creation failed");
+    } finally { setBusy(false); }
+  }
+  function updateWorld(patch: WorldPatch) {
+    setWorld((current) => ({ ...current, ...patch, world: { ...current.world, ...(patch.world ?? {}) } }));
+  }
+  function placeObject(kind: ObjectKind, x: number, z: number) {
+    const item: SceneObject = {
+      id: "obj-" + Math.random().toString(36).slice(2, 10),
+      name: labels[kind] + " " + (world.objects.filter((object) => object.kind === kind).length + 1),
+      kind, x: Math.round(x * 10) / 10, y: 0, z: Math.round(z * 10) / 10,
+      rotation: 0, scale: 1, color: colors[kind]
+    };
+    setWorld((current) => ({ ...current, objects: [...current.objects, item] }));
+    setSelectedObject(item.id);
+    setPlacementType(null);
+    setStatus(item.name + " placed · scene updated");
+  }
+  function updateObject(patch: Partial<SceneObject>) {
+    if (!selectedObject) return;
+    setWorld((current) => ({ ...current, objects: current.objects.map((item) => item.id === selectedObject ? { ...item, ...patch } : item) }));
+  }
+  async function saveWorld() {
+    if (!selected) { setStatus("Create or select a project before saving this world"); return; }
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/projects/" + selected + "/world", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(world)
+      });
+      if (!response.ok) throw new Error((await response.json()).detail ?? "Save failed");
+      setStatus("Scene saved · " + world.objects.length + " placed object(s)");
+    } catch {
+      setStatus("Preview updated locally · Foundry API is required to persist this scene");
+    } finally { setBusy(false); }
+  }
+  async function generateGame() {
+    if (!selected) { setStatus("Create or select a project first"); return; }
+    setBusy(true);
+    try {
+      const saveResponse = await fetch(API + "/api/projects/" + selected + "/world", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(world)
+      });
+      if (!saveResponse.ok) throw new Error("Could not save the scene before generation");
+      const response = await fetch(API + "/api/projects/" + selected + "/generate", { method: "POST" });
+      if (!response.ok) throw new Error("Generation request failed");
+      const job = await response.json() as { id: string };
+      let done = false;
+      while (!done) {
+        await new Promise((resolve) => window.setTimeout(resolve, 850));
+        const current = await (await fetch(API + "/api/jobs/" + job.id)).json();
+        setStatus(current.progress + "% · " + current.message);
+        if (["COMPLETED", "FAILED"].includes(current.state)) {
+          done = true;
+          setStatus(current.state + " · " + (current.error ?? current.message));
+        }
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Generation failed");
+    } finally { setBusy(false); }
+  }
+  function rotateSelected(amount: number) {
+    if (activeObject) updateObject({ rotation: (activeObject.rotation + amount + 360) % 360 });
+  }
+
+  const worldView = view !== "workspace";
+  return <main className="app-shell">
+    <aside className="sidebar">
+      <a className="brand" href="#" onClick={(event) => { event.preventDefault(); setView("workspace"); }}>
+        <span className="brand-mark">PGF</span><span><b>PROCEDURAL</b><small>GAME FOUNDRY</small></span>
+      </a>
+      <div className="side-label">WORKSPACE</div>
+      <button className={view === "workspace" ? "side-link active" : "side-link"} onClick={() => setView("workspace")}><span>▦</span> Overview</button>
+      <button className={view === "world" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("world"); }}><span>◈</span> World Foundry</button>
+      <button className={view === "scene" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("scene"); }}><span>⬡</span> Scene Editor</button>
+      <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
+    </aside>
+
+    <section className="main-pane">
+      <header className="topbar">
+        <div><small>PROCEDURAL GAME FOUNDRY / {worldView ? (view === "world" ? "WORLD FOUNDRY" : "SCENE EDITOR") : "PROJECT WORKSPACE"}</small>
+          <h1>{worldView ? (view === "world" ? "Shape a living world." : "Build the scene.") : "Build worlds. Make games."}</h1>
+          <p>{worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
+        </div>
+        <div className="top-actions"><span className="connection">{status}</span>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
+      </header>
+
+      {!worldView ? <>
+        <section className="welcome-card">
+          <div><span className="eyebrow">FOUNDRY CORE · 0.2</span><h2>Your next universe<br/>starts here.</h2>
+            <p>Build terrain from a seed, arrange the environment, then enter it through a first-person controller. No generative model or paid asset pipeline required.</p>
+            <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
+          </div><div className="planet-art"><span /></div>
+        </section>
+        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
+        <div className="project-grid">
+          {projects.map((project) => <button key={project.id} className={selected === project.id ? "project-card chosen" : "project-card"} onClick={() => changeProject(project.id)}>
+            <span className="project-icon">◉</span><b>{project.project.name}</b><small>{project.project.genre} · {project.project.dimension}D · seed {project.project.seed}</small><span className="card-open">Open project →</span>
+          </button>)}
+          {!projects.length && <div className="empty-state"><b>No projects yet</b><p>Create a world above. The viewport can also generate a local preview without the API.</p></div>}
+        </div>
+        <section className="launch-card"><div><small>SELECTED PROJECT</small><h3>{selectedProject?.project.name ?? "Choose a project"}</h3><p>Generate terrain, scene objects and a playable Godot project.</p></div><div className="launch-actions"><button className="button secondary" disabled={!selected} onClick={() => changeProject(selected)}>Open World Foundry</button><button className="button primary" disabled={busy || !selected} onClick={generateGame}>{busy ? "Working…" : "Build playable game →"}</button></div></section>
+      </> : <>
+        <div className="editor-toolbar">
+          <div className="view-switch"><button className={view === "world" ? "selected" : ""} onClick={() => { setMode("edit"); setView("world"); }}>World Foundry</button><button className={view === "scene" ? "selected" : ""} onClick={() => { setMode("edit"); setView("scene"); }}>Scene Editor</button></div>
+          <div className="toolbar-right"><span className="seed-tag">SEED {world.seed}</span>
+            {mode === "play" ? <button className="button danger" onClick={() => setMode("edit")}>■ Exit world</button> : <><button className="button secondary" onClick={generateGame} disabled={busy || !selected}>{busy ? "Building…" : "Build game"}</button><button className="button primary" onClick={() => { setPlacementType(null); setMode("play"); }}>▶ Enter world</button></>}
+          </div>
+        </div>
+        <div className="editor-layout">
+          <section className="viewport-column">
+            <WorldEditor seed={world.seed} width={world.world.width} depth={world.world.depth} amplitude={world.world.amplitude}
+              frequency={world.world.frequency} waterLevel={world.water_level} fog={world.fog} sunAngle={world.sun_angle}
+              objects={world.objects} selectedId={selectedObject} mode={mode} placementType={placementType}
+              onPlace={placeObject} onSelect={setSelectedObject}/>
+            <div className="viewport-footer"><span>{world.world.width} × {world.world.depth} m world</span><span>{world.objects.length} scene objects</span><span>{world.world.resolution} grid resolution</span></div>
+          </section>
+          <aside className="inspector">
+            {view === "world" ? <>
+              <div className="panel-title"><small>WORLD FOUNDRY</small><h3>Terrain &amp; environment</h3><p>Adjust the generation recipe. The preview updates immediately.</p></div>
+              <label className="field-label">World seed <input type="number" value={world.seed} min={0} max={4294967295} onChange={(event) => updateWorld({ seed: Number(event.target.value) || 0 })}/></label>
+              <div className="field-pair"><label className="field-label">Width <b>{world.world.width} m</b><input type="range" min="48" max="192" step="8" value={world.world.width} onChange={(event) => updateWorld({ world: { width: Number(event.target.value) } })}/></label><label className="field-label">Depth <b>{world.world.depth} m</b><input type="range" min="48" max="192" step="8" value={world.world.depth} onChange={(event) => updateWorld({ world: { depth: Number(event.target.value) } })}/></label></div>
+              <label className="field-label">Terrain elevation <b>{world.world.amplitude.toFixed(1)}</b><input type="range" min="0" max="24" step=".5" value={world.world.amplitude} onChange={(event) => updateWorld({ world: { amplitude: Number(event.target.value) } })}/></label>
+              <label className="field-label">Terrain roughness <b>{world.world.frequency.toFixed(3)}</b><input type="range" min=".018" max=".12" step=".001" value={world.world.frequency} onChange={(event) => updateWorld({ world: { frequency: Number(event.target.value) } })}/></label>
+              <label className="field-label">Water level <b>{world.water_level.toFixed(1)} m</b><input type="range" min="-8" max="8" step=".5" value={world.water_level} onChange={(event) => updateWorld({ water_level: Number(event.target.value) })}/></label>
+              <label className="field-label">Sun direction <b>{world.sun_angle}°</b><input type="range" min="-180" max="180" step="5" value={world.sun_angle} onChange={(event) => updateWorld({ sun_angle: Number(event.target.value) })}/></label>
+              <label className="toggle-row"><span><b>Atmospheric fog</b><small>Depth and distance haze</small></span><input type="checkbox" checked={world.fog} onChange={(event) => updateWorld({ fog: event.target.checked })}/></label>
+              <div className="inspector-note">Deterministic terrain is generated from the seed and noise parameters. Reusing the same settings recreates the same landscape.</div>
+            </> : <>
+              <div className="panel-title"><small>SCENE EDITOR</small><h3>Asset placement</h3><p>Select an asset, then click the terrain to place it into the scene.</p></div>
+              <div className="asset-grid">{(Object.keys(labels) as ObjectKind[]).map((kind) => <button key={kind} className={placementType === kind ? "asset-option active" : "asset-option"} onClick={() => { setPlacementType(placementType === kind ? null : kind); setMode("edit"); }}><span>{kind === "outpost" ? "⌂" : kind === "beacon" ? "⌁" : kind === "tree" ? "♣" : kind === "rock" ? "⬟" : "▣"}</span>{labels[kind]}</button>)}</div>
+              <div className="object-list-title"><b>Scene objects</b><span>{world.objects.length}</span></div>
+              <div className="object-list">{world.objects.map((item) => <button key={item.id} className={selectedObject === item.id ? "object-row active" : "object-row"} onClick={() => { setSelectedObject(item.id); setPlacementType(null); }}><span className="object-swatch" style={{ background: item.color }}/><span><b>{item.name}</b><small>{item.kind} · {item.x.toFixed(1)}, {item.z.toFixed(1)}</small></span><i>›</i></button>)}
+                {!world.objects.length && <p className="list-empty">Your scene is empty. Pick an asset and click the terrain to place it.</p>}</div>
+              {activeObject && <div className="object-inspector">
+                <div className="object-list-title"><b>{activeObject.name}</b><button onClick={() => { setWorld((current) => ({ ...current, objects: current.objects.filter((item) => item.id !== activeObject.id) })); setSelectedObject(""); }}>Delete</button></div>
+                <label className="field-label">Position X <b>{activeObject.x.toFixed(1)}</b><input type="range" min={-world.world.width / 2 + 2} max={world.world.width / 2 - 2} step=".5" value={activeObject.x} onChange={(event) => updateObject({ x: Number(event.target.value) })}/></label>
+                <label className="field-label">Position Z <b>{activeObject.z.toFixed(1)}</b><input type="range" min={-world.world.depth / 2 + 2} max={world.world.depth / 2 - 2} step=".5" value={activeObject.z} onChange={(event) => updateObject({ z: Number(event.target.value) })}/></label>
+                <label className="field-label">Scale <b>{activeObject.scale.toFixed(2)}×</b><input type="range" min=".25" max="3" step=".05" value={activeObject.scale} onChange={(event) => updateObject({ scale: Number(event.target.value) })}/></label>
+                <div className="rotate-row"><span>Rotation</span><button onClick={() => rotateSelected(-15)}>−15°</button><b>{activeObject.rotation}°</b><button onClick={() => rotateSelected(15)}>＋15°</button></div>
+                <button className="button secondary full-width" onClick={() => { const duplicate = { ...activeObject, id: "obj-" + Math.random().toString(36).slice(2, 10), name: activeObject.name + " copy", x: activeObject.x + 3, z: activeObject.z + 3 }; setWorld((current) => ({ ...current, objects: [...current.objects, duplicate] })); setSelectedObject(duplicate.id); }}>Duplicate object</button>
+              </div>}
+            </>}
+          </aside>
+        </div>
+      </>}
+      <footer className="app-footer">PGF · Model-free by design · Godot is the exported gameplay runtime</footer>
+    </section>
+  </main>;
 }
