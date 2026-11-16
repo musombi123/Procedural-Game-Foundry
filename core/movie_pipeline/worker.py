@@ -49,7 +49,8 @@ def _probe(video: Path) -> dict[str, Any]:
         "audio_streams": sum(1 for s in streams if s.get("codec_type") == "audio"),
     }
 
-def _scene_times(video: Path, duration: float, limit: int = 24) -> tuple[list[float], str]:\n    limit = max(2, limit)
+def _scene_times(video: Path, duration: float, limit: int = 24) -> tuple[list[float], str]:
+    limit = max(2, limit)
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise MediaAnalysisError("FFmpeg is required for keyframe extraction")
