@@ -70,12 +70,12 @@ def test_media_uploads_are_signature_checked_and_project_scoped(tmp_path, monkey
     bad = client.post(f"/api/projects/{pid}/movie-pipeline/source/photo", files={"file": ("portrait.jpg", b"not an image", "image/jpeg")})
     assert bad.status_code == 400
 
-    photo_bytes = b"\\xff\\xd8\\xff" + b"test-jpeg-payload"
+    photo_bytes = bytes.fromhex("ffd8ff") + b"test-jpeg-payload"
     photo = client.post(f"/api/projects/{pid}/movie-pipeline/source/photo", files={"file": ("portrait.jpg", photo_bytes, "image/jpeg")})
     assert photo.status_code == 201
     assert photo.json()["metadata"]["size_bytes"] == len(photo_bytes)
 
-    video_bytes = b"\\x00\\x00\\x00\\x18ftypmp42" + b"test-video-payload"
+    video_bytes = bytes.fromhex("00000018667479706d703432") + b"test-video-payload"
     video = client.post(f"/api/projects/{pid}/movie-pipeline/source/video", files={"file": ("movie.mp4", video_bytes, "video/mp4")})
     assert video.status_code == 201
     assert video.json()["metadata"]["sha256"]
