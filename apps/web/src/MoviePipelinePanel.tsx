@@ -50,6 +50,29 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Upload failed"); }
     finally { setBusy(false); }
   }
+  async function runAnalysis() {
+    setBusy(true);
+    try {
+      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/analysis/run", { method: "POST" });
+      const queued = await response.json();
+      if (!response.ok) throw new Error(queued.detail ?? "Could not start media analysis");
+      setMessage("Local media analysis running · extracting metadata and keyframes…");
+      for (let attempt = 0; attempt < 240; attempt++) {
+        await new Promise(resolve => window.setTimeout(resolve, 1500));
+        const jobResponse = await fetch(api + "/api/jobs/" + queued.id);
+        if (!jobResponse.ok) throw new Error("Could not read media analysis job status");
+        const job = await jobResponse.json();
+        if (job.state === "COMPLETED") {
+          await refresh();
+          setMessage(job.message ?? "Media analysis ready for creator review");
+          return;
+        }
+        if (job.state === "FAILED") throw new Error(job.error ?? "Media analysis failed");
+      }
+      setMessage("Analysis is still running in the background. Refresh this panel to inspect the stage state.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Media analysis failed"); await refresh(); }
+    finally { setBusy(false); }
+  }
   async function stageAction(stage: string, action: "approve" | "regenerate") {
     setBusy(true);
     try {
@@ -85,10 +108,10 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       {pipeline.stages.map((stage) => <article key={stage.stage} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: 13, border: "1px solid #2b3a4e", borderRadius: 10, background: "#142235" }}>
         <div style={{ minWidth: 180, flex: 1 }}><b>{stageNames[stage.stage] ?? stage.stage}</b><div style={{ fontSize: 12, color: "#9fb0c4", marginTop: 5 }}>{stage.summary} · revision {stage.revision + 1}</div>{stage.error && <div style={{ color: "#ef9696", fontSize: 12 }}>{stage.error}</div>}</div>
         <span style={{ color: statusColor[stage.state], fontSize: 11, fontWeight: 800, letterSpacing: .8 }}>{stage.state}</span>
-        {stage.state === "REVIEW" && <button disabled={busy} onClick={() => stageAction(stage.stage, "approve")}>Approve</button>}
+        {stage.stage === "analysis" && stage.state === "READY" && pipeline.source_video && <button disabled={busy} onClick={() => void runAnalysis()}>Run local analysis</button>}\n        {stage.state === "REVIEW" && <button disabled={busy} onClick={() => stageAction(stage.stage, "approve")}>Approve</button>}
         {["REVIEW", "FAILED", "APPROVED"].includes(stage.state) && <button disabled={busy} onClick={() => stageAction(stage.stage, "regenerate")}>Regenerate</button>}
       </article>)}
-      <p style={{ margin: "6px 0 0", color: "#e3c58b", fontSize: 13 }}>Worker status: not installed yet. This interface manages persisted approvals; it does not claim that media analysis or asset generation has run.</p>
+      <p style={{ margin: "6px 0 0", color: "#e3c58b", fontSize: 13 }}>Media worker: FFmpeg / FFprobe analysis is available when installed locally. Vision-model synthesis and generated assets remain separate, optional workers.</p>
     </div>}
     <p aria-live="polite" style={{ margin: "14px 0 0", color: "#9fb0c4", fontSize: 12 }}>{message}</p>
   </section>;
