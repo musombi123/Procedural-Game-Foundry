@@ -1,7 +1,7 @@
 import os
 import shutil
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.project_engine.models import ProjectCreate, WorldDocument
@@ -195,3 +195,35 @@ def regenerate_movie_stage(pid: str, stage_id: StageId):
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+from core.movie_pipeline.ingestion import UploadRejected, store_upload
+
+async def _attach_movie_input(pid: str, kind: str, upload: UploadFile):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        store = PipelineStore(folder)
+        document = store.load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    attribute = "source_photo" if kind == "photo" else "source_video"
+    if getattr(document, attribute):
+        raise HTTPException(409, f"A {kind} input is already attached; remove it before replacing")
+    try:
+        metadata = await store_upload(upload, kind, store.folder / "uploads")
+    except UploadRejected as exc:
+        raise HTTPException(400, str(exc)) from exc
+    setattr(document, attribute, metadata)
+    store.save(document)
+    return {"attached": True, "kind": kind, "metadata": metadata}
+
+@app.post("/api/projects/{pid}/movie-pipeline/source/photo", status_code=201)
+async def upload_player_portrait(pid: str, file: UploadFile = File(...)):
+    return await _attach_movie_input(pid, "photo", file)
+
+@app.post("/api/projects/{pid}/movie-pipeline/source/video", status_code=201)
+async def upload_source_movie(pid: str, file: UploadFile = File(...)):
+    return await _attach_movie_input(pid, "video", file)
