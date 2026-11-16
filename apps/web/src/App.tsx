@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import WorldEditor from "./WorldEditor";
+import MoviePipelinePanel from "./MoviePipelinePanel";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
