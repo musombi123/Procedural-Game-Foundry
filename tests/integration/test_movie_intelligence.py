@@ -80,3 +80,44 @@ def test_story_intelligence_requires_review_state(tmp_path):
     PipelineStore(project).save(new_pipeline("project", RIGHTS))
     with pytest.raises(ValueError, match="must be in REVIEW"):
         intelligence.run_story_intelligence(project)
+
+
+def test_story_edit_api_persists_creator_changes(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import services.api.main as api
+
+    monkeypatch.setattr(api, "manager", api.ProjectManager(tmp_path))
+    client = TestClient(api.app)
+    project = client.post("/api/projects", json={"name": "Story Edit"}).json()
+    pid = project["id"]
+    client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS})
+    folder = api.manager.path_for(pid)
+    store = PipelineStore(folder)
+    document = store.load()
+    analysis = document.stages[0]
+    analysis.state = StageState.REVIEW
+    story_path = store.folder / "analysis" / "revision-0" / "storyboard.json"
+    story_path.parent.mkdir(parents=True)
+    initial = {
+        "status": "ready_for_creator_review",
+        "story": {
+            "title": "Original", "logline": "Original logline",
+            "missions": [{"id": str(i), "title": "Mission " + str(i), "objective": "Objective"} for i in range(4)],
+            "level_progression": [{"level": i, "name": "Level " + str(i), "primary_challenge": "Challenge"} for i in range(3)],
+            "supporting_characters": [], "locations": [], "enemies": [], "items": [],
+        },
+    }
+    story_path.write_text(json.dumps(initial), encoding="utf-8")
+    analysis.output = {"story_manifest": str(story_path.relative_to(folder))}
+    store.save(document)
+    edited = dict(initial["story"])
+    edited["title"] = "Creator Original Game"
+    response = client.put(
+        f"/api/projects/{pid}/movie-pipeline/stages/analysis/intelligence",
+        json={"story": edited},
+    )
+    assert response.status_code == 200
+    assert response.json()["story"]["title"] == "Creator Original Game"
+    fetched = client.get(f"/api/projects/{pid}/movie-pipeline/stages/analysis/intelligence")
+    assert fetched.status_code == 200
+    assert fetched.json()["story"]["title"] == "Creator Original Game"
