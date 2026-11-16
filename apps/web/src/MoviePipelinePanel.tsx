@@ -15,6 +15,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
   const [rights, setRights] = useState([false, false, false, false]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Loading production pipeline…");
+  const [story, setStory] = useState<Record<string, any> | null>(null);
   const refresh = useCallback(async () => {
     try {
       const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline");
@@ -34,7 +35,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Could not create pipeline");
-      setPipeline(data as Pipeline); setMessage("Production stages created. Add secure media ingestion and local workers to begin processing.");
+      setPipeline(data as Pipeline); setMessage("Production stages created. Upload the portrait and movie to begin.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Pipeline creation failed"); }
     finally { setBusy(false); }
   }
@@ -73,6 +74,33 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Media analysis failed"); await refresh(); }
     finally { setBusy(false); }
   }
+  async function runIntelligence() {
+    setBusy(true);
+    try {
+      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/analysis/intelligence/run", { method: "POST" });
+      const queued = await response.json();
+      if (!response.ok) throw new Error(queued.detail ?? "Could not start local intelligence");
+      setMessage("Local vision model is examining keyframes; story planner will build the original game proposal…");
+      for (let attempt = 0; attempt < 240; attempt++) {
+        await new Promise(resolve => window.setTimeout(resolve, 1500));
+        const jobResponse = await fetch(api + "/api/jobs/" + queued.id);
+        if (!jobResponse.ok) throw new Error("Could not read intelligence job status");
+        const job = await jobResponse.json();
+        if (job.state === "COMPLETED") {
+          const resultResponse = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/analysis/intelligence");
+          const result = await resultResponse.json();
+          if (!resultResponse.ok) throw new Error(result.detail ?? "Could not load generated story");
+          setStory(result.story);
+          await refresh();
+          setMessage(job.message ?? "Original story proposal is ready for review");
+          return;
+        }
+        if (job.state === "FAILED") throw new Error(job.error ?? "Local intelligence failed");
+      }
+      setMessage("Intelligence is still running. Refresh the pipeline later to inspect its state.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Local intelligence failed"); }
+    finally { setBusy(false); }
+  }
   async function stageAction(stage: string, action: "approve" | "regenerate") {
     setBusy(true);
     try {
@@ -108,10 +136,21 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       {pipeline.stages.map((stage) => <article key={stage.stage} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: 13, border: "1px solid #2b3a4e", borderRadius: 10, background: "#142235" }}>
         <div style={{ minWidth: 180, flex: 1 }}><b>{stageNames[stage.stage] ?? stage.stage}</b><div style={{ fontSize: 12, color: "#9fb0c4", marginTop: 5 }}>{stage.summary} · revision {stage.revision + 1}</div>{stage.error && <div style={{ color: "#ef9696", fontSize: 12 }}>{stage.error}</div>}</div>
         <span style={{ color: statusColor[stage.state], fontSize: 11, fontWeight: 800, letterSpacing: .8 }}>{stage.state}</span>
-        {stage.stage === "analysis" && stage.state === "READY" && pipeline.source_photo && pipeline.source_video && <button disabled={busy} onClick={() => void runAnalysis()}>Run local analysis</button>}\n        {stage.state === "REVIEW" && <button disabled={busy} onClick={() => stageAction(stage.stage, "approve")}>Approve</button>}
+        {stage.stage === "analysis" && stage.state === "READY" && pipeline.source_photo && pipeline.source_video && <button disabled={busy} onClick={() => void runAnalysis()}>Run local analysis</button>}\n        {stage.stage === "analysis" && stage.state === "REVIEW" && <button disabled={busy} onClick={() => void runIntelligence()}>Generate story & missions with local AI</button>}
+        {stage.state === "REVIEW" && <button disabled={busy} onClick={() => stageAction(stage.stage, "approve")}>Approve</button>}
         {["REVIEW", "FAILED", "APPROVED"].includes(stage.state) && <button disabled={busy} onClick={() => stageAction(stage.stage, "regenerate")}>Regenerate</button>}
       </article>)}
-      <p style={{ margin: "6px 0 0", color: "#e3c58b", fontSize: 13 }}>Media worker: FFmpeg / FFprobe analysis runs locally when installed. Both source inputs are required. Vision-model synthesis and generated assets remain separate, optional workers.</p>
+      {story && <article style={{ padding: 16, border: "1px solid #49627d", borderRadius: 12, background: "#0d1725" }}>
+        <h3 style={{ margin: "0 0 6px" }}>{story.title}</h3>
+        <p style={{ color: "#b8c8d9", marginTop: 0 }}>{story.logline}</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#9fb0c4" }}><span>{story.genre}</span><span>· {story.missions?.length ?? 0} missions</span><span>· {story.level_progression?.length ?? 0} levels</span></div>
+        <h4>Mission outline</h4>
+        <ol>{(story.missions ?? []).map((mission: any, index: number) => <li key={mission.id ?? index} style={{ marginBottom: 6 }}><b>{mission.title ?? mission.id ?? "Mission " + (index + 1)}</b> — {mission.objective}</li>)}</ol>
+        <h4>Level progression</h4>
+        <ol>{(story.level_progression ?? []).map((level: any, index: number) => <li key={level.level ?? index}><b>{level.name ?? "Level " + (index + 1)}</b> — {level.primary_challenge}</li>)}</ol>
+        <small style={{ color: "#e3c58b" }}>AI-generated proposal · review and approve before asset production</small>
+      </article>}
+      <p style={{ margin: "6px 0 0", color: "#e3c58b", fontSize: 13 }}>Media worker: FFmpeg / FFprobe analysis runs locally when installed. Both source inputs are required. Vision and story synthesis use local Ollama models; generated assets remain a separate production stage.</p>
     </div>}
     <p aria-live="polite" style={{ margin: "14px 0 0", color: "#9fb0c4", fontSize: 12 }}>{message}</p>
   </section>;
