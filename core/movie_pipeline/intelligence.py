@@ -172,6 +172,19 @@ def run_story_intelligence(project_folder: Path) -> dict:
             "environmental_motifs (array), uncertainty_notes (array). Keep concise and factual."
         )
         vision = client.generate_json(vision_model, vision_prompt, frames)
+        photo_key = document.source_photo.get("storage_key", "")
+        portrait_path = (project_folder / photo_key).resolve()
+        upload_root = (store.folder / "uploads").resolve()
+        if upload_root not in portrait_path.parents or not portrait_path.is_file():
+            raise IntelligenceError("Player portrait is missing or outside the project upload directory")
+        if portrait_path.stat().st_size > 20 * 1024 * 1024:
+            raise IntelligenceError("Player portrait exceeds the 20 MB analysis limit")
+        portrait_prompt = ("Analyze this creator-supplied full-body portrait as an original game-avatar reference. "
+            "Do not identify the person. Return JSON with visible_presentation, silhouette, hair_and_headwear, "
+            "clothing_and_footwear, dominant_colors, visible_accessories, pose, distinctive_non-identifying_visual_details, "
+            "uncertainties. Describe visible evidence only; do not invent hidden features.")
+        portrait_analysis = client.generate_json(vision_model, portrait_prompt, [portrait_path.read_bytes()])
+        vision["player_portrait_reference"] = portrait_analysis
         vision_path = analysis_dir / "vision-analysis.json"
         vision_path.write_text(json.dumps({"model": vision_model, "selected_frames": selected_frames, "analysis": vision}, indent=2), encoding="utf-8")
 
@@ -200,6 +213,8 @@ def run_story_intelligence(project_folder: Path) -> dict:
                 raise IntelligenceError(f"Story model response is missing the required '{key}' array")
         if not isinstance(story.get("title"), str) or not story["title"].strip():
             raise IntelligenceError("Story model response is missing a game title")
+        if not 4 <= len(story["missions"]) <= 8 or not 3 <= len(story["level_progression"]) <= 7:
+            raise IntelligenceError("Story model must return 4-8 missions and 3-7 levels; regenerate with a suitable local model")
         story_path = analysis_dir / "storyboard.json"
         story_payload = {
             "status": "ready_for_creator_review",
