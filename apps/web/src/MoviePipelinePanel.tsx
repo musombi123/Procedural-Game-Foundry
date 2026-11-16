@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 type StageState = "LOCKED" | "READY" | "RUNNING" | "REVIEW" | "APPROVED" | "FAILED";
 type Stage = { stage: string; state: StageState; revision: number; progress: number; summary: string; output: Record<string, unknown>; error?: string | null };
-type Pipeline = { project_id: string; active_stage: string; stages: Stage[] };
+type Pipeline = { project_id: string; active_stage: string; stages: Stage[]; source_photo?: { filename: string; size_bytes: number } | null; source_video?: { filename: string; size_bytes: number } | null };
 type Props = { projectId: string; api: string };
 const stageNames: Record<string, string> = {
   analysis: "01 · Film analysis & storyboard", player: "02 · Player character", environment: "03 · Environments",
@@ -38,6 +38,18 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Pipeline creation failed"); }
     finally { setBusy(false); }
   }
+  async function uploadInput(kind: "photo" | "video", file?: File) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const form = new FormData(); form.append("file", file);
+      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/source/" + kind, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "Upload failed");
+      await refresh(); setMessage(kind === "photo" ? "Player portrait uploaded and verified" : "Movie uploaded and verified");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Upload failed"); }
+    finally { setBusy(false); }
+  }
   async function stageAction(stage: string, action: "approve" | "regenerate") {
     setBusy(true);
     try {
@@ -60,6 +72,16 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       {["I own or have permission to use the movie video.", "I own or have permission to use the portrait photo.", "I have consent to use the depicted person's likeness.", "I agree the game will use original inspired assets, not copied footage, music, logos or exact character designs."].map((label, index) => <label key={index} style={{ display: "flex", gap: 10, margin: "11px 0", color: "#c8d4e1", fontSize: 14 }}><input type="checkbox" checked={rights[index]} onChange={(event) => setRights(current => current.map((value, i) => i === index ? event.target.checked : value))}/>{label}</label>)}
       <button disabled={busy || rights.some(value => !value)} onClick={create} style={{ marginTop: 8, border: 0, borderRadius: 8, padding: "11px 16px", background: "#2878bb", color: "white", fontWeight: 700, cursor: "pointer", opacity: busy || rights.some(value => !value) ? .5 : 1 }}>Create staged pipeline</button>
     </div> : <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 6 }}>
+        <label style={{ padding: 13, border: "1px dashed #49627d", borderRadius: 10, color: "#c5d4e4", fontSize: 13 }}>PLAYER PORTRAIT · FULL BODY
+          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || !!pipeline.source_photo} onChange={event => void uploadInput("photo", event.target.files?.[0])} style={{ display: "block", marginTop: 9, maxWidth: "100%" }}/>
+          <small style={{ display: "block", marginTop: 6, color: pipeline.source_photo ? "#7ec79c" : "#9fb0c4" }}>{pipeline.source_photo ? pipeline.source_photo.filename : "JPEG, PNG or WebP · max 20 MB"}</small>
+        </label>
+        <label style={{ padding: 13, border: "1px dashed #49627d", borderRadius: 10, color: "#c5d4e4", fontSize: 13 }}>MOVIE VIDEO · FULL FILM OR CLIP
+          <input type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-msvideo" disabled={busy || !!pipeline.source_video} onChange={event => void uploadInput("video", event.target.files?.[0])} style={{ display: "block", marginTop: 9, maxWidth: "100%" }}/>
+          <small style={{ display: "block", marginTop: 6, color: pipeline.source_video ? "#7ec79c" : "#9fb0c4" }}>{pipeline.source_video ? pipeline.source_video.filename : "MP4, MOV, MKV, WebM or AVI · max 8 GB"}</small>
+        </label>
+      </div>
       {pipeline.stages.map((stage) => <article key={stage.stage} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: 13, border: "1px solid #2b3a4e", borderRadius: 10, background: "#142235" }}>
         <div style={{ minWidth: 180, flex: 1 }}><b>{stageNames[stage.stage] ?? stage.stage}</b><div style={{ fontSize: 12, color: "#9fb0c4", marginTop: 5 }}>{stage.summary} · revision {stage.revision + 1}</div>{stage.error && <div style={{ color: "#ef9696", fontSize: 12 }}>{stage.error}</div>}</div>
         <span style={{ color: statusColor[stage.state], fontSize: 11, fontWeight: 800, letterSpacing: .8 }}>{stage.state}</span>
