@@ -58,7 +58,7 @@ def test_story_intelligence_writes_vision_and_story_outputs(tmp_path, monkeypatc
             if images:
                 return {"visual_style": "moody science fiction", "events": [], "locations": [], "recurring_characters": []}
             return {
-                "title": "The Last Signal", "missions": [{"id": "m1"}], "level_progression": [{"level": 1}],
+                "title": "The Last Signal", "missions": [{"id": "m" + str(i)} for i in range(4)], "level_progression": [{"level": i} for i in range(3)],
                 "supporting_characters": [], "locations": [], "enemies": [], "items": [],
             }
 
@@ -90,7 +90,7 @@ def test_story_edit_api_persists_creator_changes(tmp_path, monkeypatch):
     client = TestClient(api.app)
     project = client.post("/api/projects", json={"name": "Story Edit"}).json()
     pid = project["id"]
-    client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS})
+    client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS.model_dump(mode="json")})
     folder = api.manager.path_for(pid)
     store = PipelineStore(folder)
     document = store.load()
