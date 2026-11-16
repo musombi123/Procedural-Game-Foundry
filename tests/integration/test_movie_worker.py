@@ -56,3 +56,23 @@ def test_scene_fallback_is_bounded(monkeypatch, tmp_path):
     times, method = worker._scene_times(tmp_path / "movie.mp4", 3600, limit=8)
     assert method == "even_interval_fallback"
     assert len(times) <= 8
+
+def test_analysis_run_endpoint_queues_job_and_completes(tmp_path, monkeypatch):
+    import services.api.main as api
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(api, "manager", api.ProjectManager(tmp_path))
+    monkeypatch.setattr(api, "analyze_project", lambda folder: {"keyframes": [{"index": 1}]})
+    client = TestClient(api.app)
+    project = client.post("/api/projects", json={"name": "Worker API"}).json()
+    pid = project["id"]
+    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS})
+    assert created.status_code == 201
+    store = PipelineStore(api.manager.path_for(pid))
+    document = store.load()
+    document.source_video = {"storage_key": "movie_pipeline/uploads/source-movie.mp4"}
+    store.save(document)
+    queued = client.post(f"/api/projects/{pid}/movie-pipeline/stages/analysis/run")
+    assert queued.status_code == 202
+    job = client.get(f"/api/jobs/{queued.json()['id']}")
+    assert job.status_code == 200
+    assert job.json()["state"] == "COMPLETED"
