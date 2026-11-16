@@ -66,7 +66,7 @@ def test_analysis_run_endpoint_queues_job_and_completes(tmp_path, monkeypatch):
     client = TestClient(api.app)
     project = client.post("/api/projects", json={"name": "Worker API"}).json()
     pid = project["id"]
-    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS})
+    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS.model_dump(mode="json")})
     assert created.status_code == 201
     store = PipelineStore(api.manager.path_for(pid))
     document = store.load()
