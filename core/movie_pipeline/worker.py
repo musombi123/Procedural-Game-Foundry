@@ -108,8 +108,8 @@ def analyze_project(project_folder: Path) -> dict[str, Any]:
     record = next(item for item in document.stages if item.stage == StageId.ANALYSIS)
     if record.state != StageState.READY:
         raise PipelineError("Analysis stage must be READY before the worker can run")
-    if not document.source_video:
-        raise MediaAnalysisError("Attach a movie video before starting analysis")
+    if not document.source_photo or not document.source_video:
+        raise MediaAnalysisError("Attach both the player portrait and movie video before starting analysis")
     video = (project_folder / document.source_video["storage_key"]).resolve()
     uploads = (store.folder / "uploads").resolve()
     if uploads not in video.parents or not video.is_file():
