@@ -1,0 +1,1 @@
+Add headless Godot integration tests as mechanics are implemented. File-structure tests alone do not prove runtime behaviour.

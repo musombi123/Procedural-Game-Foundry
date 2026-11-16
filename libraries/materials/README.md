@@ -1,0 +1,1 @@
+Material definitions must record renderer compatibility, texture dependencies, provenance and license.

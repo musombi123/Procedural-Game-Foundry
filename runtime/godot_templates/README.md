@@ -1,1 +1,1 @@
-The initial 3D template is assembled by core/game_assembler/godot.py. It includes seeded heightfield data, generated triangle mesh and collision, CharacterBody3D movement and a camera. Target Godot 4.x.
+The first 3D template is assembled by core/game_assembler/godot.py. It includes seeded heightfield data, generated triangle mesh and collision, CharacterBody3D movement and a camera. Target Godot 4.x.
