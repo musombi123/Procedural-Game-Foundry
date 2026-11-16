@@ -138,7 +138,7 @@ def project_files(pid: str):
 
 # Movie-to-game pipeline: persisted, creator-approved stage state machine.
 from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, new_pipeline
-from core.movie_pipeline.service import PipelineError, PipelineStore
+from core.movie_pipeline.service import PipelineError, PipelineStore\nfrom core.movie_pipeline.worker import analyze_project
 
 @app.post("/api/projects/{pid}/movie-pipeline", status_code=201)
 def create_movie_pipeline(pid: str, request: PipelineCreate):
@@ -227,3 +227,33 @@ async def upload_player_portrait(pid: str, file: UploadFile = File(...)):
 @app.post("/api/projects/{pid}/movie-pipeline/source/video", status_code=201)
 async def upload_source_movie(pid: str, file: UploadFile = File(...)):
     return await _attach_movie_input(pid, "video", file)
+
+
+@app.post("/api/projects/{pid}/movie-pipeline/stages/analysis/run", status_code=202)
+def run_movie_analysis(pid: str, background: BackgroundTasks):
+    """Queue local FFmpeg analysis; poll the returned PGF job id for completion."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        pipeline = PipelineStore(folder).load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    analysis = next(item for item in pipeline.stages if item.stage == StageId.ANALYSIS)
+    if analysis.state.value != "READY":
+        raise HTTPException(409, "Analysis stage must be READY before it can run")
+    if not pipeline.source_video:
+        raise HTTPException(409, "Upload the movie video before starting analysis")
+    job = jobs.add(Job.create(pid))
+    background.add_task(run_movie_analysis_job, job.id, folder)
+    return job.as_dict()
+
+def run_movie_analysis_job(job_id: str, folder: Path):
+    try:
+        jobs.update(job_id, state=JobState.RUNNING, progress=5, message="Starting local media analysis")
+        result = analyze_project(folder)
+        jobs.update(job_id, state=JobState.COMPLETED, progress=100,
+                    message=f"Analysis ready for review ({len(result.get('keyframes', []))} keyframes)", error=None)
+    except Exception as exc:
+        jobs.update(job_id, state=JobState.FAILED, message="Movie analysis failed", error=str(exc))
