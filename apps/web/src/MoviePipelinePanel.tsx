@@ -21,7 +21,13 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline");
       if (response.status === 404) { setPipeline(null); setMessage("No movie-to-game pipeline created for this project yet."); return; }
       if (!response.ok) throw new Error("Could not load pipeline");
-      setPipeline(await response.json() as Pipeline);
+      const loaded = await response.json() as Pipeline;
+      setPipeline(loaded);
+      const analysis = loaded.stages.find(stage => stage.stage === "analysis");
+      if (analysis?.output?.story_manifest) {
+        const storyResponse = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/analysis/intelligence");
+        if (storyResponse.ok) { const saved = await storyResponse.json(); setStory(saved.story ?? null); }
+      } else setStory(null);
       setMessage("Pipeline manifest loaded · stage approvals are persisted");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Pipeline unavailable"); }
   }, [api, projectId]);
