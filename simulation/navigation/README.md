@@ -1,0 +1,1 @@
+Use Godot NavigationRegion3D and NavigationAgent3D. Navigation baking and reachable-destination tests remain future work.

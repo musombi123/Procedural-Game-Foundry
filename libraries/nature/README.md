@@ -1,0 +1,1 @@
+Reserved for procedural vegetation, rocks, terrain materials, water and ecosystem assets.

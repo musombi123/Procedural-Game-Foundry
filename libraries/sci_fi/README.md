@@ -1,0 +1,1 @@
+Original PGF recipes and reviewed assets: research-base modules, landing pads, industrial props, alien palettes and spacecraft components. Do not bundle unlicensed assets.

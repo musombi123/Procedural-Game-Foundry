@@ -1,0 +1,1 @@
+Blender is an optional asset adapter. Background scripts should accept explicit paths, avoid network access and emit provenance manifests.
