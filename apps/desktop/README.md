@@ -1,0 +1,1 @@
+Tauri 2 desktop shell. Wraps apps/web and communicates with the local Foundry API. Keep Godot/Blender workers as separate processes. Initialize with the official Tauri 2 CLI and Rust prerequisites. Do not grant the webview arbitrary shell or filesystem access.
