@@ -1,0 +1,1 @@
+Model-free NPC logic will use finite-state machines, behaviour trees and utility scoring. No remote inference endpoint is required.

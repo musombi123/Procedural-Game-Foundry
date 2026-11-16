@@ -1,0 +1,1 @@
+Planned data-driven item definitions, stack limits, equipment slots and save serialization.

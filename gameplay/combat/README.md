@@ -1,0 +1,1 @@
+Planned modular health, damage receiver, weapon, projectile and hit-event components. Combat is not enabled in the initial template.

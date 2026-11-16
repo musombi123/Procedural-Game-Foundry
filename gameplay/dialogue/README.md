@@ -1,0 +1,1 @@
+Dialogue uses authored branching graphs and localization keys. No language model is required.

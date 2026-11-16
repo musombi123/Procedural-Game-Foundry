@@ -1,0 +1,1 @@
+The generated template includes basic CharacterBody3D movement, gravity and jump. Mouse-look, touch controls, camera collision and remapping are future tasks.
