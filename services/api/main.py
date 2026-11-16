@@ -140,6 +140,7 @@ def project_files(pid: str):
 from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, new_pipeline
 from core.movie_pipeline.service import PipelineError, PipelineStore
 from core.movie_pipeline.worker import analyze_project
+from core.movie_pipeline.intelligence import IntelligenceError, run_story_intelligence
 
 @app.post("/api/projects/{pid}/movie-pipeline", status_code=201)
 def create_movie_pipeline(pid: str, request: PipelineCreate):
@@ -244,8 +245,8 @@ def run_movie_analysis(pid: str, background: BackgroundTasks):
     analysis = next(item for item in pipeline.stages if item.stage == StageId.ANALYSIS)
     if analysis.state.value != "READY":
         raise HTTPException(409, "Analysis stage must be READY before it can run")
-    if not pipeline.source_video:
-        raise HTTPException(409, "Upload the movie video before starting analysis")
+    if not pipeline.source_photo or not pipeline.source_video:
+        raise HTTPException(409, "Upload both the player portrait and movie video before starting analysis")
     job = jobs.add(Job.create(pid))
     background.add_task(run_movie_analysis_job, job.id, folder)
     return job.as_dict()
@@ -258,3 +259,58 @@ def run_movie_analysis_job(job_id: str, folder: Path):
                     message=f"Analysis ready for review ({len(result.get('keyframes', []))} keyframes)", error=None)
     except Exception as exc:
         jobs.update(job_id, state=JobState.FAILED, message="Movie analysis failed", error=str(exc))
+
+
+@app.post("/api/projects/{pid}/movie-pipeline/stages/analysis/intelligence/run", status_code=202)
+def run_movie_intelligence(pid: str, background: BackgroundTasks):
+    """Queue local Ollama vision analysis and original game-story synthesis."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        pipeline = PipelineStore(folder).load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    analysis = next(item for item in pipeline.stages if item.stage == StageId.ANALYSIS)
+    if analysis.state.value != "REVIEW":
+        raise HTTPException(409, "Complete media analysis first; the analysis stage must be in REVIEW")
+    job = jobs.add(Job.create(pid))
+    background.add_task(run_movie_intelligence_job, job.id, folder)
+    return job.as_dict()
+
+
+def run_movie_intelligence_job(job_id: str, folder: Path):
+    try:
+        jobs.update(job_id, state=JobState.RUNNING, progress=5, message="Starting local vision and story models")
+        result = run_story_intelligence(folder)
+        story = result.get("story", {})
+        jobs.update(job_id, state=JobState.COMPLETED, progress=100,
+                    message=f"Story proposal ready: {len(story.get('missions', []))} missions, {len(story.get('level_progression', []))} levels",
+                    error=None)
+    except Exception as exc:
+        jobs.update(job_id, state=JobState.FAILED, message="Local story intelligence failed", error=str(exc))
+
+
+@app.get("/api/projects/{pid}/movie-pipeline/stages/analysis/intelligence")
+def get_movie_intelligence(pid: str):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        pipeline = PipelineStore(folder).load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    analysis = next(item for item in pipeline.stages if item.stage == StageId.ANALYSIS)
+    relative = analysis.output.get("story_manifest")
+    if not relative:
+        raise HTTPException(404, "No local story proposal has been generated")
+    path = (folder / relative).resolve()
+    root = (folder / "movie_pipeline").resolve()
+    if root not in path.parents or not path.is_file():
+        raise HTTPException(404, "Story proposal file is missing")
+    try:
+        return __import__("json").loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise HTTPException(500, "Story proposal JSON is invalid") from exc
