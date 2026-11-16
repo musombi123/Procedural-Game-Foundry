@@ -12,7 +12,7 @@ The first executable worker for the movie-to-game pipeline uses local FFmpeg too
 From the repository root:
 
 ```bash
-python -m core.movie_pipeline.worker --project-dir .pgf-data/projects/PROJECT_ID
+python -m core.movie_pipeline.cli --project-dir .pgf-data/projects/PROJECT_ID
 ```
 
 Or start it through the API:
