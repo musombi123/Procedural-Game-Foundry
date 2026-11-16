@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import WorldEditor from "./WorldEditor";
-import type { ObjectKind, SceneObject, WorldDocument } from "./types";
+import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
 const API = import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8000";
 const initialWorld = (seed: number): WorldDocument => ({
   seed,
   world: { width: 96, depth: 96, resolution: 64, amplitude: 9, frequency: 0.055, biomes: ["rocky-desert", "alien-forest"], weather: true },
-  objects: [], sun_angle: -28, fog: true, water_level: -1.5
+  objects: [], terrain_edits: [], sun_angle: -28, fog: true, water_level: -1.5
 });
 const labels: Record<ObjectKind, string> = { outpost: "Outpost", beacon: "Signal beacon", tree: "Alien tree", rock: "Rock formation", crate: "Cargo crate" };
 const colors: Record<ObjectKind, string> = { outpost: "#819db9", beacon: "#5b8da8", tree: "#4c846f", rock: "#8d8b84", crate: "#b18a5f" };
@@ -21,6 +21,9 @@ export default function App() {
   const [world, setWorld] = useState<WorldDocument>(initialWorld(784215));
   const [selectedObject, setSelectedObject] = useState("");
   const [placementType, setPlacementType] = useState<ObjectKind | null>(null);
+  const [sculptMode, setSculptMode] = useState<TerrainEdit["operation"] | null>(null);
+  const [brushRadius, setBrushRadius] = useState(8);
+  const [brushStrength, setBrushStrength] = useState(2.5);
   const [mode, setMode] = useState<"edit" | "play">("edit");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Connecting to Foundry Core…");
@@ -43,7 +46,7 @@ export default function App() {
       const response = await fetch(API + "/api/projects/" + projectId + "/world");
       if (!response.ok) throw new Error("World load unavailable");
       const document = await response.json() as WorldDocument;
-      setWorld(document);
+      setWorld({ ...document, terrain_edits: document.terrain_edits ?? [] });
       setSelectedObject("");
       setStatus("World loaded · seed " + document.seed);
     } catch {
@@ -97,6 +100,11 @@ export default function App() {
   function updateObject(patch: Partial<SceneObject>) {
     if (!selectedObject) return;
     setWorld((current) => ({ ...current, objects: current.objects.map((item) => item.id === selectedObject ? { ...item, ...patch } : item) }));
+  }
+  function sculptTerrain(x: number, z: number) {
+    const edit: TerrainEdit = { id: "sculpt-" + Math.random().toString(36).slice(2, 10), operation: sculptMode ?? "raise", x: Math.round(x*10)/10, z: Math.round(z*10)/10, radius: brushRadius, strength: brushStrength };
+    setWorld((current) => ({ ...current, terrain_edits: [...(current.terrain_edits ?? []), edit] }));
+    setStatus(edit.operation + " stroke applied · terrain updated");
   }
   async function saveWorld() {
     if (!selected) { setStatus("Create or select a project before saving this world"); return; }
@@ -188,13 +196,19 @@ export default function App() {
           <section className="viewport-column">
             <WorldEditor seed={world.seed} width={world.world.width} depth={world.world.depth} amplitude={world.world.amplitude}
               frequency={world.world.frequency} waterLevel={world.water_level} fog={world.fog} sunAngle={world.sun_angle}
+              resolution={world.world.resolution} terrainEdits={world.terrain_edits ?? []} sculptMode={sculptMode}
               objects={world.objects} selectedId={selectedObject} mode={mode} placementType={placementType}
-              onPlace={placeObject} onSelect={setSelectedObject}/>
+              onPlace={placeObject} onSelect={setSelectedObject} onSculpt={sculptTerrain}/>
             <div className="viewport-footer"><span>{world.world.width} × {world.world.depth} m world</span><span>{world.objects.length} scene objects</span><span>{world.world.resolution} grid resolution</span></div>
           </section>
           <aside className="inspector">
             {view === "world" ? <>
-              <div className="panel-title"><small>WORLD FOUNDRY</small><h3>Terrain &amp; environment</h3><p>Adjust the generation recipe. The preview updates immediately.</p></div>
+              <div className="panel-title"><small>WORLD FOUNDRY</small><h3>Terrain &amp; environment</h3><p>Adjust the generation recipe or sculpt the live heightfield.</p></div>
+              <div className="object-list-title"><b>Terrain sculpting</b><span>{(world.terrain_edits ?? []).length} strokes</span></div>
+              <div className="asset-grid">{(["raise","lower","smooth"] as const).map(tool => <button key={tool} className={sculptMode === tool ? "asset-option active" : "asset-option"} onClick={() => { setSculptMode(sculptMode === tool ? null : tool); setPlacementType(null); setMode("edit"); }}><span>{tool === "raise" ? "↗" : tool === "lower" ? "↘" : "≈"}</span>{tool}</button>)}</div>
+              <label className="field-label">Brush radius <b>{brushRadius.toFixed(1)} m</b><input type="range" min="2" max="24" step="1" value={brushRadius} onChange={e=>setBrushRadius(Number(e.target.value))}/></label>
+              <label className="field-label">Brush strength <b>{brushStrength.toFixed(1)}</b><input type="range" min=".2" max="8" step=".1" value={brushStrength} onChange={e=>setBrushStrength(Number(e.target.value))}/></label>
+              <button className="button secondary full-width" disabled={!(world.terrain_edits ?? []).length} onClick={()=>updateWorld({terrain_edits:[]})}>Reset sculpting strokes</button>
               <label className="field-label">World seed <input type="number" value={world.seed} min={0} max={4294967295} onChange={(event) => updateWorld({ seed: Number(event.target.value) || 0 })}/></label>
               <div className="field-pair"><label className="field-label">Width <b>{world.world.width} m</b><input type="range" min="48" max="192" step="8" value={world.world.width} onChange={(event) => updateWorld({ world: { width: Number(event.target.value) } })}/></label><label className="field-label">Depth <b>{world.world.depth} m</b><input type="range" min="48" max="192" step="8" value={world.world.depth} onChange={(event) => updateWorld({ world: { depth: Number(event.target.value) } })}/></label></div>
               <label className="field-label">Terrain elevation <b>{world.world.amplitude.toFixed(1)}</b><input type="range" min="0" max="24" step=".5" value={world.world.amplitude} onChange={(event) => updateWorld({ world: { amplitude: Number(event.target.value) } })}/></label>

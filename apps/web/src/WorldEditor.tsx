@@ -2,15 +2,16 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import type { ObjectKind, SceneObject } from "./types";
+import type { ObjectKind, SceneObject, TerrainEdit } from "./types";
 
 type Props = {
   seed: number; width: number; depth: number; amplitude: number; frequency: number;
-  waterLevel: number; fog: boolean; sunAngle: number;
+  waterLevel: number; fog: boolean; sunAngle: number; resolution: number; terrainEdits: TerrainEdit[]; sculptMode: "raise" | "lower" | "smooth" | null;
   objects: SceneObject[]; selectedId: string; mode: "edit" | "play";
   placementType: ObjectKind | null;
   onPlace: (kind: ObjectKind, x: number, z: number) => void;
   onSelect: (id: string) => void;
+  onSculpt: (x: number, z: number) => void;
 };
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -29,6 +30,24 @@ function heightAt(seed: number, x: number, z: number, amplitude: number, frequen
   const detail = noise2(seed + 101, x * frequency * 2.1, z * frequency * 2.1) * 0.35;
   const ridge = (1 - Math.abs(noise2(seed + 211, x * frequency * 0.55, z * frequency * 0.55))) * 0.18;
   return (base + detail + ridge) * amplitude;
+}
+function terrainHeight(seed: number, x: number, z: number, amplitude: number, frequency: number, edits: TerrainEdit[], width: number, depth: number, resolution: number) {
+  let height = heightAt(seed, x, z, amplitude, frequency);
+  const sx = width / resolution, sz = depth / resolution;
+  for (const edit of edits) {
+    const dx = x-edit.x, dz = z-edit.z, d2 = dx*dx+dz*dz;
+    if (d2 >= edit.radius*edit.radius) continue;
+    const weight = Math.exp(-4*d2/(edit.radius*edit.radius));
+    if (edit.operation === "raise") height += edit.strength*weight;
+    else if (edit.operation === "lower") height -= edit.strength*weight;
+    else {
+      const neighbors = [[-sx,-sz],[0,-sz],[sx,-sz],[-sx,0],[sx,0],[-sx,sz],[0,sz],[sx,sz]];
+      const avg = neighbors.reduce((sum,[ox,oz])=>sum+heightAt(seed,x+ox,z+oz,amplitude,frequency),0)/8;
+      const blend = Math.min(1,edit.strength/12)*weight;
+      height = height*(1-blend)+avg*blend;
+    }
+  }
+  return height;
 }
 function material(color: string, roughness = 0.84) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness: 0.08 });
@@ -174,6 +193,7 @@ export default function WorldEditor(props: Props) {
         -((event.clientY - rect.top) / rect.height) * 2 + 1
       );
       raycaster.setFromCamera(coords, camera);
+      if (current.sculptMode) { const hit = raycaster.intersectObject(terrain, false)[0]; if (hit) current.onSculpt(hit.point.x, hit.point.z); return; }
       if (current.placementType) {
         const hit = raycaster.intersectObject(terrain, false)[0];
         if (hit) current.onPlace(current.placementType, hit.point.x, hit.point.z);
@@ -201,7 +221,7 @@ export default function WorldEditor(props: Props) {
       const colors: number[] = [];
       for (let i = 0; i < positions.count; i++) {
         const x = positions.getX(i), z = positions.getZ(i);
-        const height = heightAt(current.seed, x, z, current.amplitude, current.frequency);
+        const height = terrainHeight(current.seed, x, z, current.amplitude, current.frequency, current.terrainEdits, current.width, current.depth, current.resolution);
         positions.setY(i, height);
         const moisture = noise2(current.seed + 991, x * 0.12, z * 0.12);
         const color = height < -1.8 ? new THREE.Color("#315e78") :
@@ -224,7 +244,7 @@ export default function WorldEditor(props: Props) {
 
       state.objects.forEach((item) => { state.scene.remove(item); disposeObject(item); });
       state.objects = current.objects.map((item) => buildObject(
-        item, heightAt(current.seed, item.x, item.z, current.amplitude, current.frequency)
+        item, terrainHeight(current.seed, item.x, item.z, current.amplitude, current.frequency, current.terrainEdits, current.width, current.depth, current.resolution)
       ));
       state.objects.forEach((item) => state.scene.add(item));
 
@@ -269,7 +289,7 @@ export default function WorldEditor(props: Props) {
         const halfDepth = liveProps.current.depth / 2 - 1;
         camera.position.x = clamp(camera.position.x, -halfWidth, halfWidth);
         camera.position.z = clamp(camera.position.z, -halfDepth, halfDepth);
-        const floor = heightAt(liveProps.current.seed, camera.position.x, camera.position.z, liveProps.current.amplitude, liveProps.current.frequency) + 1.7;
+        const floor = terrainHeight(liveProps.current.seed, camera.position.x, camera.position.z, liveProps.current.amplitude, liveProps.current.frequency, liveProps.current.terrainEdits, liveProps.current.width, liveProps.current.depth, liveProps.current.resolution) + 1.7;
         if (keys.has(" ") && camera.position.y <= floor + 0.04) state.verticalVelocity = 6.4;
         state.verticalVelocity -= 18 * delta;
         camera.position.y += state.verticalVelocity * delta;
@@ -306,7 +326,7 @@ export default function WorldEditor(props: Props) {
     const colors: number[] = [];
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i), z = positions.getZ(i);
-      const height = heightAt(current.seed, x, z, current.amplitude, current.frequency);
+      const height = terrainHeight(current.seed, x, z, current.amplitude, current.frequency, current.terrainEdits, current.width, current.depth, current.resolution);
       positions.setY(i, height);
       const moisture = noise2(current.seed + 991, x * 0.12, z * 0.12);
       const color = height < -1.8 ? new THREE.Color("#315e78") :
@@ -327,7 +347,7 @@ export default function WorldEditor(props: Props) {
     sun?.position.set(Math.cos(THREE.MathUtils.degToRad(current.sunAngle)) * 75, 70, Math.sin(THREE.MathUtils.degToRad(current.sunAngle)) * 75);
     state.scene.fog = current.fog ? new THREE.Fog("#172b40", size * 0.55, size * 2.7) : null;
     state.objects.forEach((item) => { state.scene.remove(item); disposeObject(item); });
-    state.objects = current.objects.map((item) => buildObject(item, heightAt(current.seed, item.x, item.z, current.amplitude, current.frequency)));
+    state.objects = current.objects.map((item) => buildObject(item, terrainHeight(current.seed, item.x, item.z, current.amplitude, current.frequency, current.terrainEdits, current.width, current.depth, current.resolution)));
     state.objects.forEach((item) => state.scene.add(item));
     if (state.selectedRing) {
       state.scene.remove(state.selectedRing);
@@ -345,12 +365,12 @@ export default function WorldEditor(props: Props) {
       state.selectedRing = ring;
     }
     if (current.mode === "play") {
-      state.camera.position.set(0, heightAt(current.seed, 0, 18, current.amplitude, current.frequency) + 1.7, 18);
-      state.camera.lookAt(0, heightAt(current.seed, 0, 0, current.amplitude, current.frequency), 0);
+      state.camera.position.set(0, terrainHeight(current.seed, 0, 18, current.amplitude, current.frequency, current.terrainEdits, current.width, current.depth, current.resolution) + 1.7, 18);
+      state.camera.lookAt(0, terrainHeight(current.seed, 0, 0, current.amplitude, current.frequency, current.terrainEdits, current.width, current.depth, current.resolution), 0);
     } else {
       state.orbit.target.set(0, 0, 0);
     }
-  }, [props.seed, props.width, props.depth, props.amplitude, props.frequency, props.waterLevel, props.fog, props.sunAngle, props.objects, props.selectedId, props.mode]);
+  }, [props.seed, props.width, props.depth, props.amplitude, props.frequency, props.waterLevel, props.fog, props.sunAngle, props.objects, props.selectedId, props.mode, props.terrainEdits, props.resolution]);
 
   useEffect(() => {
     const state = stateRef.current;
@@ -358,9 +378,9 @@ export default function WorldEditor(props: Props) {
     if (props.mode === "play") {
       state.orbit.enabled = false;
       state.pointer.unlock();
-      const floor = heightAt(props.seed, 0, 18, props.amplitude, props.frequency);
+      const floor = terrainHeight(props.seed, 0, 18, props.amplitude, props.frequency, props.terrainEdits, props.width, props.depth, props.resolution);
       state.camera.position.set(0, floor + 1.7, 18);
-      state.camera.lookAt(0, heightAt(props.seed, 0, 0, props.amplitude, props.frequency), 0);
+      state.camera.lookAt(0, terrainHeight(props.seed, 0, 0, props.amplitude, props.frequency, props.terrainEdits, props.width, props.depth, props.resolution), 0);
     } else {
       state.pointer.unlock();
       state.orbit.enabled = true;
@@ -372,7 +392,7 @@ export default function WorldEditor(props: Props) {
 
   return <div className="world-canvas" ref={hostRef}>
     <div className="canvas-hud"><span className="canvas-dot" /> {props.mode === "play" ? "EXPLORATION MODE" : "LIVE PROCEDURAL PREVIEW"}
-      {props.placementType && props.mode === "edit" ? <b>CLICK THE TERRAIN TO PLACE {props.placementType.toUpperCase()}</b> : null}
+      {props.sculptMode && props.mode === "edit" ? <b>CLICK TO {props.sculptMode.toUpperCase()} TERRAIN</b> : props.placementType && props.mode === "edit" ? <b>CLICK THE TERRAIN TO PLACE {props.placementType.toUpperCase()}</b> : null}
     </div>
     {props.mode === "play" ? <div className="play-hud">W A S D · MOVE　 SHIFT · SPRINT　 SPACE · JUMP　 ESC · RELEASE MOUSE</div> : <div className="canvas-credit">SEEDED TERRAIN · REAL-TIME SCENE · NO GENERATIVE MODEL</div>}
   </div>;

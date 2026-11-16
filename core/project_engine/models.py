@@ -46,11 +46,22 @@ class SceneObject(BaseModel):
     scale: float = Field(default=1, ge=0.25, le=4)
     color: str = Field(default="#8ba7c7", pattern=r"^#[0-9A-Fa-f]{6}$")
 
+class TerrainEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    operation: Literal["raise", "lower", "smooth"]
+    x: float = Field(ge=-512, le=512)
+    z: float = Field(ge=-512, le=512)
+    radius: float = Field(default=6.0, ge=0.5, le=40)
+    strength: float = Field(default=2.0, ge=0.05, le=12)
+
+
 class WorldDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
     seed: int = Field(ge=0, le=4294967295)
     world: WorldDefinition = Field(default_factory=WorldDefinition)
     objects: list[SceneObject] = Field(default_factory=list, max_length=500)
+    terrain_edits: list[TerrainEdit] = Field(default_factory=list, max_length=1000)
     sun_angle: float = Field(default=-28, ge=-180, le=180)
     fog: bool = True
     water_level: float = Field(default=-1.5, ge=-20, le=20)
