@@ -67,12 +67,12 @@ func _ready() -> void:
     player.name = "Player"
     player.set_script(Player)
     player.position = Vector3(0, float(data.get("spawn_height", 0.0)) + 1.0, 18)
-    add_child(player)
 
     var camera = Camera3D.new()
     camera.name = "Camera3D"
     camera.position = Vector3(0, 1.65, 0)
     player.add_child(camera)
+    add_child(player)
     camera.current = true
 
 func _spawn_prop(item: Dictionary) -> void:
