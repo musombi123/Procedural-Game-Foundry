@@ -138,7 +138,8 @@ def project_files(pid: str):
 
 # Movie-to-game pipeline: persisted, creator-approved stage state machine.
 from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, new_pipeline
-from core.movie_pipeline.service import PipelineError, PipelineStore\nfrom core.movie_pipeline.worker import analyze_project
+from core.movie_pipeline.service import PipelineError, PipelineStore
+from core.movie_pipeline.worker import analyze_project
 
 @app.post("/api/projects/{pid}/movie-pipeline", status_code=201)
 def create_movie_pipeline(pid: str, request: PipelineCreate):
