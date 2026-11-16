@@ -13,13 +13,13 @@ VIDEO_LIMIT = 8 * 1024 * 1024 * 1024
 
 def _signature_ok(kind: str, content_type: str, head: bytes) -> bool:
     if kind == "photo":
-        return ((content_type == "image/jpeg" and head.startswith(b"\\xff\\xd8\\xff")) or
-                (content_type == "image/png" and head.startswith(b"\\x89PNG\\r\\n\\x1a\\n")) or
+        return ((content_type == "image/jpeg" and head.startswith(bytes.fromhex("ffd8ff"))) or
+                (content_type == "image/png" and head.startswith(bytes.fromhex("89504e470d0a1a0a"))) or
                 (content_type == "image/webp" and head.startswith(b"RIFF") and head[8:12] == b"WEBP"))
     if content_type in ("video/mp4", "video/quicktime"):
         return len(head) >= 12 and head[4:8] == b"ftyp"
     if content_type in ("video/x-matroska", "video/webm"):
-        return head.startswith(b"\\x1a\\x45\\xdf\\xa3")
+        return head.startswith(bytes.fromhex("1a45dfa3"))
     if content_type == "video/x-msvideo":
         return head.startswith(b"RIFF") and head[8:12] == b"AVI "
     return False
