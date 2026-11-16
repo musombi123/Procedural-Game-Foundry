@@ -189,7 +189,7 @@ export default function App() {
         <div className="editor-toolbar">
           <div className="view-switch"><button className={view === "world" ? "selected" : ""} onClick={() => { setMode("edit"); setView("world"); }}>World Foundry</button><button className={view === "scene" ? "selected" : ""} onClick={() => { setMode("edit"); setView("scene"); }}>Scene Editor</button></div>
           <div className="toolbar-right"><span className="seed-tag">SEED {world.seed}</span>
-            {mode === "play" ? <button className="button danger" onClick={() => setMode("edit")}>■ Exit world</button> : <><button className="button secondary" onClick={generateGame} disabled={busy || !selected}>{busy ? "Building…" : "Build game"}</button><button className="button primary" onClick={() => { setPlacementType(null); setMode("play"); }}>▶ Enter world</button></>}
+            {mode === "play" ? <button className="button danger" onClick={() => setMode("edit")}>■ Exit world</button> : <><button className="button secondary" onClick={generateGame} disabled={busy || !selected}>{busy ? "Building…" : "Build game"}</button><button className="button primary" onClick={() => { setPlacementType(null); setSculptMode(null); setMode("play"); }}>▶ Enter world</button></>}
           </div>
         </div>
         <div className="editor-layout">
@@ -219,7 +219,7 @@ export default function App() {
               <div className="inspector-note">Deterministic terrain is generated from the seed and noise parameters. Reusing the same settings recreates the same landscape.</div>
             </> : <>
               <div className="panel-title"><small>SCENE EDITOR</small><h3>Asset placement</h3><p>Select an asset, then click the terrain to place it into the scene.</p></div>
-              <div className="asset-grid">{(Object.keys(labels) as ObjectKind[]).map((kind) => <button key={kind} className={placementType === kind ? "asset-option active" : "asset-option"} onClick={() => { setPlacementType(placementType === kind ? null : kind); setMode("edit"); }}><span>{kind === "outpost" ? "⌂" : kind === "beacon" ? "⌁" : kind === "tree" ? "♣" : kind === "rock" ? "⬟" : "▣"}</span>{labels[kind]}</button>)}</div>
+              <div className="asset-grid">{(Object.keys(labels) as ObjectKind[]).map((kind) => <button key={kind} className={placementType === kind ? "asset-option active" : "asset-option"} onClick={() => { setPlacementType(placementType === kind ? null : kind); setSculptMode(null); setMode("edit"); }}><span>{kind === "outpost" ? "⌂" : kind === "beacon" ? "⌁" : kind === "tree" ? "♣" : kind === "rock" ? "⬟" : "▣"}</span>{labels[kind]}</button>)}</div>
               <div className="object-list-title"><b>Scene objects</b><span>{world.objects.length}</span></div>
               <div className="object-list">{world.objects.map((item) => <button key={item.id} className={selectedObject === item.id ? "object-row active" : "object-row"} onClick={() => { setSelectedObject(item.id); setPlacementType(null); }}><span className="object-swatch" style={{ background: item.color }}/><span><b>{item.name}</b><small>{item.kind} · {item.x.toFixed(1)}, {item.z.toFixed(1)}</small></span><i>›</i></button>)}
                 {!world.objects.length && <p className="list-empty">Your scene is empty. Pick an asset and click the terrain to place it.</p>}</div>
