@@ -16,7 +16,7 @@ from .service import PipelineError, PipelineStore
 class MediaAnalysisError(RuntimeError):
     pass
 
-def _run(command: list[str], timeout: int = 180) -> str:
+def _run(command: list[str], timeout: int = 180, include_stderr: bool = False) -> str:
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
@@ -57,7 +57,7 @@ def _scene_times(video: Path, duration: float, limit: int = 24) -> tuple[list[fl
     # FFmpeg's scene score selects likely cuts. showinfo emits timestamps without decoding a full-resolution frame set.
     expression = "select='gt(scene,0.35)',showinfo"
     try:
-        output = _run([ffmpeg, "-hide_banner", "-i", str(video), "-vf", expression, "-an", "-f", "null", "-"], timeout=max(180, int(duration * 2)))
+        output = _run([ffmpeg, "-hide_banner", "-i", str(video), "-vf", expression, "-an", "-f", "null", "-"], timeout=max(180, int(duration * 2)), include_stderr=True)
         times = [float(value) for value in re.findall(r"pts_time:([0-9]+(?:\.[0-9]+)?)", output)]
         method = "ffmpeg_scene_score"
     except MediaAnalysisError:
