@@ -1,0 +1,1 @@
+Generation adapters accept validated FPD models and deterministic seeds. Generators must be pure where possible, avoid network access by default, and record algorithm versions so projects can be reproduced.

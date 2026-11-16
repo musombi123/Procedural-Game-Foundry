@@ -1,0 +1,1 @@
+Blender is optional. PGF's initial playable vertical slice uses a native procedural terrain generator and does not require Blender. Add background-mode mesh recipes and GLB exporters here in the asset-foundry phase.
