@@ -26,7 +26,7 @@ def _run(command: list[str], timeout: int = 180) -> str:
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or str(exc))[-3000:]
         raise MediaAnalysisError(f"{command[0]} failed: {detail}") from exc
-    return result.stdout
+    return result.stdout + "\\n" + result.stderr
 
 def _probe(video: Path) -> dict[str, Any]:
     raw = _run(["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", str(video)], timeout=60)
@@ -49,7 +49,7 @@ def _probe(video: Path) -> dict[str, Any]:
         "audio_streams": sum(1 for s in streams if s.get("codec_type") == "audio"),
     }
 
-def _scene_times(video: Path, duration: float, limit: int = 24) -> tuple[list[float], str]:
+def _scene_times(video: Path, duration: float, limit: int = 24) -> tuple[list[float], str]:\n    limit = max(2, limit)
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise MediaAnalysisError("FFmpeg is required for keyframe extraction")
