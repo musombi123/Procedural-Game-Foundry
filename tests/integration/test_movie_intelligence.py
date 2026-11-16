@@ -71,7 +71,7 @@ def test_story_intelligence_writes_vision_and_story_outputs(tmp_path, monkeypatc
     assert (analysis_dir / "storyboard.json").is_file()
     final = store.load().stages[0]
     assert final.state == StageState.REVIEW
-    assert final.output["mission_count"] == 1
+    assert final.output["mission_count"] == 4
 
 
 def test_story_intelligence_requires_review_state(tmp_path):
