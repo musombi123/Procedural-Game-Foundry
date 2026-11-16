@@ -1,4 +1,4 @@
-"""CLI entry point: python -m core.movie_pipeline.worker --project-dir PATH"""
+"""CLI entry point: python -m core.movie_pipeline.cli --project-dir PATH"""
 import argparse
 import json
 from pathlib import Path
