@@ -19,7 +19,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "product": "Procedural Game Foundry", "model_free": True}
+    return {"status": "ok", "product": "Procedural Game Foundry", "model_free": True, "staged_movie_pipeline": True, "local_model_workers_ready": False}
 
 @app.get("/api/capabilities")
 def capabilities():
@@ -134,3 +134,64 @@ def project_files(pid: str):
     if not root.is_dir():
         raise HTTPException(404, "Project not found")
     return {"files": [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]}
+
+
+# Movie-to-game pipeline: persisted, creator-approved stage state machine.
+from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, new_pipeline
+from core.movie_pipeline.service import PipelineError, PipelineStore
+
+@app.post("/api/projects/{pid}/movie-pipeline", status_code=201)
+def create_movie_pipeline(pid: str, request: PipelineCreate):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+    except FileNotFoundError:
+        raise HTTPException(404, "Project not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    rights = request.rights
+    if not (rights.has_video_rights and rights.has_photo_rights and rights.likeness_consent and rights.accepts_original_assets_only):
+        raise HTTPException(400, "Confirm video rights, photo rights, likeness consent and original-asset generation before processing")
+    store = PipelineStore(folder)
+    if store.path.exists():
+        raise HTTPException(409, "A movie pipeline already exists for this project")
+    return store.save(new_pipeline(pid, rights)).model_dump(mode="json")
+
+@app.get("/api/projects/{pid}/movie-pipeline")
+def get_movie_pipeline(pid: str):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        return PipelineStore(folder).load().model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@app.post("/api/projects/{pid}/movie-pipeline/stages/{stage_id}/approve")
+def approve_movie_stage(pid: str, stage_id: StageId, request: StageDecision):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        result = PipelineStore(folder).approve(stage_id, request.note)
+        return result.model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except PipelineError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@app.post("/api/projects/{pid}/movie-pipeline/stages/{stage_id}/regenerate")
+def regenerate_movie_stage(pid: str, stage_id: StageId):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        result = PipelineStore(folder).regenerate(stage_id)
+        return result.model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except PipelineError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
