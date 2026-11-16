@@ -95,7 +95,7 @@ func _spawn_prop(item: Dictionary) -> void:
         _add_part(visual, BoxMesh.new(), Vector3(0, 2.0, 0), material, Vector3(8, 4, 8))
         _add_part(visual, BoxMesh.new(), Vector3(0, 4.25, 0), material, Vector3(8.6, 0.5, 8.6))
     elif kind == "beacon":
-        _add_part(visual, CylinderMesh.new(), Vector3(0, 1.8, 0), material, Vector3(1.3, 3.6, 1.3))
+        _add_part(visual, CylinderMesh.new(), Vector3(0, 1.8, 0), material, Vector3(1.3, 1.8, 1.3))
         var glow = StandardMaterial3D.new()
         glow.albedo_color = Color("#6bd9ff")
         glow.emission_enabled = true
@@ -103,9 +103,9 @@ func _spawn_prop(item: Dictionary) -> void:
         _add_part(visual, SphereMesh.new(), Vector3(0, 3.9, 0), glow, Vector3(0.8, 0.8, 0.8))
     elif kind == "tree":
         _add_part(visual, CylinderMesh.new(), Vector3(0, 1.6, 0), material, Vector3(0.45, 3.2, 0.45))
-        _add_part(visual, SphereMesh.new(), Vector3(0, 3.8, 0), material, Vector3(2.4, 2.8, 2.4))
+        _add_part(visual, SphereMesh.new(), Vector3(0, 3.8, 0), material, Vector3(1.2, 1.4, 1.2))
     elif kind == "rock":
-        _add_part(visual, SphereMesh.new(), Vector3(0, 0.9, 0), material, Vector3(2.2, 1.5, 1.8))
+        _add_part(visual, SphereMesh.new(), Vector3(0, 0.9, 0), material, Vector3(1.1, 0.75, 0.9))
     else:
         _add_part(visual, BoxMesh.new(), Vector3(0, 0.9, 0), material, Vector3(1.8, 1.8, 1.8))
 
@@ -115,8 +115,8 @@ func _spawn_prop(item: Dictionary) -> void:
         bounds.size = Vector3(8, 4.5, 8)
         collider.position.y = 2.2
     elif kind == "tree":
-        bounds.size = Vector3(1.4, 4.5, 1.4)
-        collider.position.y = 2.2
+        bounds.size = Vector3(2.8, 5.4, 2.8)
+        collider.position.y = 2.7
     elif kind == "beacon":
         bounds.size = Vector3(1.6, 4.2, 1.6)
         collider.position.y = 2.1

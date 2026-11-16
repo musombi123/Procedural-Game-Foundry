@@ -32,3 +32,7 @@ def test_assembly_includes_saved_scene_objects(tmp_path):
     assert terrain["width"] == 112
     assert scene["objects"][0]["name"] == "North Beacon"
     assert scene["objects"][0]["y"] != 0
+    player = (folder / "game" / "scripts" / "player.gd").read_text()
+    assert "CapsuleShape3D.new()" in player
+    assert "move_and_slide()" in player
+    assert "ui_accept" in player
