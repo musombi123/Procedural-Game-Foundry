@@ -51,8 +51,8 @@ def claim_job() -> dict[str, Any] | None:
             WHERE state = 'queued'
                OR (state = 'running' AND lease_expires_at < now())
             ORDER BY created_at
-            FOR UPDATE SKIP LOCKED
             LIMIT 1
+            FOR UPDATE SKIP LOCKED
             """
         ).fetchone()
         if not row:
