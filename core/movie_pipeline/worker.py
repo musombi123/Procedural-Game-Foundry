@@ -85,6 +85,78 @@ def _extract_frames(video: Path, output_dir: Path, times: list[float]) -> list[d
                            "path": str(target.relative_to(output_dir.parent)), "size_bytes": target.stat().st_size})
     return frames
 
+def _extract_analysis_frames(video: Path, output_dir: Path, duration: float) -> dict[str, Any]:
+    """Decode an analysis-only image sequence at 12 fps; never decode the source at its native frame rate."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise MediaAnalysisError("FFmpeg is required for 12-fps analysis frame extraction")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pattern = str(output_dir / "frame-%06d.jpg")
+    _run([
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(video),
+        "-vf", "fps=12,scale='min(1280,iw)':-2", "-q:v", "4",
+        "-start_number", "1", "-y", pattern,
+    ], timeout=max(180, int(duration * 4)))
+    frames = sorted(output_dir.glob("frame-*.jpg"))
+    if not frames:
+        raise MediaAnalysisError("FFmpeg did not produce any 12-fps analysis frames")
+    return {
+        "fps": 12,
+        "frame_count": len(frames),
+        "directory": str(output_dir.relative_to(output_dir.parent.parent)),
+    }
+
+
+def _extract_audio_tracks(video: Path, output_dir: Path, stream_count: int, duration: float) -> list[dict[str, Any]]:
+    """Extract each source audio stream to PCM for later voice/music analysis.
+
+    This preserves the original mix per stream. It does not claim to separate
+    dialogue from music when both are mixed into a single source stream.
+    """
+    if stream_count <= 0:
+        return []
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise MediaAnalysisError("FFmpeg is required for source audio extraction")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tracks = []
+    for index in range(stream_count):
+        target = output_dir / f"audio-track-{index + 1:02d}.wav"
+        _run([
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(video),
+            "-map", f"0:a:{index}", "-vn", "-c:a", "pcm_s16le",
+            "-ar", "48000", "-ac", "2", "-y", str(target),
+        ], timeout=max(180, int(duration * 3)))
+        if not target.is_file() or target.stat().st_size <= 44:
+            raise MediaAnalysisError(f"FFmpeg did not extract source audio stream {index + 1}")
+        tracks.append({
+            "index": index + 1,
+            "type": "source_mix",
+            "path": str(target.relative_to(output_dir.parent.parent)),
+            "size_bytes": target.stat().st_size,
+        })
+    return tracks
+
+
+def _discard_original_video(project_folder: Path) -> None:
+    """Delete the temporary source movie after extraction, retaining its checksum only."""
+    store = PipelineStore(project_folder)
+    document = store.load()
+    source = document.source_video or {}
+    storage_key = source.get("storage_key")
+    if not storage_key:
+        return
+    video = (project_folder / storage_key).resolve()
+    uploads = (store.folder / "uploads").resolve()
+    if uploads not in video.parents:
+        raise MediaAnalysisError("Refusing to remove a source movie outside the project upload directory")
+    video.unlink(missing_ok=True)
+    source.pop("storage_key", None)
+    source["original_retained"] = False
+    source["retention_policy"] = "extracted_assets_and_sha256_only"
+    store.save(document)
+
+
 def _transcribe(video: Path, output_dir: Path) -> dict[str, Any]:
     """No speech-recognition model is loaded in tools-only mode."""
     return {"status": "skipped", "reason": "Tools-only mode: speech transcription models are disabled; provide story/dialogue context in the creator brief"}
@@ -116,18 +188,24 @@ def analyze_project(project_folder: Path) -> dict[str, Any]:
         analysis_dir.mkdir(parents=True, exist_ok=True)
         times, detection_method = _scene_times(video, metadata["duration_seconds"])
         frames = _extract_frames(video, analysis_dir / "keyframes", times)
-        record.progress = 75
+        analysis_frames = _extract_analysis_frames(video, analysis_dir / "frames_12fps", metadata["duration_seconds"])
+        audio_tracks = _extract_audio_tracks(video, analysis_dir / "audio", metadata["audio_streams"], metadata["duration_seconds"])
+        record.progress = 85
         store.save(document)
         transcription = _transcribe(video, analysis_dir)
         result = {
             "status": "media_analysis_complete",
             "source_sha256": document.source_video.get("sha256"),
+            "original_video_retained": False,
             "media": metadata,
             "scene_detection": {"method": detection_method, "candidate_count": len(times),
                                 "scenes": [{"index": i + 1, "start_seconds": round(t, 3),
                                             "end_seconds": round(times[i + 1], 3) if i + 1 < len(times) else metadata["duration_seconds"]}
                                            for i, t in enumerate(times)]},
             "keyframes": frames,
+            "analysis_frames": analysis_frames,
+            "audio_tracks": audio_tracks,
+            "voice_music_separation": {"status": "not_performed", "reason": "Source audio is extracted per stream; mixed voice/music separation requires a dedicated separator"},
             "transcription": transcription,
             "vision_analysis": {"status": "disabled_tools_only", "reason": "Visual interpretation is creator-guided; no machine-learning vision models are loaded"},
             "story_design": {"status": "creator_authored", "reason": "Use the creator story editor to define plot, missions and instructions; no generated text is used"},
@@ -136,15 +214,24 @@ def analyze_project(project_folder: Path) -> dict[str, Any]:
         manifest = analysis_dir / "analysis.json"
         manifest.write_text(json.dumps(result, indent=2), encoding="utf-8")
         store.mark_review(StageId.ANALYSIS, {"manifest": str(manifest.relative_to(project_folder)),
-                                             "keyframe_count": len(frames), "duration_seconds": metadata["duration_seconds"],
+                                             "keyframe_count": len(frames), "analysis_frame_count": analysis_frames["frame_count"],
+                                             "analysis_fps": 12, "audio_track_count": len(audio_tracks),
+                                             "duration_seconds": metadata["duration_seconds"],
                                              "transcription_status": transcription["status"]},
-                          f"Media analysis complete: {len(frames)} keyframes extracted; ready for creator review")
+                          f"Media intake complete: {analysis_frames['frame_count']} analysis frames at 12 fps; ready for creator review")
+        _discard_original_video(project_folder)
         return result
     except Exception as exc:
         record.state = StageState.FAILED
         record.error = str(exc)
-        record.summary = "Local media analysis failed"
+        record.summary = "Local media analysis failed; re-upload the movie to retry"
         record.updated_at = datetime.now(timezone.utc).isoformat()
         store.save(document)
+        # Source movies are transient inputs only. Keep the SHA-256 and extracted
+        # partial outputs, but do not retain the full upload after a failed run.
+        try:
+            _discard_original_video(project_folder)
+        except Exception:
+            pass
         raise
 

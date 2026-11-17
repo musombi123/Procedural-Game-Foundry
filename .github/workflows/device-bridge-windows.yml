@@ -1,0 +1,32 @@
+name: NEXORA Desktop Device Bridge
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feat/nexora-desktop-device-bridge]
+    paths:
+      - "nexora_device_bridge/**"
+      - "tests/unit/test_device_bridge_security.py"
+      - "pyproject.toml"
+      - ".github/workflows/device-bridge-windows.yml"
+jobs:
+  test-and-package-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package and desktop build dependencies
+        run: python -m pip install -e ".[dev,desktop]"
+      - name: Run bridge security tests
+        run: python -m pytest tests/unit/test_device_bridge_security.py -q
+      - name: Build standalone desktop companion
+        run: pyinstaller --clean --onefile --name NEXORA-Device-Bridge --collect-all fastapi --collect-all uvicorn --collect-all starlette --hidden-import nexora_device_bridge.app nexora_device_bridge/__main__.py
+      - name: Upload Windows desktop companion
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEXORA-Device-Bridge-Windows-x64
+          path: dist/NEXORA-Device-Bridge.exe
+          if-no-files-found: error
+          retention-days: 30

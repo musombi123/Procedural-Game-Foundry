@@ -56,10 +56,25 @@ class UploadIntent(BaseModel):
     sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
 
 
+class AndroidBuildSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    app_name: str = Field(default="NEXORA Game", min_length=1, max_length=48)
+    package_id: str = Field(default="com.nexora.game", pattern=r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*){1,7}$", max_length=180)
+    version_name: str = Field(default="1.0.0", pattern=r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,31}$")
+    version_code: int = Field(default=1, ge=1, le=2100000000)
+    build_type: str = Field(default="debug", pattern=r"^(debug|release)$")
+    artifact_format: str = Field(default="apk", pattern=r"^(apk|aab)$")
+    orientation: str = Field(default="landscape", pattern=r"^(landscape|portrait|sensor)$")
+    internet_permission: bool = True
+    camera_permission: bool = False
+    microphone_permission: bool = False
+    icon_asset_id: UUID | None = None
+
 class JobCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: str = Field(pattern=r"^(scene.generate|build.export)$")
     target: str = Field(default="desktop", pattern=r"^(desktop|android|desktop_android)$")
+    android: AndroidBuildSettings | None = None
 
 
 def _json_document(document: dict[str, Any]) -> dict[str, Any]:
@@ -435,8 +450,20 @@ def create_production_job(project_id: str, request: JobCreateRequest, principal:
             "AND status IN ('ready','processed') AND lower(right(filename, 4)) = '.glb'",
             (project["id"], principal["id"]),
         ).fetchall()
+        android_payload = request.android.model_dump() if request.android else None
+        if android_payload and request.android.icon_asset_id:
+            icon_asset = connection.execute(
+                "SELECT id, filename, object_key, processed_object_key, content_type, status FROM nexora_assets "
+                "WHERE id=%s AND project_id=%s AND owner_id=%s",
+                (request.android.icon_asset_id, project["id"], principal["id"]),
+            ).fetchone()
+            if not icon_asset or icon_asset["status"] not in ("ready", "processed") or icon_asset["content_type"] != "image/png":
+                raise HTTPException(status_code=422, detail="Android launcher icon must be an uploaded, ready PNG asset in this project.")
+            android_payload["icon_object_key"] = icon_asset["processed_object_key"] or icon_asset["object_key"]
+            android_payload["icon_filename"] = icon_asset["filename"]
         payload = {
             "target": request.target,
+            "android": android_payload,
             "project": {
                 "name": project["name"],
                 "description": project["description"],

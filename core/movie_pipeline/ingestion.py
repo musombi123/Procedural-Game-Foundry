@@ -6,7 +6,7 @@ class UploadRejected(ValueError):
     pass
 
 PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
-VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/x-matroska": ".mkv", "video/webm": ".webm", "video/x-msvideo": ".avi"}
+VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/x-matroska": ".mkv"}
 PHOTO_LIMIT = 20 * 1024 * 1024
 VIDEO_LIMIT = 8 * 1024 * 1024 * 1024
 
@@ -18,10 +18,8 @@ def _signature_ok(kind: str, content_type: str, head: bytes) -> bool:
                 (content_type == "image/webp" and head.startswith(b"RIFF") and head[8:12] == b"WEBP"))
     if content_type in ("video/mp4", "video/quicktime"):
         return len(head) >= 12 and head[4:8] == b"ftyp"
-    if content_type in ("video/x-matroska", "video/webm"):
+    if content_type == "video/x-matroska":
         return head.startswith(bytes.fromhex("1a45dfa3"))
-    if content_type == "video/x-msvideo":
-        return head.startswith(b"RIFF") and head[8:12] == b"AVI "
     return False
 
 async def store_upload(upload: UploadFile, kind: str, destination: Path) -> dict:
@@ -59,4 +57,4 @@ async def store_upload(upload: UploadFile, kind: str, destination: Path) -> dict
         temporary.unlink(missing_ok=True)
         raise
     return {"filename": final_path.name, "content_type": content_type, "size_bytes": total,
-            "sha256": digest.hexdigest(), "storage_key": str(final_path.relative_to(destination.parent))}
+            "sha256": digest.hexdigest(), "storage_key": str(final_path.relative_to(destination.parent.parent))}
