@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: nexora-foundry-api
+    runtime: docker
+    plan: starter
+    region: singapore
+    healthCheckPath: /health/ready
+    autoDeploy: false
+    envVars:
+      - key: PGF_REQUIRE_CLOUD_DEPENDENCIES
+        value: "true"
+      - key: PGF_DATA_DIR
+        value: /tmp/nexora-foundry
+      - key: PGF_CORS_ORIGINS
+        value: https://revelacode.co.ke,https://www.revelacode.co.ke
+      - key: DATABASE_URL
+        sync: false
+      - key: PGF_OBJECT_STORAGE_ENDPOINT
+        sync: false
+      - key: PGF_OBJECT_STORAGE_BUCKET
+        sync: false
+      - key: PGF_OBJECT_STORAGE_REGION
+        value: auto
+      - key: PGF_OBJECT_STORAGE_ACCESS_KEY
+        sync: false
+      - key: PGF_OBJECT_STORAGE_SECRET_KEY
+        sync: false
+      - key: PGF_AUTH_ENFORCEMENT_ENABLED
+        value: "false"
