@@ -43,6 +43,7 @@ const PROP_SCRIPT = preload("res://scripts/InteractableProp.gd")
 var gameplay: Dictionary = {}
 var actor_spec: Dictionary = {}
 var audio_manifest: Dictionary = {}
+var world_spec: Dictionary = {}
 var audio_players: Dictionary = {}
 var player: CharacterBody3D
 var director: Node
@@ -51,9 +52,12 @@ func _ready() -> void:
     gameplay = _read_json("res://gameplay/gameplay.json")
     actor_spec = _read_json("res://gameplay/actors-props.json")
     audio_manifest = _read_json("res://gameplay/audio-manifest.json")
+    world_spec = _read_json("res://gameplay/world-spec.json")
     _configure_input()
     _create_lighting()
     _instance_environment()
+    _create_terrain_collision()
+    _create_environment_colliders()
     _create_floor_safety_collision()
     _create_director()
     _create_player()
@@ -113,10 +117,68 @@ func _instance_environment() -> void:
     instance.name = "EnvironmentAsset"
     add_child(instance)
 
+func _create_terrain_collision() -> void:
+    var dimensions: Array = world_spec.get("dimensions", [96, 48, 96])
+    var terrain: Dictionary = world_spec.get("terrain", {})
+    var width := float(dimensions[0])
+    var depth := float(dimensions[2])
+    var segments := clampi(int(terrain.get("segments", 64)), 8, 160)
+    var amplitude := float(terrain.get("amplitude", 4.0))
+    var frequency := float(terrain.get("frequency", 0.035))
+    var faces := PackedVector3Array()
+    var vertices: Array[Vector3] = []
+    for z in range(segments + 1):
+        for x in range(segments + 1):
+            var px := (float(x) / segments - 0.5) * width
+            var pz := (float(z) / segments - 0.5) * depth
+            var height := amplitude * (sin(px * frequency) * cos(pz * frequency) * 0.55 + sin((px + pz) * frequency * 0.6) * 0.25)
+            vertices.append(Vector3(px, height, pz))
+    for z in range(segments):
+        for x in range(segments):
+            var a := z * (segments + 1) + x
+            var b := a + 1
+            var d := a + segments + 1
+            var e := d + 1
+            faces.append_array(PackedVector3Array([vertices[a], vertices[d], vertices[b], vertices[b], vertices[d], vertices[e]]))
+    var body := StaticBody3D.new()
+    body.name = "GeneratedTerrainCollision"
+    var collision := CollisionShape3D.new()
+    var shape := ConcavePolygonShape3D.new()
+    shape.set_faces(faces)
+    collision.shape = shape
+    body.add_child(collision)
+    add_child(body)
+
+func _create_environment_colliders() -> void:
+    for landmark in world_spec.get("landmarks", []):
+        var position_data: Array = landmark.get("position", [0, 0, 0])
+        var footprint: Array = landmark.get("footprint", [8, 8, 8])
+        var body := StaticBody3D.new()
+        body.name = "Collision_" + str(landmark.get("id", "landmark"))
+        body.position = Vector3(float(position_data[0]), float(position_data[1]) + float(footprint[1]) * 0.5, float(position_data[2]))
+        var collision := CollisionShape3D.new()
+        var shape := BoxShape3D.new()
+        shape.size = Vector3(float(footprint[0]), float(footprint[1]), float(footprint[2]))
+        collision.shape = shape
+        body.add_child(collision)
+        add_child(body)
+    for prop in world_spec.get("props", []):
+        var position_data: Array = prop.get("position", [0, 0, 0])
+        var scale := float(prop.get("scale", 1.0))
+        var body := StaticBody3D.new()
+        body.name = "Collision_" + str(prop.get("id", "world-prop"))
+        body.position = Vector3(float(position_data[0]), float(position_data[1]) + scale * 0.5, float(position_data[2]))
+        var collision := CollisionShape3D.new()
+        var shape := BoxShape3D.new()
+        shape.size = Vector3.ONE * scale
+        collision.shape = shape
+        body.add_child(collision)
+        add_child(body)
+
 func _create_floor_safety_collision() -> void:
     var floor := StaticBody3D.new()
     floor.name = "WorldSafetyFloor"
-    floor.position.y = -2.5
+    floor.position.y = -8.0
     var shape := CollisionShape3D.new()
     var bounds := BoxShape3D.new()
     bounds.size = Vector3(400, 1, 400)
@@ -171,6 +233,8 @@ func _instance_actors_and_props() -> void:
         _bind_actor_behaviours(visuals)
         _create_actor_hitboxes(visuals)
     _create_interaction_areas()
+    _create_reach_objectives()
+    _create_survival_objectives()
 
 func _bind_actor_behaviours(visuals: Node) -> void:
     for config in gameplay.get("actor_behaviours", []):
@@ -234,6 +298,51 @@ func _create_interaction_areas() -> void:
         area.set_script(PROP_SCRIPT)
         area.call("configure", interaction, director)
         add_child(area)
+
+func _create_reach_objectives() -> void:
+    for mission in gameplay.get("missions", []):
+        for objective in mission.get("objectives", []):
+            if str(objective.get("kind", "")) != "reach":
+                continue
+            var target_id := str(objective.get("target_id", ""))
+            var position_data: Array = []
+            for landmark in world_spec.get("landmarks", []):
+                if str(landmark.get("id", "")) == target_id:
+                    position_data = landmark.get("position", [])
+                    break
+            if position_data.is_empty():
+                for prop in actor_spec.get("props", []):
+                    if str(prop.get("id", "")) == target_id:
+                        position_data = prop.get("position", [])
+                        break
+            if position_data.is_empty():
+                continue
+            var area := Area3D.new()
+            area.name = "Reach_" + str(objective.id)
+            area.position = Vector3(float(position_data[0]), float(position_data[1]) + 1.0, float(position_data[2]))
+            area.collision_layer = 8
+            area.collision_mask = 1
+            var collision := CollisionShape3D.new()
+            var shape := SphereShape3D.new()
+            shape.radius = 2.0
+            collision.shape = shape
+            area.add_child(collision)
+            area.set_script(load("res://scripts/ObjectiveTrigger.gd"))
+            area.call("configure", str(objective.id), director)
+            add_child(area)
+
+func _create_survival_objectives() -> void:
+    for mission in gameplay.get("missions", []):
+        for objective in mission.get("objectives", []):
+            if str(objective.get("kind", "")) != "survive":
+                continue
+            var timer := Timer.new()
+            timer.name = "Survive_" + str(objective.id)
+            timer.one_shot = true
+            timer.wait_time = float(objective.get("required_count", 1))
+            timer.timeout.connect(func(): director.advance_objective(str(objective.id)))
+            add_child(timer)
+            timer.start()
 
 func _create_audio() -> void:
     for effect in audio_manifest.get("effects", []):
@@ -412,6 +521,21 @@ func pgf_interact(_player: Node) -> void:
     queue_free()
 '''
 
+
+def _objective_trigger_script() -> str:
+    return r'''extends Area3D
+var objective_id := ""
+var director: Node
+func configure(identifier: String, gameplay_director: Node) -> void:
+    objective_id = identifier
+    director = gameplay_director
+    body_entered.connect(_on_body_entered)
+func _on_body_entered(body: Node3D) -> void:
+    if body.name == "Player" and is_instance_valid(director):
+        director.advance_objective(objective_id)
+        queue_free()
+'''
+
 def assemble_movie_game(project_folder: Path, pipeline: Any, godot_executable: str) -> dict[str, Any]:
     records = {item.stage: item for item in pipeline.stages}
     if any(records[item].state != StageState.APPROVED for item in APPROVED_INPUTS):
@@ -455,6 +579,8 @@ def assemble_movie_game(project_folder: Path, pipeline: Any, godot_executable: s
         source = _inside(gameplay_root, name)
         copied[name] = _copy(source, runtime / Path(name).name)
     copied["actors_props_spec"] = _copy(actors_spec_path, gameplay_assets / "actors-props.json")
+    world_spec_path = _inside(root, "environment/world-spec.json")
+    copied["world_spec"] = _copy(world_spec_path, gameplay_assets / "world-spec.json")
     copied["audio_manifest"] = _copy(audio_manifest_path, gameplay_assets / "audio-manifest.json")
     for effect in audio_manifest.get("effects", []):
         source = _inside(audio_manifest_path.parent, str(effect["file"]))
@@ -467,6 +593,8 @@ def assemble_movie_game(project_folder: Path, pipeline: Any, godot_executable: s
     (scripts / "PlayerController.gd").write_text(_player_script(), encoding="utf-8")
     (scripts / "ActorBehaviour.gd").write_text(_actor_script(), encoding="utf-8")
     (scripts / "InteractableProp.gd").write_text(_prop_script(), encoding="utf-8")
+    shutil.copy2(Path(__file__).resolve().parents[2] / "gameplay" / "runtime_templates" / "ActorHitbox.gd", scripts / "ActorHitbox.gd")
+    (scripts / "ObjectiveTrigger.gd").write_text(_objective_trigger_script(), encoding="utf-8")
     shutil.copy2(Path(__file__).resolve().parents[2] / "gameplay" / "runtime_templates" / "ActorHitbox.gd", scripts / "ActorHitbox.gd")
     (scripts / "assembly_smoke.gd").write_text("extends SceneTree\nfunc _initialize() -> void:\n    call_deferred(\"_run_checks\")\nfunc _fail(message: String) -> void:\n    push_error(\"PGF ASSEMBLY SMOKE FAILURE: \" + message)\n    quit(1)\nfunc _run_checks() -> void:\n    var packed := load(\"res://main.tscn\") as PackedScene\n    if packed == null:\n        _fail(\"main scene did not load\")\n        return\n    var game := packed.instantiate()\n    root.add_child(game)\n    await process_frame\n    var player := game.get_node_or_null(\"Player\")\n    var director := game.get_node_or_null(\"GameplayDirector\")\n    if player == null or director == null:\n        _fail(\"player or gameplay director missing\")\n        return\n    if game.get_node_or_null(\"EnvironmentAsset\") == null:\n        _fail(\"environment GLB was not instantiated\")\n        return\n    if game.get_node_or_null(\"ActorsAndPropsAsset\") == null:\n        _fail(\"actors/props GLB was not instantiated\")\n        return\n    var audio_players := game.find_children(\"SFX_*\", \"AudioStreamPlayer\", true, false)\n    if audio_players.is_empty():\n        _fail(\"procedural audio cue player was not wired\")\n        return\n    var interactions := game.find_children(\"Interact_*\", \"Area3D\", true, false)\n    if interactions.is_empty():\n        _fail(\"prop interaction area missing\")\n        return\n    var interaction = interactions[0]\n    interaction.pgf_interact(player)\n    var definition: Dictionary = director.get(\"definition\")\n    var first_objective: Dictionary = definition.missions[0].objectives[0]\n    var progress: Dictionary = director.get(\"progress\")\n    if int(progress.get(first_objective.id, 0)) != 1:\n        _fail(\"prop interaction did not advance objective\")\n        return\n    var inventory: Dictionary = director.get(\"inventory\")\n    if inventory.is_empty():\n        _fail(\"collect interaction did not update inventory\")\n        return\n    if not bool(director.get(\"finished\")):\n        _fail(\"completed objective did not trigger win condition\")\n        return\n    var loss_director := Node.new()\n    loss_director.set_script(load(\"res://scripts/runtime/GameplayDirector.gd\"))\n    root.add_child(loss_director)\n    loss_director.configure(definition, {})\n    loss_director.damage_player(int(loss_director.get(\"health\")))\n    if not bool(loss_director.get(\"finished\")):\n        _fail(\"health depletion did not trigger lose condition\")\n        return\n    if not loss_director.save_progress(\"user://pgf-assembly-smoke.json\"):\n        _fail(\"save system failed\")\n        return\n    loss_director.set(\"health\", 1)\n    if not loss_director.load_progress(\"user://pgf-assembly-smoke.json\") or int(loss_director.get(\"health\")) != 0:\n        _fail(\"save/load round trip failed\")\n        return\n    print(\"PGF_ASSEMBLY_SMOKE_OK\")\n    quit(0)\n", encoding="utf-8")
     (destination / "main.tscn").write_text(
