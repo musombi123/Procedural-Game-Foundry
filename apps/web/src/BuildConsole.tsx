@@ -135,7 +135,7 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
         );
         if (cancelled) return;
         setRunLog(current.log);
-        if (!current.running) setStatus("Godot process exited with code " + (current.exit_code ?? "unknown") + ".");
+        if (!current.running) { setStatus("Godot process exited with code " + (current.exit_code ?? "unknown") + "."); setRunId(""); }
       } catch (reason) {
         if (!cancelled) setRunLog(reason instanceof Error ? reason.message : "Runtime log unavailable.");
       }
@@ -390,7 +390,7 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
       {selected && <p className="artifact-meta">{selected.package_id} · {selected.output_format.toUpperCase()} · {humanSize(selected.size)} · SHA-256 {selected.sha256.slice(0, 18)}…</p>}
       <div className="build-action-row">
         <button className="button primary" disabled={!selected || selected.output_format !== "apk" || !device} onClick={() => void installBuild()}>Install APK</button>
-        <button className="button secondary" disabled={!selected || !device} onClick={() => void launchBuild()}>Launch game</button>
+        <button className="button secondary" disabled={!selected || selected.output_format !== "apk" || !device} onClick={() => void launchBuild()}>Launch game</button>
         <button className="button secondary" disabled={!device} onClick={() => void readLogcat()}>Read logcat</button>
         {selected && <a className="button secondary" href={api + projectPath + "/builds/" + encodeURIComponent(selected.id) + "/download"} target="_blank" rel="noreferrer">Download</a>}
       </div>
