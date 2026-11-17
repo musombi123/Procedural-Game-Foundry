@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -187,6 +187,114 @@ def _android_sdk() -> Path | None:
     return None
 
 
+def _java_home() -> Path | None:
+    configured = os.getenv("JAVA_HOME", "").strip()
+    if configured:
+        home = Path(configured).expanduser()
+        if home.is_dir() and any((home / "bin" / name).is_file() for name in ("java", "java.exe")):
+            return home.resolve()
+    executable = shutil.which("java")
+    if not executable:
+        return None
+    resolved = Path(executable).resolve()
+    if resolved.parent.name.casefold() == "bin":
+        return resolved.parent.parent
+    return None
+
+
+def _godot_version(godot: str) -> str:
+    result = _run([godot, "--version"], timeout=30)
+    text = (result["stdout"] or result["stderr"]).strip()
+    match = re.search(r"(\d+\.\d+(?:\.\d+)?\.(?:stable|dev|beta\d*|rc\d*|alpha\d*))", text, re.I)
+    if not match:
+        raise RuntimeError("Could not identify the Godot editor version. Install matching Android export templates.")
+    return match.group(1)
+
+
+def _godot_template_directory(godot: str) -> Path:
+    version = _godot_version(godot)
+    if os.name == "nt":
+        base = Path(os.getenv("APPDATA") or (Path.home() / "AppData" / "Roaming")) / "Godot" / "export_templates"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "Godot" / "export_templates"
+    else:
+        base = Path.home() / ".local" / "share" / "godot" / "export_templates"
+    return base / version
+
+
+def _android_template_status(godot: str | None) -> dict[str, Any]:
+    if not godot:
+        return {"available": False, "version": None, "path": None, "missing": ["Godot editor"]}
+    try:
+        directory = _godot_template_directory(godot)
+    except RuntimeError as exc:
+        return {"available": False, "version": None, "path": None, "missing": [str(exc)]}
+    required = ("android_debug.apk", "android_release.apk", "android_source.zip")
+    missing = [name for name in required if not (directory / name).is_file()]
+    return {
+        "available": not missing,
+        "version": directory.name,
+        "path": str(directory),
+        "missing": missing,
+    }
+
+
+def _godot_settings_path(godot: str) -> Path:
+    version = _godot_version(godot)
+    major_minor = ".".join(version.split(".")[:2])
+    if os.name == "nt":
+        root = Path(os.getenv("APPDATA") or (Path.home() / "AppData" / "Roaming")) / "Godot"
+    elif sys.platform == "darwin":
+        root = Path.home() / "Library" / "Application Support" / "Godot"
+    else:
+        root = Path.home() / ".config" / "godot"
+    return root / f"editor_settings-{major_minor}.tres"
+
+
+def _set_editor_resource_value(text: str, key: str, value: str) -> str:
+    encoded = json.dumps(value, ensure_ascii=False)
+    line = f"{key} = {encoded}"
+    pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
+    if pattern.search(text):
+        return pattern.sub(lambda _: line, text, count=1)
+    resource = re.search(r"(?m)^\[resource\]\s*$", text)
+    if not resource:
+        text = text.rstrip() + "\n\n[resource]\n"
+        resource = re.search(r"(?m)^\[resource\]\s*$", text)
+    assert resource is not None
+    start = resource.end()
+    next_section = re.search(r"(?m)^\[[^\]]+\]\s*$", text[start:])
+    end = start + next_section.start() if next_section else len(text)
+    block = text[start:end].rstrip()
+    updated = (block + "\n" if block else "\n") + line + "\n"
+    return text[:start] + updated + text[end:]
+
+
+def _configure_godot_android(godot: str, env: dict[str, str]) -> dict[str, str]:
+    sdk = _android_sdk()
+    java_home = _java_home()
+    if not sdk:
+        raise RuntimeError("Android SDK not found. Set ANDROID_HOME or ANDROID_SDK_ROOT on this desktop.")
+    if not (sdk / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb")).is_file():
+        raise RuntimeError("Android SDK platform-tools/adb is missing. Install Android SDK Platform-Tools.")
+    if not java_home:
+        raise RuntimeError("OpenJDK 17 or a compatible JDK was not found. Set JAVA_HOME and ensure java is on PATH.")
+    env["ANDROID_HOME"] = str(sdk)
+    env["ANDROID_SDK_ROOT"] = str(sdk)
+    env["JAVA_HOME"] = str(java_home)
+    settings = _godot_settings_path(godot)
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    original = settings.read_text(encoding="utf-8") if settings.is_file() else (
+        '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n'
+    )
+    original = _set_editor_resource_value(original, "export/android/android_sdk_path", str(sdk))
+    original = _set_editor_resource_value(original, "export/android/java_sdk_path", str(java_home))
+    temporary = settings.with_suffix(settings.suffix + ".tmp")
+    temporary.write_text(original, encoding="utf-8")
+    temporary.replace(settings)
+    return {"android_sdk": str(sdk), "java_home": str(java_home), "godot_settings": str(settings)}
+
+
 def _sdk_tool(name: str) -> str | None:
     sdk = _android_sdk()
     if sdk:
@@ -260,11 +368,11 @@ def _write_android_preset(project: Path, request: AndroidBuildRequest, output: P
     icon_ref = ""
     if request.icon_path:
         source = Path(request.icon_path).expanduser().resolve()
-        if not source.is_file():
-            raise HTTPException(status_code=400, detail="Launcher icon file does not exist on this desktop.")
+        if project.resolve() not in source.parents or not source.is_file():
+            raise HTTPException(status_code=400, detail="Launcher icon must be uploaded through this project's Build Console.")
         width, height = _png_dimensions(source)
-        if width < 192 or height < 192 or width != height:
-            raise HTTPException(status_code=400, detail="Launcher icon must be a square PNG at least 192×192 pixels.")
+        if width < 432 or height < 432 or width != height:
+            raise HTTPException(status_code=400, detail="Launcher icon must be a square PNG at least 432×432 pixels for Android adaptive icons.")
         assets = project / "android_assets"
         assets.mkdir(parents=True, exist_ok=True)
         destination = assets / "launcher-icon.png"
@@ -338,12 +446,9 @@ def _debug_signing_environment(env: dict[str, str]) -> None:
     env["GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD"] = "android"
 
 
-def _signing_environment(request: AndroidBuildRequest) -> dict[str, str]:
+def _signing_environment(request: AndroidBuildRequest, godot: str) -> dict[str, str]:
     env = os.environ.copy()
-    sdk = _android_sdk()
-    if sdk:
-        env["ANDROID_HOME"] = str(sdk)
-        env["ANDROID_SDK_ROOT"] = str(sdk)
+    _configure_godot_android(godot, env)
     if request.build_type == "debug":
         _debug_signing_environment(env)
         return env
@@ -419,14 +524,26 @@ def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
         godot = _godot()
         if not godot:
             raise RuntimeError("Godot 4 editor executable was not found. Set PGF_GODOT_BIN or add Godot to PATH.")
-        if not _android_sdk():
-            raise RuntimeError("Android SDK not found. Configure ANDROID_HOME or ANDROID_SDK_ROOT on this desktop.")
-        if not shutil.which("java"):
-            raise RuntimeError("Java is required for Android export. Install a supported JDK and ensure java is on PATH.")
         if request.output_format == "aab" and request.build_type != "release":
             raise RuntimeError("AAB packages must use Release signing.")
-        env = _signing_environment(request)
+        env = _signing_environment(request, godot)
+        sdk = _android_sdk()
+        assert sdk is not None
+        if not (sdk / "platforms" / f"android-{request.target_sdk}").is_dir():
+            raise RuntimeError(f"Android SDK Platform {request.target_sdk} is not installed on this desktop.")
+        if not _sdk_tool("apksigner") or not _sdk_tool("aapt"):
+            raise RuntimeError("Android SDK Build-Tools must include apksigner and aapt on this desktop.")
+        templates = _android_template_status(godot)
+        if not templates["available"]:
+            raise RuntimeError("Matching Godot Android export templates are missing: " + ", ".join(templates["missing"]))
         project = _ensure_game(manager, project_id)
+        if request.output_format == "aab":
+            gradle_project = project / "android" / "build"
+            if not (gradle_project / "build.gradle").is_file():
+                jobs.update(job_id, progress=12, message="Installing the matching Godot Android Gradle template")
+                _run([godot, "--headless", "--path", str(project), "--install-android-build-template"], timeout=1200, env=env)
+                if not (gradle_project / "build.gradle").is_file():
+                    raise RuntimeError("Godot did not install android/build/build.gradle. Install the matching Android Gradle build template in Godot and retry.")
         build_id = uuid4().hex
         extension = request.output_format
         slug = re.sub(r"[^a-z0-9]+", "-", request.app_name.casefold()).strip("-") or "game"
@@ -564,17 +681,23 @@ def register_local_build_routes(app, manager: ProjectManager, jobs: JobRegistry)
         adb = _adb()
         sdk = _android_sdk()
         java = shutil.which("java")
+        java_home = _java_home()
         apksigner = _sdk_tool("apksigner") or shutil.which("apksigner")
         aapt = _sdk_tool("aapt") or shutil.which("aapt")
+        templates = _android_template_status(godot)
+        configured_settings = bool(godot and sdk and java_home)
         return {
             "godot": {"available": bool(godot), "path": godot},
-            "java": {"available": bool(java), "path": java},
-            "android_sdk": {"available": bool(sdk), "path": str(sdk) if sdk else None},
+            "java": {"available": bool(java_home), "path": str(java_home) if java_home else java},
+            "android_sdk": {"available": bool(sdk and (sdk / "platform-tools").is_dir()), "path": str(sdk) if sdk else None},
             "adb": {"available": bool(adb), "path": adb},
             "apksigner": {"available": bool(apksigner), "path": apksigner},
             "aapt": {"available": bool(aapt), "path": aapt},
-            "android_export_templates": bool(Path.home().joinpath(".local/share/godot/export_templates").is_dir()
-                                             or Path.home().joinpath("AppData/Roaming/Godot/export_templates").is_dir()),
+            "android_export_templates": templates["available"],
+            "android_export_template_version": templates["version"],
+            "android_export_template_path": templates["path"],
+            "missing_android_templates": templates["missing"],
+            "godot_android_settings_configured": configured_settings,
             "desktop_local": True,
         }
 
@@ -653,6 +776,36 @@ def register_local_build_routes(app, manager: ProjectManager, jobs: JobRegistry)
         if not (root / "pgf.json").is_file():
             raise HTTPException(status_code=404, detail="Project not found.")
         return {"builds": _read_history(root)}
+
+
+    @app.post("/api/projects/{project_id}/android-icon", status_code=201)
+    async def upload_android_icon(project_id: str, file: UploadFile = File(...)):
+        _require_desktop()
+        try:
+            root = manager.path_for(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid project ID.") from exc
+        if not (root / "pgf.json").is_file():
+            raise HTTPException(status_code=404, detail="Project not found.")
+        if Path(file.filename or "").suffix.casefold() != ".png":
+            raise HTTPException(status_code=415, detail="Launcher icon must be a PNG file.")
+        data = await file.read(6 * 1024 * 1024 + 1)
+        if len(data) > 6 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Launcher icon files are limited to 6 MB.")
+        if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+            raise HTTPException(status_code=415, detail="The uploaded file is not a valid PNG image.")
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        if width != height or width < 432:
+            raise HTTPException(status_code=422, detail="Use a square PNG at least 432×432 pixels for Android adaptive icons.")
+        game = _ensure_game(manager, project_id)
+        assets = game / "android_assets"
+        assets.mkdir(parents=True, exist_ok=True)
+        destination = assets / "launcher-icon.png"
+        temporary = assets / "launcher-icon.png.tmp"
+        temporary.write_bytes(data)
+        temporary.replace(destination)
+        return {"icon_path": str(destination.resolve()), "width": width, "height": height, "size": len(data)}
 
     @app.post("/api/projects/{project_id}/android-build", status_code=202)
     def create_android_build(project_id: str, request: AndroidBuildRequest, background: BackgroundTasks):
