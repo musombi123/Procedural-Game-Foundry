@@ -93,9 +93,9 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       <span style={{ fontSize: 12, color: "#9fb5ca" }}>LOCAL-FIRST · NO PAID APIs</span>
     </div>
     {!pipeline ? <div style={{ marginTop: 18 }}>
-      <p style={{ color: "#c1cedc" }}>Before enabling processing, confirm all four rights and originality requirements:</p>
+      <p style={{ color: "#c1cedc" }}>Before enabling processing, confirm portrait rights, likeness consent and original-asset requirements. Movie rights are required only if you select movie-first or guided mode.</p>
       {["If I use a movie clip, I own it or have permission to use it (optional for story-first creation).", "I own or have permission to use the portrait photo.", "I have consent to use the depicted person's likeness.", "I agree the game will use original inspired assets, not copied footage, music, logos or exact character designs."].map((label, index) => <label key={index} style={{ display: "flex", gap: 10, margin: "11px 0", color: "#c8d4e1", fontSize: 14 }}><input type="checkbox" checked={rights[index]} onChange={(event) => setRights(current => current.map((value, i) => i === index ? event.target.checked : value))}/>{label}</label>)}
-      <button disabled={busy || rights.slice(1).some(value => !value)} onClick={create} style={{ marginTop: 8, border: 0, borderRadius: 8, padding: "11px 16px", background: "#2878bb", color: "white", fontWeight: 700, cursor: "pointer", opacity: busy || rights.some(value => !value) ? .5 : 1 }}>Create staged pipeline</button>
+      <button disabled={busy || rights.slice(1).some(value => !value)} onClick={create} style={{ marginTop: 8, border: 0, borderRadius: 8, padding: "11px 16px", background: "#2878bb", color: "white", fontWeight: 700, cursor: "pointer", opacity: busy || rights.slice(1).some(value => !value) ? .5 : 1 }}>Create staged pipeline</button>
     </div> : <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 6 }}>
         <label style={{ padding: 13, border: "1px dashed #49627d", borderRadius: 10, color: "#c5d4e4", fontSize: 13 }}>PLAYER PORTRAIT · FULL BODY
