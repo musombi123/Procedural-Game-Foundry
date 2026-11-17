@@ -156,9 +156,9 @@ func _create_player() -> void:
     var camera := Camera3D.new()
     camera.name = "FollowCamera"
     camera.position = Vector3(0, 2.5, 6.5)
-    camera.current = true
     player.add_child(camera)
     add_child(player)
+    camera.current = true
     camera.look_at(player.global_position + Vector3(0, 1.1, 0))
     player.set("director", director)
 
@@ -246,7 +246,7 @@ func _create_audio() -> void:
         player_node.stream = load(path)
         add_child(player_node)
         audio_players[cue_id] = player_node
-    director.audio_event.connect(_play_audio_cue)
+    director.connect("audio_event", _play_audio_cue)
     var music_value = audio_manifest.get("music")
     if typeof(music_value) == TYPE_DICTIONARY:
         var music: Dictionary = music_value
@@ -274,11 +274,11 @@ func _create_hud() -> void:
     label.text = "WASD move · SPACE jump · E interact · F attack · F5 save"
     layer.add_child(label)
     add_child(layer)
-    director.objective_updated.connect(func(_id: String, current: int, required: int):
+    director.connect("objective_updated", func(_id: String, current: int, required: int):
         label.text = "Objective progress: %d / %d   ·   WASD move · E interact · F5 save" % [current, required]
     )
-    director.game_won.connect(func(): label.text = "MISSION COMPLETE")
-    director.game_lost.connect(func(): label.text = "GAME OVER")
+    director.connect("game_won", func(): label.text = "MISSION COMPLETE")
+    director.connect("game_lost", func(): label.text = "GAME OVER")
 
 func save_game() -> void:
     director.save_progress()
