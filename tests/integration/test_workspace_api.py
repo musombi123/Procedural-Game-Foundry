@@ -9,6 +9,7 @@ import services.api.main as api
 from services.api.auth import current_principal
 from services.storage.postgres import database
 from services.api import workspace
+from services.worker.runner import claim_job
 
 
 @pytest.fixture
@@ -177,3 +178,21 @@ def test_project_delete_cleans_private_artifacts_and_rejects_active_jobs(owner_c
     assert deleted.status_code == 204
     assert removed == [object_key]
     assert client.get(f"/api/v1/workspace/projects/{project_id}").status_code == 404
+
+
+
+def test_worker_claims_persisted_production_jobs_with_postgres_locking(owner_client):
+    _, client = owner_client
+    project = create_cloud_project(client)
+    queued = client.post(f"/api/v1/workspace/projects/{project['id']}/jobs", json={
+        "kind": "scene.generate",
+        "target": "desktop",
+    })
+    assert queued.status_code == 202, queued.text
+
+    claimed = claim_job()
+    assert claimed is not None
+    assert str(claimed["id"]) == queued.json()["job_id"]
+    assert claimed["state"] == "running"
+    assert claimed["worker_id"]
+    assert claimed["lease_expires_at"] is not None
