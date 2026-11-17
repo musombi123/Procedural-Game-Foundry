@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -508,5 +509,32 @@ def register_assembly_routes(app, manager_provider):
                 "mission_count": manifest["mission_count"], "objective_count": manifest["objective_count"],
                 "actor_count": manifest["actor_count"], "prop_count": manifest["prop_count"],
                 "audio_effect_count": manifest["audio_effect_count"], "requires_creator_review": True}
+
+
+    @router.get("/api/projects/{pid}/movie-pipeline/assembly/download")
+    def download_assembly(pid: str):
+        manager = manager_provider()
+        try:
+            folder = manager.path_for(pid)
+            manager.load(pid)
+            store = PipelineStore(folder)
+            pipeline = store.load()
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Project or movie pipeline not found") from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        record = next(item for item in pipeline.stages if item.stage == StageId.ASSEMBLY)
+        if record.state not in (StageState.REVIEW, StageState.APPROVED):
+            raise HTTPException(409, "Assemble and validate the game before downloading it")
+        game = folder / "game"
+        if not (game / "project.godot").is_file():
+            raise HTTPException(404, "Assembled Godot project is missing")
+        archive = folder / "assembled-game.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            for item in game.rglob("*"):
+                if item.is_file():
+                    bundle.write(item, Path("ProceduralGameFoundry") / item.relative_to(game))
+        from fastapi.responses import FileResponse
+        return FileResponse(archive, media_type="application/zip", filename="procedural-game-foundry.zip")
 
     app.include_router(router)
