@@ -1,4 +1,5 @@
 import { useState } from "react";
+import AvatarPreview from "./AvatarPreview";
 
 type Props={projectId:string;api:string;portraitReady:boolean;playerReady:boolean;onBuilt:()=>void};
 export default function PlayerAvatarBuilder({projectId,api,portraitReady,playerReady,onBuilt}:Props){
@@ -32,6 +33,7 @@ export default function PlayerAvatarBuilder({projectId,api,portraitReady,playerR
    {range("Face crop · height",faceHeight,.08,.3,.005,setFaceHeight)}
   </div>
   <button disabled={busy||!portraitReady||!playerReady} onClick={()=>void generate()}>{busy?"Building avatar in Blender…":"Generate procedural player avatar"}</button>
+  {asset&&<AvatarPreview src={api+"/api/projects/"+projectId+"/movie-pipeline/assets/"+asset} />}
   {asset&&<p style={{margin:0,color:"#8fd1a8",fontSize:12}}>GLB scene: <a href={api+"/api/projects/"+projectId+"/movie-pipeline/assets/"+asset} target="_blank" rel="noreferrer">Download player avatar</a></p>}
   <p aria-live="polite" style={{margin:0,color:"#d5c28e",fontSize:12}}>{result}</p>
  </article>;
