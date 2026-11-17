@@ -137,7 +137,8 @@ def test_movie_pipeline_assembles_and_runs_gameplay_end_to_end(tmp_path):
     spec = {
         "player":{"move_speed":5,"jump_velocity":4.5,"gravity":9.8,"health":100,"inventory_capacity":10},
         "missions":[{"id":"mission-1","title":"Find the key","description":"Collect the key","objectives":[
-            {"id":"collect-key","title":"Collect key","description":"Pick up the key","kind":"collect","target_id":"key-1","required_count":1}]}],
+            {"id":"collect-key","title":"Collect key","description":"Pick up the key","kind":"collect","target_id":"key-1","required_count":1},
+            {"id":"defeat-guard","title":"Defeat guard","description":"Defeat the guard","kind":"defeat","target_id":"guard-1","required_count":1}]}],
         "actor_behaviours":[{"actor_id":"guard-1","behaviour":"patrol","move_speed":2.5,"detection_range":10,"attack_range":1.8,"damage":10}],
         "interactions":[{"prop_id":"key-1","action":"collect","objective_id":"collect-key","item_id":"key"}],
         "audio_bindings":[{"event":"objective_complete","cue_id":"pickup-sfx"}],
