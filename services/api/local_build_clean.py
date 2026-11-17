@@ -23,7 +23,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.game_assembler.godot import assemble_godot_project
@@ -159,8 +159,10 @@ class WirelessPairRequest(WirelessEndpoint):
 
 
 def _require_desktop() -> None:
-    if os.getenv("PGF_REQUIRE_CLOUD_DEPENDENCIES", "false").lower() == "true":
-        raise HTTPException(status_code=404, detail="Desktop build and device controls are not exposed by the hosted API.")
+    enabled = os.getenv("PGF_ENABLE_DESKTOP_BUILD_CONSOLE", "false").lower() == "true"
+    hosted = os.getenv("PGF_REQUIRE_CLOUD_DEPENDENCIES", "false").lower() == "true"
+    if not enabled or hosted:
+        raise HTTPException(status_code=404, detail="Desktop build and device controls are disabled on this API instance.")
 
 
 def _find_executable(env_names: tuple[str, ...], candidates: tuple[str, ...]) -> str | None:
@@ -446,6 +448,14 @@ def _android_export_command(godot: str, project: Path, mode: str, output: Path, 
     return command
 
 
+def _android_export_command(godot: str, project: Path, mode: str, output: Path, install_gradle_template: bool) -> list[str]:
+    command = [godot, "--headless", "--path", str(project)]
+    if install_gradle_template:
+        command.append("--install-android-build-template")
+    command.extend([mode, "Android", str(output)])
+    return command
+
+
 def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
                    manager: ProjectManager, jobs: JobRegistry) -> None:
     try:
@@ -610,6 +620,23 @@ def _ready_device(serial: str) -> tuple[str, str]:
 
 
 def register_local_build_routes(app, manager: ProjectManager, jobs: JobRegistry) -> None:
+    @app.middleware("http")
+    async def restrict_build_console_to_loopback(request, call_next):
+        path = request.url.path
+        is_local_control = (
+            path.startswith("/api/local/")
+            or re.match(r"^/api/projects/[^/]+/(runtime-test|runs|android-build|android-icon|builds)(/|$)", path) is not None
+        )
+        if is_local_control:
+            client_host = request.client.host if request.client else ""
+            try:
+                is_loopback = ipaddress.ip_address(client_host).is_loopback
+            except ValueError:
+                is_loopback = client_host == "localhost"
+            if not is_loopback:
+                return JSONResponse(status_code=403, content={"detail": "Desktop process and ADB controls accept loopback clients only."})
+        return await call_next(request)
+
     @app.get("/api/local/build-tools")
     def build_tools():
         _require_desktop()
