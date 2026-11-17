@@ -116,7 +116,7 @@ jobs:
       - name: Export Android debug APK
         run: |
           mkdir -p "${{ runner.temp }}/nexora-export-game/build/android"
-          godot --headless --path "${{ runner.temp }}/nexora-export-game" --export-debug "Android" "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
+          godot --verbose --headless --path "${{ runner.temp }}/nexora-export-game" --export-debug "Android" "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
           test -s "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
       - uses: actions/upload-artifact@v4
         with:
