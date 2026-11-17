@@ -759,6 +759,66 @@ func _run_checks() -> void:
         'config_version=5\n[application]\nconfig/name="Nexora Foundry - Assembled Game"\nrun/main_scene="res://main.tscn"\n[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n[rendering]\nrenderer/rendering_method="gl_compatibility"\nrenderer/rendering_method.mobile="gl_compatibility"\n',
         encoding="utf-8",
     )
+    (destination / "export_presets.cfg").write_text(
+        '''[preset.0]
+name="Linux/X11"
+platform="Linux/X11"
+runnable=true
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="build/linux/NexoraFoundry.x86_64"
+encryption_include_filters=""
+encryption_exclude_filters=""
+encrypt_pck=false
+encrypt_directory=false
+
+[preset.0.options]
+custom_template/debug=""
+custom_template/release=""
+debug/export_console_wrapper=false
+binary_format/64_bits=true
+binary_format/embed_pck=false
+texture_format/bptc=false
+texture_format/s3tc=true
+texture_format/etc=false
+texture_format/etc2=false
+
+[preset.1]
+name="Android"
+platform="Android"
+runnable=true
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="build/android/NexoraFoundry-debug.apk"
+encryption_include_filters=""
+encryption_exclude_filters=""
+encrypt_pck=false
+encrypt_directory=false
+
+[preset.1.options]
+custom_template/debug=""
+custom_template/release=""
+gradle_build/use_gradle_build=false
+gradle_build/export_format=0
+architectures/armeabi-v7a=false
+architectures/arm64-v8a=true
+architectures/x86=false
+architectures/x86_64=false
+version/code=1
+version/name="0.1.0"
+package/unique_name="com.nexora.foundry"
+package/name="Nexora Foundry"
+package/signed=true
+screen/immersive_mode=true
+''',
+        encoding="utf-8",
+    )
     manifest = {
         "schema_version": "1.0", "assembler": "Nexora Foundry Godot Assembler v1",
         "project": "game/project.godot", "main_scene": "game/main.tscn",
