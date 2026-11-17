@@ -19,7 +19,8 @@ def _project(tmp_path):
     upload.mkdir()
     video = upload / "source-movie.mp4"
     video.write_bytes(b"fixture")
-    doc.source_photo = {"storage_key": "movie_pipeline/uploads/player-portrait.jpg"}\n    doc.source_video = {"storage_key": "movie_pipeline/uploads/source-movie.mp4", "sha256": "abc"}
+    doc.source_photo = {"storage_key": "movie_pipeline/uploads/player-portrait.jpg"}
+    doc.source_video = {"storage_key": "movie_pipeline/uploads/source-movie.mp4", "sha256": "abc"}
     store.save(doc)
     return folder, store, video
 
