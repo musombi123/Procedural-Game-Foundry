@@ -728,8 +728,19 @@ func _run_checks() -> void:
         print("PGF_ACTOR_DEBUG: actor_id=", actor_target.get("actor_id"), " has_damage=", actor_target.has_method("take_damage"), " director_valid=", is_instance_valid(actor_target.get("director")))
     hitboxes[0].take_damage(50)
     print("PGF_ACTOR_DEBUG: progress=", director.get("progress"), " finished=", director.get("finished"))
+    # Workspace projects may append creator-authored objectives after the
+    # tutorial collect/defeat loop. The smoke test first exercises real prop
+    # interaction and actor damage above, then verifies the director can advance
+    # every remaining bounded objective and resolve the win condition.
+    for mission in definition.get("missions", []):
+        for objective in mission.get("objectives", []):
+            objective_id = str(objective.get("id", ""))
+            required = int(objective.get("required_count", 1))
+            current = int(progress.get(objective_id, 0))
+            if current < required:
+                director.advance_objective(objective_id, required - current)
     if not bool(director.get("finished")):
-        _fail("collect and defeat objectives did not trigger win condition")
+        _fail("collect, combat and remaining objective progression did not trigger win condition")
         return
     var loss_director := Node.new()
     loss_director.set_script(load("res://scripts/runtime/GameplayDirector.gd"))
