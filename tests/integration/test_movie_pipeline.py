@@ -47,6 +47,22 @@ def test_movie_pipeline_requires_all_rights_and_persists_stages(tmp_path, monkey
     assert data["stages"][1]["revision"] == 1
 
 
+def test_video_upload_requires_explicit_video_rights(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "manager", api.ProjectManager(tmp_path))
+    client = TestClient(api.app)
+    project = client.post("/api/projects", json={"name": "Rights Gate"}).json()
+    pid = project["id"]
+    rights = {**RIGHTS, "has_video_rights": False}
+    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": rights})
+    assert created.status_code == 201
+
+    denied = client.post(
+        f"/api/projects/{pid}/movie-pipeline/source/video",
+        files={"file": ("movie.mp4", bytes.fromhex("00000018667479706d703432") + b"payload", "video/mp4")},
+    )
+    assert denied.status_code == 403
+
+
 def test_cannot_approve_stage_without_review_output(tmp_path):
     store = PipelineStore(tmp_path)
     from core.movie_pipeline.models import RightsDeclaration, new_pipeline
@@ -79,9 +95,16 @@ def test_media_uploads_are_signature_checked_and_project_scoped(tmp_path, monkey
     video = client.post(f"/api/projects/{pid}/movie-pipeline/source/video", files={"file": ("movie.mp4", video_bytes, "video/mp4")})
     assert video.status_code == 201
     assert video.json()["metadata"]["sha256"]
+    assert video.json()["metadata"]["storage_key"] == f"movie_pipeline/uploads/source-movie.mp4"
     restored = client.get(f"/api/projects/{pid}/movie-pipeline").json()
     assert restored["source_photo"]["filename"] == "player-portrait.jpg"
     assert restored["source_video"]["filename"] == "source-movie.mp4"
+
+    unsupported = client.post(
+        f"/api/projects/{pid}/movie-pipeline/source/video",
+        files={"file": ("movie.webm", bytes.fromhex("1a45dfa3") + b"payload", "video/webm")},
+    )
+    assert unsupported.status_code == 400
 
     duplicate = client.post(f"/api/projects/{pid}/movie-pipeline/source/photo", files={"file": ("another.jpg", photo_bytes, "image/jpeg")})
     assert duplicate.status_code == 409
