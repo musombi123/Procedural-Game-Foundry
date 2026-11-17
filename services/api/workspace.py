@@ -410,6 +410,12 @@ def create_production_job(project_id: str, request: JobCreateRequest, principal:
     try:
         project = _owned_project(connection, project_id, principal["id"])
         job_id = uuid4()
+        asset_rows = connection.execute(
+            "SELECT id, filename, object_key, processed_object_key, status "
+            "FROM nexora_assets WHERE project_id=%s AND owner_id=%s "
+            "AND status IN ('ready','processed') AND lower(filename) LIKE '%.glb'",
+            (project["id"], principal["id"]),
+        ).fetchall()
         payload = {
             "target": request.target,
             "project": {
@@ -418,6 +424,15 @@ def create_production_job(project_id: str, request: JobCreateRequest, principal:
                 "document": project["document"],
                 "version": project["version"],
             },
+            "assets": [
+                {
+                    "id": str(asset["id"]),
+                    "filename": asset["filename"],
+                    "object_key": asset["processed_object_key"] or asset["object_key"],
+                    "status": asset["status"],
+                }
+                for asset in asset_rows
+            ],
         }
         connection.execute(
             "INSERT INTO nexora_jobs (id, project_id, owner_id, kind, payload) VALUES (%s,%s,%s,%s,%s)",
