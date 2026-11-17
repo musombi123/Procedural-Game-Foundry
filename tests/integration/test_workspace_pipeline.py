@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -92,3 +93,14 @@ def test_workspace_build_runs_real_blender_godot_and_gameplay_checks(tmp_path: P
     assert (game / "gameplay" / "gameplay.json").is_file()
     assert (game / "scripts" / "assembly_smoke.gd").is_file()
     assert 'package/unique_name="com.nexora.foundry"' in (game / "export_presets.cfg").read_text(encoding="utf-8")
+
+    # Native export and Android emulator jobs consume this exact workspace game,
+    # not a separate fixture build.
+    export_project = os.environ.get("NEXORA_EXPORT_PROJECT_DIR")
+    if export_project:
+        destination = Path(export_project)
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(game, destination)
+        assert (destination / "project.godot").is_file()
+        assert (destination / "nexora-workspace-manifest.json").is_file()
