@@ -31,6 +31,7 @@ def _canonical_profile(payload: Any) -> dict[str, Any] | None:
         payload.get("data", {}).get("user") if isinstance(payload.get("data"), dict) else None,
         payload.get("account"),
         payload.get("data") if isinstance(payload.get("data"), dict) else None,
+        payload,
     ]
     for profile in candidates:
         if isinstance(profile, dict):
@@ -59,7 +60,7 @@ def verify_identity_token(authorization: str | None) -> dict[str, str]:
         response = httpx.get(
             _identity_url(),
             headers={"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"},
-            timeout=httpx.Timeout(6.0, connect=3.0),
+            timeout=httpx.Timeout(60.0, connect=5.0),
             follow_redirects=False,
         )
     except httpx.HTTPError as exc:
