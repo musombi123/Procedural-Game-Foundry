@@ -7,12 +7,28 @@ on:
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nexora
+          POSTGRES_PASSWORD: nexora_test
+          POSTGRES_DB: nexora_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexora -d nexora_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://nexora:nexora_test@localhost:5432/nexora_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install -e ".[dev,cloud]"
       - run: pytest -q
   web:
     runs-on: ubuntu-latest
@@ -60,10 +76,13 @@ jobs:
           use-dotnet: false
           include-templates: false
       - run: python -m pip install -e ".[dev]"
-      - name: Generate real Blender assets and run the Godot game
+      - name: Generate and normalize creator assets, then run the Godot game
         env:
           NEXORA_EXPORT_PROJECT_DIR: ${{ runner.temp }}/nexora-export-game
-        run: pytest -q tests/integration/test_blender_to_godot.py
+        run: >-
+          pytest -q
+          tests/integration/test_blender_asset_normalization.py
+          tests/integration/test_blender_to_godot.py
       - uses: actions/upload-artifact@v4
         with:
           name: nexora-export-project
@@ -118,11 +137,44 @@ jobs:
           mkdir -p "${{ runner.temp }}/nexora-export-game/build/android"
           godot --verbose --headless --path "${{ runner.temp }}/nexora-export-game" --export-debug "Android" "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
           test -s "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
+      - name: Stage emulator smoke-test package
+        run: |
+          mkdir -p "${{ runner.temp }}/nexora-emulator-package"
+          cp "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk" "${{ runner.temp }}/nexora-emulator-package/"
+          cp "${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64" "${{ runner.temp }}/nexora-emulator-package/"
       - uses: actions/upload-artifact@v4
         with:
           name: nexora-foundry-native-builds
-          path: |
-            ${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64
-            ${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk
+          path: ${{ runner.temp }}/nexora-emulator-package/*
           if-no-files-found: error
           retention-days: 14
+
+  android-emulator-smoke:
+    runs-on: ubuntu-latest
+    needs: [native-exports]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: nexora-foundry-native-builds
+          path: artifacts
+      - name: Install APK on Android emulator and verify launch
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          disable-animations: true
+          script: |
+            APK="$(find artifacts -type f -name 'NexoraFoundry-debug.apk' -print -quit)"
+            test -n "$APK"
+            adb install "$APK"
+            adb shell monkey -p org.nexora.foundry 1
+            sleep 25
+            adb shell pidof org.nexora.foundry
+            if adb logcat -d -t 2000 | grep -E "FATAL EXCEPTION|Process: org.nexora.foundry.*has died"; then
+              echo "NEXORA Android process crashed during launch smoke test."
+              exit 1
+            fi
+            adb shell dumpsys activity activities | grep -F 'org.nexora.foundry'
