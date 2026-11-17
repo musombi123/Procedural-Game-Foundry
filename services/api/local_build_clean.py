@@ -374,27 +374,46 @@ def _validate_export(project: Path, output: Path, request: AndroidBuildRequest, 
         with zipfile.ZipFile(output) as archive:
             if "AndroidManifest.xml" not in archive.namelist():
                 raise RuntimeError("APK validation failed: AndroidManifest.xml is missing.")
-        apksigner = _sdk_tool("apksigner") or shutil.which("apksigner")
+        apksigner = _sdk_tool("apksigner")
         if not apksigner:
-            raise RuntimeError("Android build-tools apksigner is required to verify the APK signature.")
+            raise RuntimeError("Android SDK Build-Tools apksigner is required to verify the APK signature.")
         verification = _run(_command(apksigner, "verify", "--verbose", str(output)), timeout=180, env=env)
-        aapt = _sdk_tool("aapt") or shutil.which("aapt")
-        package_validation = None
-        if aapt:
-            badging = _run(_command(aapt, "dump", "badging", str(output)), timeout=120, env=env)
-            package_validation = next((line.strip() for line in badging["stdout"].splitlines() if line.startswith("package:")), None)
-            if package_validation and f"name='{request.package_id}'" not in package_validation:
-                raise RuntimeError("APK manifest package ID does not match the Build Console configuration.")
-        return {"signature_verified": True, "signature_output": verification["stdout"][-3000:], "package_manifest": package_validation}
+        aapt = _sdk_tool("aapt")
+        if not aapt:
+            raise RuntimeError("Android SDK Build-Tools aapt is required to verify the APK package ID.")
+        badging = _run(_command(aapt, "dump", "badging", str(output)), timeout=120, env=env)
+        package_validation = next((line.strip() for line in badging["stdout"].splitlines() if line.startswith("package:")), None)
+        if not package_validation or f"name='{request.package_id}'" not in package_validation:
+            raise RuntimeError("APK manifest package ID does not match the Build Console configuration.")
+        return {
+            "signature_verified": True,
+            "signature_output": verification["stdout"][-3000:],
+            "package_manifest": package_validation,
+        }
+
     with zipfile.ZipFile(output) as archive:
         names = set(archive.namelist())
         if "base/manifest/AndroidManifest.xml" not in names or "BundleConfig.pb" not in names:
             raise RuntimeError("AAB validation failed: bundle manifest or BundleConfig.pb is missing.")
-    jarsigner = shutil.which("jarsigner")
+        signature_files = [
+            name for name in names
+            if name.upper().startswith("META-INF/") and name.upper().endswith((".RSA", ".DSA", ".EC"))
+        ]
+        signature_metadata = [
+            name for name in names
+            if name.upper().startswith("META-INF/") and name.upper().endswith(".SF")
+        ]
+        if not signature_files or not signature_metadata:
+            raise RuntimeError("AAB validation failed: release signature files are missing.")
+    jarsigner = java_tool("jarsigner", env)
     if not jarsigner:
         raise RuntimeError("Java jarsigner is required to verify the Android App Bundle signature.")
     verification = _run(_command(jarsigner, "-verify", "-verbose", str(output)), timeout=180, env=env)
-    return {"signature_verified": True, "signature_output": verification["stdout"][-3000:], "bundle_structure_verified": True}
+    return {
+        "signature_verified": True,
+        "signature_output": verification["stdout"][-3000:],
+        "bundle_structure_verified": True,
+    }
 
 
 def _history_file(project_root: Path) -> Path:
@@ -419,6 +438,14 @@ def _write_history(project_root: Path, history: list[dict[str, Any]]) -> None:
     temporary.replace(target)
 
 
+def _android_export_command(godot: str, project: Path, mode: str, output: Path, install_gradle_template: bool) -> list[str]:
+    command = [godot, "--headless", "--path", str(project)]
+    if install_gradle_template:
+        command.append("--install-android-build-template")
+    command.extend([mode, "Android", str(output)])
+    return command
+
+
 def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
                    manager: ProjectManager, jobs: JobRegistry) -> None:
     try:
@@ -426,14 +453,23 @@ def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
         godot = _godot()
         if not godot:
             raise RuntimeError("Godot 4 editor executable was not found. Set PGF_GODOT_BIN or add Godot to PATH.")
-        if not _android_sdk():
-            raise RuntimeError("Android SDK not found. Configure ANDROID_HOME or ANDROID_SDK_ROOT on this desktop.")
-        if not shutil.which("java"):
-            raise RuntimeError("Java is required for Android export. Install a supported JDK and ensure java is on PATH.")
         if request.output_format == "aab" and request.build_type != "release":
             raise RuntimeError("AAB packages must use Release signing.")
-        env = _signing_environment(request)
+        env = _signing_environment(request, godot)
+        sdk = _android_sdk()
+        if not sdk:
+            raise RuntimeError("Android SDK not found on this desktop.")
+        component_report = sdk_components(sdk)
+        if not component_report["available"]:
+            raise RuntimeError("Android SDK components are missing: " + ", ".join(component_report["missing"]))
+        if not (sdk / "platforms" / f"android-{request.target_sdk}").is_dir():
+            raise RuntimeError(f"Android SDK Platform {request.target_sdk} is not installed on this desktop.")
+        templates = template_status(godot)
+        if not templates["available"]:
+            raise RuntimeError("Matching Godot Android export templates are missing: " + ", ".join(templates["missing"]))
         project = _ensure_game(manager, project_id)
+        gradle_project = project / "android" / "build"
+        install_gradle_template = request.output_format == "aab" and not (gradle_project / "build.gradle").is_file()
         build_id = uuid4().hex
         extension = request.output_format
         slug = re.sub(r"[^a-z0-9]+", "-", request.app_name.casefold()).strip("-") or "game"
@@ -442,9 +478,15 @@ def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
         _write_android_preset(project, request, output)
         jobs.update(job_id, progress=20, message="Importing and validating the Godot project")
         _run([godot, "--headless", "--path", str(project), "--editor", "--quit"], timeout=900, env=env)
-        jobs.update(job_id, progress=45, message=f"Exporting signed Android {extension.upper()} package")
+        if install_gradle_template:
+            jobs.update(job_id, progress=40, message="Installing the matching Android Gradle template and exporting the AAB")
+        else:
+            jobs.update(job_id, progress=45, message=f"Exporting signed Android {extension.upper()} package")
         export_mode = "--export-debug" if request.build_type == "debug" else "--export-release"
-        export = _run([godot, "--headless", "--path", str(project), export_mode, "Android", str(output)], timeout=3600, env=env)
+        export_command = _android_export_command(godot, project, export_mode, output, install_gradle_template)
+        export = _run(export_command, timeout=3600, env=env)
+        if request.output_format == "aab" and not (gradle_project / "build.gradle").is_file():
+            raise RuntimeError("Godot exported an AAB without leaving android/build/build.gradle. Check the installed Android Gradle template.")
         jobs.update(job_id, progress=82, message="Verifying package structure, application ID and signature")
         validation = _validate_export(project, output, request, env)
         digest = hashlib.sha256(output.read_bytes()).hexdigest()
@@ -465,16 +507,20 @@ def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
             "package_validation": validation.get("package_manifest"),
         }
         root = manager.path_for(project_id)
-        history = _read_history(root)
-        history.insert(0, record)
-        _write_history(root, history)
+        with _HISTORY_LOCK:
+            history = _read_history(root)
+            history.insert(0, record)
+            _write_history(root, history)
         (output.parent / f"{output.stem}.manifest.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
         jobs.update(job_id, state=JobState.COMPLETED, progress=100,
                     message=f"{request.output_format.upper()} exported and signature-verified",
                     result={"build": record, "validation": validation,
                             "godot_export": {"stdout": export["stdout"][-6000:], "stderr": export["stderr"][-6000:]}})
     except Exception as exc:
-        jobs.update(job_id, state=JobState.FAILED, progress=100, message="Android build failed", error=str(exc)[-12000:])
+        message = str(exc)
+        if request.signing and request.signing.key_password:
+            message = message.replace(request.signing.key_password, "[REDACTED]")
+        jobs.update(job_id, state=JobState.FAILED, progress=100, message="Android build failed", error=message[-12000:])
 
 
 def _runtime_test(job_id: str, project_id: str, manager: ProjectManager, jobs: JobRegistry) -> None:
