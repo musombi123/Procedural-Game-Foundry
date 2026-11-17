@@ -94,6 +94,20 @@ jobs:
         with:
           name: nexora-export-project
           path: ${{ runner.temp }}/nexora-export-game
+      - name: Configure Godot Android export environment
+        run: |
+          mkdir -p "$HOME/.config/godot" "$HOME/.android"
+          keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000 -noprompt
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+          [resource]
+          export/android/android_sdk_path = "/usr/local/lib/android/sdk"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+          godot --headless --path "${{ runner.temp }}/nexora-export-game" --editor --quit
       - name: Export Linux desktop build
         run: |
           mkdir -p "${{ runner.temp }}/nexora-export-game/build/linux"
