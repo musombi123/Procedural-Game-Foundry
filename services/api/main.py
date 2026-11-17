@@ -15,6 +15,7 @@ from core.validation.validator import validate_project
 from core.build_engine.godot_cli import headless_check
 from services.api.platform import router as platform_router
 from services.api.workspace import router as workspace_router
+from services.api.local_build import register_local_build_routes
 
 HOSTED_MODE = os.getenv("PGF_REQUIRE_CLOUD_DEPENDENCIES", "false").lower() == "true"
 DATA = Path(os.environ.get("PGF_DATA_DIR", ".pgf-data")).resolve()
@@ -68,6 +69,7 @@ async def hosted_api_safety_gate(request: Request, call_next):
 
 app.include_router(platform_router)
 app.include_router(workspace_router)
+register_local_build_routes(app, manager, jobs)
 
 
 @app.get("/health")
