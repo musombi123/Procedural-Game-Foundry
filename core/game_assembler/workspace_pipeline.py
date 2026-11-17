@@ -166,7 +166,7 @@ def build_workspace_specs(
             continue
         label = str(raw.get("name") or f"Scene prop {index + 1}")
         lowered = f"{label} {raw.get('type', '')}".casefold()
-        if any(word in lowered for word in ("world root", "player start", "directional light", "camera")):
+        if lowered.strip() in {"world", "world root"} or any(word in lowered for word in ("player start", "directional light", "camera")):
             continue
         object_id = _safe_id(raw.get("id"), f"scene_prop_{index + 1}")
         if object_id in prop_ids:
