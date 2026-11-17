@@ -194,6 +194,22 @@ def _configure_android_editor_settings(env: dict[str, str]) -> None:
     )
 
 
+def _verify_android_signature(artifact: Path, env: dict[str, str]) -> dict[str, Any]:
+    sdk = env.get("ANDROID_SDK_ROOT") or env.get("ANDROID_HOME")
+    candidates = []
+    if sdk:
+        candidates.extend(sorted((Path(sdk) / "build-tools").glob("*/apksigner"), reverse=True))
+        candidates.extend(sorted((Path(sdk) / "build-tools").glob("*/apksigner.bat"), reverse=True))
+    executable = shutil.which("apksigner") or next((str(path) for path in candidates if path.is_file()), None)
+    if not executable:
+        raise RuntimeError("Android package signing verification unavailable: apksigner was not found in the Android SDK")
+    result = subprocess.run([executable, "verify", "--verbose", str(artifact)], capture_output=True, text=True, timeout=60, env=env)
+    output = (result.stdout or "") + "\n" + (result.stderr or "")
+    if result.returncode != 0:
+        raise RuntimeError("APK signature verification failed:\n" + output[-5000:])
+    return {"signature": "verified", "verifier": Path(executable).name}
+
+
 def _require_release_signing(target: ExportTarget, env: dict[str, str]) -> None:
     if target.key == "android":
         required = (
@@ -263,6 +279,17 @@ def export_game(
             + export_output[-12000:]
         )
     artifact_info = verify_export(target, artifact)
+    if target.key == "android":
+        artifact_info.update(_verify_android_signature(artifact, environment))
+    if target.key == "linux":
+        runtime = subprocess.run(
+            [str(artifact), "--headless", "--quit-after", "6"],
+            capture_output=True, text=True, timeout=60, env=environment,
+        )
+        runtime_output = (runtime.stdout or "") + "\\n" + (runtime.stderr or "")
+        if runtime.returncode != 0 or "SCRIPT ERROR:" in runtime_output or "Parse Error" in runtime_output:
+            raise RuntimeError("Exported Linux game failed its headless launch test:\\n" + runtime_output[-8000:])
+        artifact_info["headless_launch"] = "passed"
     project_manifest = project_dir / "assembly-manifest.json"
     manifest = {
         "schema_version": "1.0",
