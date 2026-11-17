@@ -107,6 +107,13 @@ class AndroidBuildRequest(BaseModel):
             raise ValueError("Version name must be a dotted version such as 1.0.0.")
         return value
 
+    @field_validator("permissions")
+    @classmethod
+    def require_godot_internet_permission(cls, value: AndroidPermissions) -> AndroidPermissions:
+        if not value.internet:
+            raise ValueError("Godot Android exports always include INTERNET; this permission cannot be disabled.")
+        return value
+
     @field_validator("target_sdk")
     @classmethod
     def target_not_below_minimum(cls, value: int, info):
