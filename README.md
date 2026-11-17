@@ -1,8 +1,16 @@
-# Procedural Game Foundry
+# Nexora Foundry
 
-**Model-free. Procedural. Library-driven. Built to produce playable games.**
+**The flagship game-creation platform from NEXORA Interactive Studios.**
 
-PGF is a local-first game creation studio. It converts a versioned Foundry Project Definition (FPD) into a native Godot project using deterministic procedural generators, reusable gameplay components, validation and build tooling. Core generation does not require a neural model or paid AI API.
+> Imagine beyond limits. Build worlds without boundaries.
+
+Nexora Foundry is a local-first, creator-led game production platform. It converts a versioned Foundry Project Definition (FPD) into a native Godot project using deterministic procedural generators, reusable gameplay components, validation and build tooling. Core generation does not require a neural model or paid AI API.
+
+**Studio:** NEXORA Interactive Studios  
+**Product:** Nexora Foundry  
+**Engineering principle:** model-free, procedural, library-driven, creator-approved production.
+
+NEXORA is the independent studio identity. Nexora Foundry is its flagship product—not the studio itself. This repository contains the Foundry product implementation.
 
 ## Implemented vertical slice
 - FastAPI Foundry Core with project, generation-job, validation and Godot-check endpoints.
