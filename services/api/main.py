@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.project_engine.models import ProjectCreate, WorldDocument
@@ -429,3 +430,25 @@ def build_procedural_player(pid: str, request: dict):
     return {"generated":True,"stage":next(item.model_dump(mode="json") for item in updated.stages if item.stage==StageId.PLAYER),
             "glb_scene":str(glb.relative_to(folder)),"glb_bytes":glb.stat().st_size,
             "proportions":values,"requires_creator_review":True}
+
+
+@app.get("/api/projects/{pid}/movie-pipeline/assets/{asset_path:path}")
+def get_movie_pipeline_asset(pid: str, asset_path: str):
+    """Serve only generated, project-scoped GLB artifacts for creator preview/download."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    relative = Path(asset_path)
+    if relative.is_absolute() or ".." in relative.parts or relative.suffix.lower() != ".glb":
+        raise HTTPException(400, "Only project-scoped GLB assets can be retrieved")
+    if not relative.parts or relative.parts[0] != "movie_pipeline" or len(relative.parts) < 3:
+        raise HTTPException(400, "Asset path is outside generated movie-pipeline artifacts")
+    target = (folder / relative).resolve()
+    root = (folder / "movie_pipeline").resolve()
+    if root not in target.parents or not target.is_file():
+        raise HTTPException(404, "Generated asset not found")
+    return FileResponse(target, media_type="model/gltf-binary", filename=target.name)
