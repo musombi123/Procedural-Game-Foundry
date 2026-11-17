@@ -117,7 +117,7 @@ def _project_from_job(job: dict[str, Any], workdir: Path):
     payload = job.get("payload") or {}
     source = payload.get("project") or {}
     blender = _executable("BLENDER_BIN", "blender")
-    godot = _executable("GODOT_BIN", "godot") or shutil.which("godot4") or shutil.which("godot4")
+    godot = _executable("GODOT_BIN", "godot") or shutil.which("godot4")
     if not blender:
         raise RuntimeError("Blender is not installed on this worker (set BLENDER_BIN or add blender to PATH).")
     if not godot:
