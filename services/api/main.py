@@ -14,6 +14,7 @@ from core.game_assembler.godot import assemble_godot_project
 from core.validation.validator import validate_project
 from core.build_engine.godot_cli import headless_check
 from services.api.platform import router as platform_router
+from services.api.workspace import router as workspace_router
 
 HOSTED_MODE = os.getenv("PGF_REQUIRE_CLOUD_DEPENDENCIES", "false").lower() == "true"
 DATA = Path(os.environ.get("PGF_DATA_DIR", ".pgf-data")).resolve()
@@ -46,24 +47,27 @@ app.add_middleware(
 
 @app.middleware("http")
 async def hosted_api_safety_gate(request: Request, call_next):
-    """Do not expose local-filesystem project routes before Stage 2 auth exists."""
-    if (
-        HOSTED_MODE
-        and request.url.path.startswith("/api/")
-        and os.getenv("PGF_AUTH_ENFORCEMENT_ENABLED", "false").lower() != "true"
-    ):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": "workspace_api_not_open",
-                "message": "Hosted project operations are locked until identity and ownership enforcement is deployed.",
-                "stage": "identity-and-projects",
-            },
-        )
+    """Only expose the owner-scoped cloud API on the hosted service.
+
+    Legacy /api routes are deliberately kept local-only: they read and write
+    process-local files and do not enforce per-user project ownership.
+    """
+    if HOSTED_MODE and request.url.path.startswith("/api/"):
+        if not request.url.path.startswith("/api/v1/workspace/"):
+            return JSONResponse(
+                status_code=404,
+                content={"error": "route_not_available", "message": "This legacy local API route is not exposed by the hosted NEXORA service."},
+            )
+        if os.getenv("PGF_AUTH_ENFORCEMENT_ENABLED", "false").lower() != "true":
+            return JSONResponse(
+                status_code=503,
+                content={"error": "workspace_auth_not_enabled", "message": "Hosted project operations remain locked until identity verification is configured."},
+            )
     return await call_next(request)
 
 
 app.include_router(platform_router)
+app.include_router(workspace_router)
 
 
 @app.get("/health")
