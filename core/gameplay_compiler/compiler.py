@@ -116,7 +116,9 @@ func load_progress(path: String = "user://savegame.json") -> bool:
     health = int(parsed.get("health", health))
     inventory = parsed.get("inventory", {})
     progress = parsed.get("progress", progress)
-    checkpoints = parsed.get("checkpoints", [])
+    checkpoints.clear()
+    for checkpoint in parsed.get("checkpoints", []):
+        checkpoints.append(str(checkpoint))
     finished = bool(parsed.get("finished", false))
     return true
 ''',

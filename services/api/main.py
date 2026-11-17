@@ -70,11 +70,28 @@ def save_world(pid: str, document: WorldDocument):
         folder = manager.path_for(pid)
     except FileNotFoundError:
         raise HTTPException(404, "Project not found")
-    path = folder / "world.json"
-    temporary = folder / "world.json.tmp"
-    temporary.write_text(document.model_dump_json(indent=2), encoding="utf-8")
-    temporary.replace(path)
-    return {"saved": True, "objects": len(document.objects), "seed": document.seed}
+    result = manager.save_world(pid, document, reason="autosave")
+    return {**result, "objects": len(document.objects), "seed": document.seed}
+
+
+@app.get("/api/projects/{pid}/versions")
+def list_project_versions(pid: str):
+    try:
+        return {"versions": manager.list_versions(pid)}
+    except FileNotFoundError:
+        raise HTTPException(404, "Project not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/projects/{pid}/versions/{revision}/restore")
+def restore_project_version(pid: str, revision: int):
+    try:
+        return manager.restore_version(pid, revision)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 @app.post("/api/projects/{pid}/generate", status_code=202)
 def generate(pid: str, background: BackgroundTasks):
@@ -488,3 +505,12 @@ register_audio_routes(app, lambda: manager)
 # Deterministic, creator-authored Gameplay Compiler routes.
 from core.movie_pipeline.gameplay_api import register_gameplay_routes
 register_gameplay_routes(app, lambda: manager)
+
+
+# Approval-gated Godot assembly for the movie-to-game pipeline.
+from core.movie_pipeline.assembly import register_assembly_routes
+register_assembly_routes(app, lambda: manager)
+
+# Project-scoped Blender/creator asset ingestion with structural glTF validation.
+from core.asset_registry.api import register_asset_routes
+register_asset_routes(app, lambda: manager)
