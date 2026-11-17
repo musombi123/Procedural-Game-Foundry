@@ -462,17 +462,24 @@ def get_movie_pipeline_asset(pid: str, asset_path: str):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     relative = Path(asset_path)
-    if relative.is_absolute() or ".." in relative.parts or relative.suffix.lower() != ".glb":
-        raise HTTPException(400, "Only project-scoped GLB assets can be retrieved")
+    allowed_media={".glb":("model/gltf-binary","model"),".wav":("audio/wav","audio")}
+    suffix=relative.suffix.lower()
+    if relative.is_absolute() or ".." in relative.parts or suffix not in allowed_media:
+        raise HTTPException(400, "Only project-scoped GLB and WAV assets can be retrieved")
     if not relative.parts or relative.parts[0] != "movie_pipeline" or len(relative.parts) < 3:
         raise HTTPException(400, "Asset path is outside generated movie-pipeline artifacts")
     target = (folder / relative).resolve()
     root = (folder / "movie_pipeline").resolve()
     if root not in target.parents or not target.is_file():
         raise HTTPException(404, "Generated asset not found")
-    return FileResponse(target, media_type="model/gltf-binary", filename=target.name)
+    return FileResponse(target, media_type=allowed_media[suffix][0], filename=target.name)
 
 
 # Creator-authored deterministic actor and prop generation routes.
 from core.movie_pipeline.actors_api import register_actor_props_routes
 register_actor_props_routes(app, lambda: manager)
+
+
+# Deterministic, creator-authored procedural audio generation routes.
+from core.movie_pipeline.audio_api import register_audio_routes
+register_audio_routes(app, lambda: manager)
