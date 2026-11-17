@@ -118,6 +118,7 @@ def test_movie_pipeline_assembles_and_runs_gameplay_end_to_end(tmp_path):
     root = project / "movie_pipeline"
     _write_minimal_glb(root / "player/revision-0/player-avatar.glb", ["AvatarRig"])
     _write_minimal_glb(root / "environment/environment.glb", ["Terrain"])
+    (root / "environment/world-spec.json").write_text(json.dumps({"dimensions":[48,48,48],"terrain":{"segments":8,"amplitude":1,"frequency":0.03},"landmarks":[],"props":[]}))
     _write_minimal_glb(root / "actors-props/revision-0/actors-props.glb", ["guard-1_rig", "key-1"])
     actors_manifest = {"actors":[{"id":"guard-1","rig":"guard-1_rig"}],"props":[{"id":"key-1"}]}
     actors_spec = {"actors":[{"id":"guard-1","position":[2,0,0],"scale":1}],
