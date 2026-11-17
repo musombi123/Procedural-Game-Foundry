@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from services.api.local_build import (
     AndroidBuildRequest,
+    _android_export_command,
     _android_sdk_components,
     _set_editor_resource_value,
     _write_android_preset,
@@ -133,3 +134,25 @@ def test_android_sdk_component_check_fails_closed_for_missing_components(tmp_pat
     assert result["available"] is False
     assert "platform-tools / adb" in result["missing"]
     assert "ndk;28.1.13356709" in result["missing"]
+
+
+
+def test_aab_gradle_template_flag_is_combined_with_release_export(tmp_path: Path):
+    project = tmp_path / "game"
+    output = project / "builds" / "android" / "game.aab"
+
+    command = _android_export_command("godot", project, "--export-release", output, True)
+
+    assert "--install-android-build-template" in command
+    assert command.index("--install-android-build-template") < command.index("--export-release")
+    assert command[-3:] == ["--export-release", "Android", str(output)]
+
+
+def test_debug_apk_export_does_not_install_gradle_template(tmp_path: Path):
+    project = tmp_path / "game"
+    output = project / "builds" / "android" / "game.apk"
+
+    command = _android_export_command("godot", project, "--export-debug", output, False)
+
+    assert "--install-android-build-template" not in command
+    assert command[-3:] == ["--export-debug", "Android", str(output)]
