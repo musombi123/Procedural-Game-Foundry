@@ -173,7 +173,19 @@ func _spawn_prop(item: Dictionary) -> void:
     var visual = Node3D.new()
     visual.name = "Visual"
     root.add_child(visual)
-    if kind == "outpost":
+    var imported_asset_path = str(item.get("asset_path", ""))
+    var imported_asset_loaded = false
+    if imported_asset_path.begins_with("res://assets/") and imported_asset_path.ends_with(".glb"):
+        var imported_scene = load(imported_asset_path)
+        if imported_scene is PackedScene:
+            visual.add_child(imported_scene.instantiate())
+            imported_asset_loaded = true
+        else:
+            push_warning("NEXORA could not load creator GLB: " + imported_asset_path)
+
+    if imported_asset_loaded:
+        pass
+    elif kind == "outpost":
         _add_part(visual, BoxMesh.new(), Vector3(0, 2.0, 0), material, Vector3(8, 4, 8))
         _add_part(visual, BoxMesh.new(), Vector3(0, 4.25, 0), material, Vector3(8.6, 0.5, 8.6))
     elif kind == "beacon":
