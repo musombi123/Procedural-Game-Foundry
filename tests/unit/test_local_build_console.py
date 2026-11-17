@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from services.api.local_build_clean import (
+from services.api.local_build import (
     AndroidBuildRequest,
     _android_export_command,
     _require_desktop,
