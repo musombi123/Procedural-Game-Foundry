@@ -414,10 +414,17 @@ def build_procedural_player(pid: str, request: dict):
         stage.error = "Blender did not produce a valid GLB avatar"
         store.save(pipeline)
         raise HTTPException(500,stage.error)
+    rig_summary = {}
+    for line in reversed((result.stdout or "").splitlines()):
+        try:
+            rig_summary = json.loads(line)
+            break
+        except json.JSONDecodeError:
+            continue
     updated = store.mark_review(StageId.PLAYER,{"glb_scene":str(glb.relative_to(folder)),
         "spec":str(spec_path.relative_to(folder)),"glb_bytes":glb.stat().st_size,
         "portrait_sha256":pipeline.source_photo.get("sha256"),"generator":"PGF procedural humanoid v1",
-        "proportions":values,"requires_creator_review":True},
+        "proportions":values,"bone_count":rig_summary.get("bone_count"),"requires_creator_review":True},
         "Procedural player avatar generated; inspect proportions, face and rig before approval")
     return {"generated":True,"stage":next(item.model_dump(mode="json") for item in updated.stages if item.stage==StageId.PLAYER),
             "glb_scene":str(glb.relative_to(folder)),"glb_bytes":glb.stat().st_size,
