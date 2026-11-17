@@ -8,7 +8,7 @@ description = "Model-free procedural game creation studio"
 requires-python = ">=3.11"
 dependencies = ["fastapi>=0.110,<1","uvicorn[standard]>=0.27,<1","pydantic>=2.6,<3","python-multipart>=0.0.9,<1"]
 [project.optional-dependencies]
-cloud = ["psycopg[binary]>=3.2,<4", "boto3>=1.35,<2"]
+cloud = ["psycopg[binary]>=3.2,<4", "boto3>=1.35,<2", "httpx>=0.27,<1"]
 dev = ["pytest>=8,<9","httpx>=0.27,<1"]
 [tool.setuptools.packages.find]
 where = ["."]
