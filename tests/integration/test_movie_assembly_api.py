@@ -42,6 +42,7 @@ def _fixture(tmp_path, monkeypatch, *, gameplay_approved=True):
         return path
     write("player/revision-0/player-avatar.glb")
     write("environment/environment.glb")
+    write("environment/world-spec.json", json.dumps({"dimensions":[48,48,48],"terrain":{"segments":8,"amplitude":1,"frequency":0.03},"landmarks":[],"props":[]}).encode())
     write("actors-props/revision-0/actors-props.glb")
     actors_manifest = {"actors":[{"id":"guard-1","rig":"guard-1_rig"}],"props":[{"id":"key-1"}]}
     write("actors-props/revision-0/actors-props.manifest.json", json.dumps(actors_manifest).encode())
