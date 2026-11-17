@@ -26,6 +26,16 @@ def _identity_url() -> str:
 def _canonical_profile(payload: Any) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
+    # A profile-shaped error response is not an authenticated identity. Keep
+    # the NEXORA trust boundary fail-closed even if an upstream error payload
+    # accidentally includes cached user fields.
+    if (
+        payload.get("success") is False
+        or payload.get("ok") is False
+        or payload.get("authenticated") is False
+        or payload.get("error") is not None
+    ):
+        return None
     candidates = [
         payload.get("user"),
         payload.get("data", {}).get("user") if isinstance(payload.get("data"), dict) else None,
