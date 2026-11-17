@@ -38,3 +38,24 @@ def test_identity_rejects_missing_and_revoked_credentials(monkeypatch):
     with pytest.raises(HTTPException) as revoked:
         auth.verify_identity_token("Bearer revoked-session")
     assert revoked.value.status_code == 401
+
+
+
+def test_identity_rejects_malformed_backend_json(monkeypatch):
+    from fastapi import HTTPException
+    import pytest
+
+    monkeypatch.setenv("PGF_IDENTITY_INTROSPECTION_URL", "https://revelacode-backend.onrender.com/api/auth/me")
+
+    def invalid_json(*args, **kwargs):
+        raise ValueError("invalid json")
+
+    monkeypatch.setattr(auth.httpx, "get", lambda *args, **kwargs: FakeResponse(200, None))
+    class InvalidJsonResponse(FakeResponse):
+        def json(self):
+            return invalid_json()
+
+    monkeypatch.setattr(auth.httpx, "get", lambda *args, **kwargs: InvalidJsonResponse(200, None))
+    with pytest.raises(HTTPException) as result:
+        auth.verify_identity_token("Bearer valid-session")
+    assert result.value.status_code == 503
