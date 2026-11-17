@@ -65,8 +65,8 @@ class AndroidBuildRequest(BaseModel):
     package_id: str = Field(min_length=3, max_length=180)
     version_name: str = Field(default="1.0.0", min_length=1, max_length=32)
     version_code: int = Field(default=1, ge=1, le=2100000000)
-    output_format: Literal["apk", "aab"] = "apk"
     build_type: Literal["debug", "release"] = "debug"
+    output_format: Literal["apk", "aab"] = "apk"
     orientation: Literal["landscape", "portrait", "sensor"] = "landscape"
     icon_path: str | None = Field(default=None, max_length=1024)
     min_sdk: int = Field(default=23, ge=23, le=35)
