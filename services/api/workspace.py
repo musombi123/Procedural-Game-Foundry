@@ -153,6 +153,7 @@ def list_projects(principal: dict[str, str] = Depends(current_principal)):
 def create_project(request: ProjectCreateRequest, principal: dict[str, str] = Depends(current_principal)):
     document = _json_document(request.document)
     project_id = uuid4()
+    document = {**document, "id": str(project_id)}
     context, connection = _db()
     try:
         row = connection.execute(
@@ -220,6 +221,34 @@ def list_revisions(project_id: str, principal: dict[str, str] = Depends(current_
             {"version": row["version"], "snapshot": row["snapshot"], "created_at": row["created_at"].isoformat()}
             for row in rows
         ]}
+    finally:
+        context.__exit__(None, None, None)
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+def delete_project(project_id: str, principal: dict[str, str] = Depends(current_principal)):
+    context, connection = _db()
+    try:
+        project = _owned_project(connection, project_id, principal["id"])
+        active_job = connection.execute(
+            "SELECT id FROM nexora_jobs WHERE project_id=%s AND owner_id=%s AND state IN ('queued','running') LIMIT 1",
+            (project["id"], principal["id"]),
+        ).fetchone()
+        if active_job:
+            raise HTTPException(status_code=409, detail="Cancel or wait for active production jobs before deleting this project.")
+        assets = connection.execute(
+            "SELECT object_key, processed_object_key FROM nexora_assets WHERE project_id=%s AND owner_id=%s",
+            (project["id"], principal["id"]),
+        ).fetchall()
+        for asset in assets:
+            for key in (asset["object_key"], asset["processed_object_key"]):
+                if key:
+                    try:
+                        object_store.delete(key)
+                    except Exception as exc:
+                        raise HTTPException(status_code=503, detail="Private asset cleanup failed; project was not deleted.") from exc
+        connection.execute("DELETE FROM nexora_projects WHERE id=%s AND owner_id=%s", (project["id"], principal["id"]))
+        return None
     finally:
         context.__exit__(None, None, None)
 
