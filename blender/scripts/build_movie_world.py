@@ -40,7 +40,7 @@ def build(spec):
     for z in range(segments):
         for x in range(segments):
             a=z*(segments+1)+x; b=a+1; c=b+segments+1; d=a+segments+1
-            faces.append((a,b,c,d))
+            faces.append((a,d,c,b))
     mesh=bpy.data.meshes.new("ProceduralTerrainMesh"); mesh.from_pydata(verts,[],faces); mesh.update()
     ground=bpy.data.objects.new("3D_Terrain",mesh); bpy.context.collection.objects.link(ground); ground.data.materials.append(terrain_mat)
     for landmark in spec.get("landmarks",[]):
@@ -50,6 +50,16 @@ def build(spec):
         # Roof, entry and structural supports are separate meshes, not a single flat card.
         cube(landmark["id"]+"_roof",(x,y+sy+0.5,z),(sx*1.15,1,sz*1.15),wood)
         cube(landmark["id"]+"_door",(x,y+1.2,z+sz*.351),(sx*.2,2.4,.18),wood,0)
+    # Raised, walkable 3D route strips connect spawn to every landmark.
+    for route_index, route in enumerate(spec.get("navigation", {}).get("paths", [])):
+        target = next((item for item in spec.get("landmarks", []) if item["id"] == route.get("to")), None)
+        if target:
+            tx, _, tz = target["position"]
+            length = math.sqrt(tx*tx + tz*tz)
+            midpoint = (tx/2, .18, tz/2)
+            road = cube("Walkable_Path_%02d" % (route_index+1), midpoint,
+                        (spec["navigation"].get("path_width", 4.0), .25, length), stone, .05)
+            road.rotation_euler[1] = math.atan2(tx, tz)
     for prop in spec.get("props",[]):
         x,y,z=prop["position"]; s=prop["scale"]; kind=prop["geometry"]
         if kind=="tree":
