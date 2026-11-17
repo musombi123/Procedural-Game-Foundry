@@ -471,3 +471,8 @@ def get_movie_pipeline_asset(pid: str, asset_path: str):
     if root not in target.parents or not target.is_file():
         raise HTTPException(404, "Generated asset not found")
     return FileResponse(target, media_type="model/gltf-binary", filename=target.name)
+
+
+# Creator-authored deterministic actor and prop generation routes.
+from core.movie_pipeline.actors_api import register_actor_props_routes
+register_actor_props_routes(app, lambda: manager)
