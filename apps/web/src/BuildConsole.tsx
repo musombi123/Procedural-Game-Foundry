@@ -5,6 +5,8 @@ type ToolState = { available: boolean; path?: string | null };
 type ToolReport = {
   godot: ToolState; java: ToolState; android_sdk: ToolState; adb: ToolState;
   apksigner: ToolState; aapt: ToolState; android_export_templates: boolean;
+  android_export_template_version?: string | null; android_export_template_path?: string | null;
+  missing_android_templates?: string[]; godot_android_settings_configured?: boolean;
 };
 type Device = { serial: string; state: string; model?: string; product?: string };
 type BuildEntry = {
@@ -59,6 +61,8 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
   const [buildType, setBuildType] = useState<"debug" | "release">("debug");
   const [orientation, setOrientation] = useState<"landscape" | "portrait" | "sensor">("landscape");
   const [iconPath, setIconPath] = useState("");
+  const [iconName, setIconName] = useState("");
+  const [iconUploading, setIconUploading] = useState(false);
   const [minSdk, setMinSdk] = useState(23);
   const [targetSdk, setTargetSdk] = useState(35);
   const [arm64, setArm64] = useState(true);
@@ -142,6 +146,27 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
     }, 1200);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [api, projectPath, runId]);
+
+  async function uploadIcon(file: File) {
+    setIconUploading(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(api + projectPath + "/android-icon", { method: "POST", body: form });
+      const body = await response.json().catch(() => ({})) as Record<string, any>;
+      if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Launcher icon upload failed.");
+      setIconPath(String(body.icon_path));
+      setIconName(file.name);
+      setStatus("Launcher icon uploaded · " + body.width + "×" + body.height + " PNG");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not upload the launcher icon.");
+      setIconPath("");
+      setIconName("");
+    } finally {
+      setIconUploading(false);
+    }
+  }
 
   async function pollJob(jobId: string): Promise<Job> {
     for (let attempt = 0; attempt < 1800; attempt += 1) {
@@ -262,8 +287,13 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
   const toolRows = tools ? [
     ["Godot 4", tools.godot], ["Java / JDK", tools.java], ["Android SDK", tools.android_sdk],
     ["ADB", tools.adb], ["apksigner", tools.apksigner], ["aapt", tools.aapt],
+    ["Godot Android SDK settings", { available: Boolean(tools.godot_android_settings_configured), path: tools.godot_android_settings_configured ? "Android SDK and Java paths configured in Godot EditorSettings" : "Check local JDK and SDK configuration" }],
   ] as const : [];
-  const canBuild = Boolean(tools?.godot.available && tools?.java.available && tools?.android_sdk.available);
+  const canBuild = Boolean(
+    tools?.godot.available && tools?.java.available && tools?.android_sdk.available
+    && tools?.apksigner.available && tools?.aapt.available && tools?.android_export_templates
+    && tools?.godot_android_settings_configured
+  );
   const selected = selectedBuild ?? null;
 
   return <section className="build-console">
@@ -331,7 +361,14 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
           <option value="debug">Debug · local test key</option><option value="release">Release · your keystore</option></select></label>
         <label>Orientation<select value={orientation} onChange={(event) => setOrientation(event.target.value as "landscape" | "portrait" | "sensor")}>
           <option value="landscape">Landscape</option><option value="portrait">Portrait</option><option value="sensor">Sensor auto-rotate</option></select></label>
-        <label>Launcher icon PNG path<input value={iconPath} onChange={(event) => setIconPath(event.target.value)} placeholder="Absolute path to square 192px+ PNG" /></label>
+        <label>Launcher icon · PNG (432×432 minimum)
+          <input type="file" accept="image/png,.png" disabled={iconUploading || busy} onChange={(event) => {
+            const selectedFile = event.target.files?.[0];
+            if (selectedFile) void uploadIcon(selectedFile);
+            event.currentTarget.value = "";
+          }} />
+          <small>{iconUploading ? "Uploading icon…" : iconName ? "Uploaded: " + iconName : "Choose a square PNG. The adaptive foreground must be at least 432×432."}</small>
+        </label>
         <label>Minimum SDK<input type="number" min={23} max={35} value={minSdk} onChange={(event) => setMinSdk(Number(event.target.value))} /></label>
         <label>Target SDK<input type="number" min={28} max={36} value={targetSdk} onChange={(event) => setTargetSdk(Number(event.target.value))} /></label>
       </div>
@@ -353,7 +390,8 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
           <label>Key password<input type="password" autoComplete="new-password" value={keyPassword} onChange={(event) => setKeyPassword(event.target.value)} /></label>
         </div>
       </div>}
-      {format === "aab" && <p className="build-note">AAB uses Godot's Gradle Android export. Build an APK separately when you need direct installation on a phone.</p>}
+      {tools && !tools.android_export_templates && <p className="build-error">Matching Godot Android export templates are missing{tools.android_export_template_version ? " for Godot " + tools.android_export_template_version : ""}. Install the templates for this exact editor version, then refresh the environment.</p>}
+      {format === "aab" && <p className="build-note">AAB uses Godot's Gradle Android export. NEXORA installs the per-project Gradle template before building. Build an APK separately when you need direct installation on a phone.</p>}
       <div className="build-action-row">
         <button className="button primary" disabled={busy || !canBuild || !appName.trim() || !packageId.trim() || (!arm64 && !arm32)} onClick={() => void buildAndroid()}>
           {busy ? "Building…" : "Generate " + format.toUpperCase()}
