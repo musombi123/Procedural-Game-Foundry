@@ -46,6 +46,7 @@ class PipelineDocument(BaseModel):
     rights: RightsDeclaration
     source_photo: dict | None = None
     source_video: dict | None = None
+    source_video_history: list[dict] = Field(default_factory=list)
     stages: list[StageRecord]
     active_stage: StageId = StageId.ANALYSIS
 
