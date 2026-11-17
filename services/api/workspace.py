@@ -27,7 +27,6 @@ MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
 MAX_ASSET_BYTES = 100 * 1024 * 1024
 ALLOWED_ASSET_TYPES = {
     ".glb": "model/gltf-binary",
-    ".gltf": "model/gltf+json",
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
