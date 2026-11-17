@@ -68,7 +68,7 @@
 .build-signing .build-form-grid{margin-top:12px}
 .device-toolbar{display:flex;align-items:flex-end;gap:12px}
 .device-toolbar label{flex:1}
-.wireless-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;margin-top:14px}
+.wireless-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:10px;align-items:end;margin-top:14px}
 .wireless-actions{display:flex;gap:6px}
 .wireless-actions .button{padding:10px}
 .build-select{margin-top:15px;max-width:560px}
