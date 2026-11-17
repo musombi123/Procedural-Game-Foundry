@@ -45,6 +45,7 @@ def main():
             raise RuntimeError(f"Object {item.name} is outside the supported coordinate range.")
         if any(abs(float(value)) < 1e-8 for value in item.scale):
             raise RuntimeError(f"Object {item.name} has a zero scale.")
+        bpy.ops.object.select_all(action="DESELECT")
         bpy.context.view_layer.objects.active = item
         item.select_set(True)
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
