@@ -146,6 +146,6 @@ def register_gameplay_routes(app, manager_provider):
             store.save(current)
             raise HTTPException(500, "Gameplay compilation failed: " + str(exc)) from exc
         return {"compiled":True,"stage":next(item.model_dump(mode="json") for item in reviewed.stages if item.stage == StageId.GAMEPLAY),
-          "manifest":output["manifest"],"mission_count":manifest["mission_count"],"objective_count":manifest["objective_count"],
+          "manifest":output["manifest"],"gameplay_spec":output["gameplay_spec"],"audio_events":output["audio_events"],"mission_count":manifest["mission_count"],"objective_count":manifest["objective_count"],
           "runtime_files":output["runtime_files"],"audio_binding_count":manifest["audio_binding_count"],"requires_creator_review":True}
     app.include_router(router)
