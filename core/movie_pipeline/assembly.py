@@ -465,6 +465,8 @@ def assemble_movie_game(project_folder: Path, pipeline: Any, godot_executable: s
     (scripts / "PlayerController.gd").write_text(_player_script(), encoding="utf-8")
     (scripts / "ActorBehaviour.gd").write_text(_actor_script(), encoding="utf-8")
     (scripts / "InteractableProp.gd").write_text(_prop_script(), encoding="utf-8")
+    shutil.copy2(Path(__file__).resolve().parents[2] / "gameplay" / "runtime_templates" / "ActorHitbox.gd", scripts / "ActorHitbox.gd")
+    (scripts / "assembly_smoke.gd").write_text("extends SceneTree\nfunc _initialize() -> void:\n    call_deferred(\"_run_checks\")\nfunc _fail(message: String) -> void:\n    push_error(\"PGF ASSEMBLY SMOKE FAILURE: \" + message)\n    quit(1)\nfunc _run_checks() -> void:\n    var packed := load(\"res://main.tscn\") as PackedScene\n    if packed == null:\n        _fail(\"main scene did not load\")\n        return\n    var game := packed.instantiate()\n    root.add_child(game)\n    await process_frame\n    var player := game.get_node_or_null(\"Player\")\n    var director := game.get_node_or_null(\"GameplayDirector\")\n    if player == null or director == null:\n        _fail(\"player or gameplay director missing\")\n        return\n    if game.get_node_or_null(\"EnvironmentAsset\") == null:\n        _fail(\"environment GLB was not instantiated\")\n        return\n    if game.get_node_or_null(\"ActorsAndPropsAsset\") == null:\n        _fail(\"actors/props GLB was not instantiated\")\n        return\n    var audio_players := game.find_children(\"SFX_*\", \"AudioStreamPlayer\", true, false)\n    if audio_players.is_empty():\n        _fail(\"procedural audio cue player was not wired\")\n        return\n    var interactions := game.find_children(\"Interact_*\", \"Area3D\", true, false)\n    if interactions.is_empty():\n        _fail(\"prop interaction area missing\")\n        return\n    var interaction = interactions[0]\n    interaction.pgf_interact(player)\n    var definition: Dictionary = director.get(\"definition\")\n    var first_objective: Dictionary = definition.missions[0].objectives[0]\n    var progress: Dictionary = director.get(\"progress\")\n    if int(progress.get(first_objective.id, 0)) != 1:\n        _fail(\"prop interaction did not advance objective\")\n        return\n    var inventory: Dictionary = director.get(\"inventory\")\n    if inventory.is_empty():\n        _fail(\"collect interaction did not update inventory\")\n        return\n    if not bool(director.get(\"finished\")):\n        _fail(\"completed objective did not trigger win condition\")\n        return\n    var loss_director := Node.new()\n    loss_director.set_script(load(\"res://scripts/runtime/GameplayDirector.gd\"))\n    root.add_child(loss_director)\n    loss_director.configure(definition, {})\n    loss_director.damage_player(int(loss_director.get(\"health\")))\n    if not bool(loss_director.get(\"finished\")):\n        _fail(\"health depletion did not trigger lose condition\")\n        return\n    if not loss_director.save_progress(\"user://pgf-assembly-smoke.json\"):\n        _fail(\"save system failed\")\n        return\n    loss_director.set(\"health\", 1)\n    if not loss_director.load_progress(\"user://pgf-assembly-smoke.json\") or int(loss_director.get(\"health\")) != 0:\n        _fail(\"save/load round trip failed\")\n        return\n    print(\"PGF_ASSEMBLY_SMOKE_OK\")\n    quit(0)\n", encoding="utf-8")
     (destination / "main.tscn").write_text(
         '[gd_scene load_steps=2 format=3]\n[ext_resource type="Script" path="res://scripts/main.gd" id="1"]\n[node name="PGFPlayableGame" type="Node3D"]\nscript = ExtResource("1")\n',
         encoding="utf-8",
@@ -496,12 +498,16 @@ def assemble_movie_game(project_folder: Path, pipeline: Any, godot_executable: s
     editor_output = editor.stdout + "\n" + editor.stderr
     if editor.returncode != 0 or "SCRIPT ERROR:" in editor_output or "Parse Error" in editor_output:
         raise RuntimeError("Godot editor import/parse validation failed:\n" + editor_output[-5000:])
+    functional = subprocess.run([godot_executable, "--headless", "--path", str(destination), "--script", "res://scripts/assembly_smoke.gd"], capture_output=True, text=True, timeout=180)
+    functional_output = functional.stdout + "\n" + functional.stderr
+    if functional.returncode != 0 or "PGF_ASSEMBLY_SMOKE_OK" not in functional_output:
+        raise RuntimeError("Godot gameplay end-to-end smoke test failed:\n" + functional_output[-5000:])
     runtime_result = subprocess.run([godot_executable, "--headless", "--path", str(destination), "--quit-after", "90"],
                                     capture_output=True, text=True, timeout=180)
     runtime_output = runtime_result.stdout + "\n" + runtime_result.stderr
     if runtime_result.returncode != 0 or "SCRIPT ERROR:" in runtime_output or "Parse Error" in runtime_output:
         raise RuntimeError("Godot headless runtime smoke test failed:\n" + runtime_output[-5000:])
-    manifest["validation"] = {"editor_import": "passed", "headless_runtime": "passed"}
+    manifest["validation"] = {"editor_import": "passed", "headless_runtime": "passed", "gameplay_e2e": "passed"}
     (destination / "assembly-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
 
