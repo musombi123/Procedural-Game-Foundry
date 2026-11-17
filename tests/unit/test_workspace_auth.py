@@ -59,3 +59,21 @@ def test_identity_rejects_malformed_backend_json(monkeypatch):
     with pytest.raises(HTTPException) as result:
         auth.verify_identity_token("Bearer valid-session")
     assert result.value.status_code == 503
+
+
+def test_identity_rejects_unsuccessful_envelope_even_with_user_fields(monkeypatch):
+    from fastapi import HTTPException
+    import pytest
+
+    monkeypatch.setenv("PGF_IDENTITY_INTROSPECTION_URL", "https://revelacode-backend.onrender.com/api/auth/me")
+    monkeypatch.setattr(
+        auth.httpx,
+        "get",
+        lambda *args, **kwargs: FakeResponse(
+            200,
+            {"success": False, "user": {"id": "must-not-be-trusted", "name": "Stale User"}},
+        ),
+    )
+    with pytest.raises(HTTPException) as result:
+        auth.verify_identity_token("Bearer invalid-session")
+    assert result.value.status_code == 401
