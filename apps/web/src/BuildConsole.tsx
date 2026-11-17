@@ -381,8 +381,8 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
       </div></div>
       <div className="build-subsection"><b>Android permissions</b><div className="build-permission-grid">
         {(Object.keys(permissionLabels) as PermissionName[]).map((key) => <label key={key}>
-          <input type="checkbox" checked={permissions[key]} onChange={(event) => setPermissions((current) => ({ ...current, [key]: event.target.checked }))} />
-          {permissionLabels[key]}
+          <input type="checkbox" checked={permissions[key]} disabled={key === "internet"} onChange={(event) => setPermissions((current) => ({ ...current, [key]: event.target.checked }))} />
+          {permissionLabels[key]}{key === "internet" ? " (required by Godot)" : ""}
         </label>)}
       </div></div>
       {buildType === "release" && <div className="build-signing">
