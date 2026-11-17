@@ -7,6 +7,7 @@ or evidence of likeness quality. Real creator testing remains consent-gated.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -67,6 +68,16 @@ def _write_synthetic_portrait_fixture(path: Path) -> None:
 
 def _run_blender(executable: str, script_name: str, *arguments: str) -> str:
     script = ROOT / "blender" / "scripts" / script_name
+    environment = os.environ.copy()
+    # Ubuntu's Blender package uses bundled Python 3.12. Expose the matching
+    # system package directory so its glTF exporter can import python3-numpy.
+    blender_system_packages = Path("/usr/lib/python3/dist-packages")
+    if blender_system_packages.is_dir():
+        existing_pythonpath = environment.get("PYTHONPATH", "")
+        environment["PYTHONPATH"] = (
+            str(blender_system_packages)
+            + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
+        )
     result = subprocess.run(
         [
             executable,
@@ -81,11 +92,15 @@ def _run_blender(executable: str, script_name: str, *arguments: str) -> str:
         capture_output=True,
         text=True,
         timeout=900,
+        env=environment,
     )
-    output = (result.stdout or "") + "\n" + (result.stderr or "")
-    assert result.returncode == 0, f"{script_name} failed:\n{output[-12000:]}"
+    output = (result.stdout or "") + "\\n" + (result.stderr or "")
+    # Blender may exit 0 even after a Python operator traceback; reject that.
+    if result.returncode != 0 or "Traceback (most recent call last)" in output or "Error: Python:" in output:
+        raise AssertionError(
+            f"{script_name} failed (exit={result.returncode}):\\n{output[-12000:]}"
+        )
     return output
-
 
 def _read_glb_json(path: Path) -> dict:
     data = path.read_bytes()
