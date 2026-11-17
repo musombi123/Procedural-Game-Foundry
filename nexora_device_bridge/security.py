@@ -2,7 +2,7 @@ from __future__ import annotations
 import hmac, ipaddress, re, secrets
 from dataclasses import dataclass, field
 
-PACKAGE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*){1,7}$")
+PACKAGE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:[.][A-Za-z][A-Za-z0-9_]*){1,7}$")
 SERIAL = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 @dataclass
