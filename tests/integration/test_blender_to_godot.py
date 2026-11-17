@@ -197,7 +197,7 @@ def test_real_blender_assets_import_and_run_in_godot(tmp_path: Path) -> None:
     actors_spec_path = actors_dir / "actors-props.json"
     actors_spec_path.write_text(json.dumps(actors_spec, indent=2), encoding="utf-8")
     actors_glb = actors_dir / "actors-props.glb"
-    _run_blender(
+    actors_output = _run_blender(
         blender,
         "build_actors_props.py",
         "--spec",
@@ -205,8 +205,17 @@ def test_real_blender_assets_import_and_run_in_godot(tmp_path: Path) -> None:
         "--output",
         str(actors_glb),
     )
+    assert actors_glb.is_file(), (
+        "Blender did not emit the actors/props GLB. Generator output:\\n"
+        + actors_output[-12000:]
+    )
     actors_manifest_path = actors_glb.with_suffix(".manifest.json")
-    assert actors_manifest_path.is_file(), "Blender did not emit the actor/prop manifest"
+    assert actors_manifest_path.is_file(), (
+        "Blender did not emit the actor/prop manifest. Generator output:\\n"
+        + actors_output[-12000:]
+        + "\\nDirectory files: "
+        + repr(sorted(item.name for item in actors_dir.iterdir()))
+    )
 
     audio_manifest = generate_audio(
         audio_dir,
