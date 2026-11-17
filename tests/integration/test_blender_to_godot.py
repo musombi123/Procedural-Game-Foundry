@@ -337,3 +337,11 @@ def test_real_blender_assets_import_and_run_in_godot(tmp_path: Path) -> None:
     assert (tmp_path / "creator-project" / "game" / "assets" / "environment.glb").is_file()
     assert (tmp_path / "creator-project" / "game" / "assets" / "actors-props.glb").is_file()
     assert (tmp_path / "creator-project" / "game" / "assets" / "audio" / "pickup-sfx.wav").is_file()
+
+    # Optional CI hand-off: export the exact assembled game tested above.
+    export_fixture_dir = os.environ.get("NEXORA_EXPORT_FIXTURE_DIR")
+    if export_fixture_dir:
+        destination = Path(export_fixture_dir)
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(tmp_path / "creator-project" / "game", destination)
