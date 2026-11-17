@@ -128,7 +128,7 @@ jobs:
           test -x "$ANDROID_HOME/build-tools/35.0.1/apksigner"
           test -d "$ANDROID_HOME/ndk/28.1.13356709"
           test -d "$ANDROID_HOME/cmake/3.10.2.4988404"
-          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          cat > "$HOME/.config/godot/editor_settings-4.6.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
           [resource]
           export/android/android_sdk_path = "/usr/local/lib/android/sdk"
@@ -138,6 +138,8 @@ jobs:
           export/android/debug_keystore_pass = "android"
           EOF
           godot --headless --path "${{ runner.temp }}/nexora-export-game" --editor --quit
+          test -f "$HOME/.config/godot/editor_settings-4.6.tres"
+          grep -F 'export/android/android_sdk_path = "/usr/local/lib/android/sdk"' "$HOME/.config/godot/editor_settings-4.6.tres"
       - name: Install desktop headless display
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y xvfb
       - name: Export and launch Linux desktop build
