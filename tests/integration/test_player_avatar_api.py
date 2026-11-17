@@ -4,7 +4,7 @@ import services.api.main as api
 from core.movie_pipeline.models import RightsDeclaration
 from core.movie_pipeline.service import PipelineStore
 
-RIGHTS=RightsDeclaration(has_video_rights=True,has_photo_rights=True,likeness_consent=True,accepts_original_assets_only=True)
+RIGHTS=RightsDeclaration(has_video_rights=False,has_photo_rights=True,likeness_consent=True,accepts_original_assets_only=True)
 
 def test_story_first_unlocks_player_and_builds_procedural_glb(tmp_path,monkeypatch):
     monkeypatch.setattr(api,"manager",api.ProjectManager(tmp_path))
