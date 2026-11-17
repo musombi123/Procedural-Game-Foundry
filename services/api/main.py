@@ -453,7 +453,7 @@ def build_procedural_player(pid: str, request: dict):
 
 @app.get("/api/projects/{pid}/movie-pipeline/assets/{asset_path:path}")
 def get_movie_pipeline_asset(pid: str, asset_path: str):
-    """Serve only generated, project-scoped GLB artifacts for creator preview/download."""
+    """Serve generated, project-scoped movie-pipeline artifacts for creator preview/download."""
     try:
         folder = manager.path_for(pid)
         manager.load(pid)
@@ -462,10 +462,10 @@ def get_movie_pipeline_asset(pid: str, asset_path: str):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     relative = Path(asset_path)
-    allowed_media={".glb":("model/gltf-binary","model"),".wav":("audio/wav","audio")}
+    allowed_media={".glb":("model/gltf-binary","model"),".wav":("audio/wav","audio"),".json":("application/json","data"),".gd":("text/plain; charset=utf-8","script")}
     suffix=relative.suffix.lower()
     if relative.is_absolute() or ".." in relative.parts or suffix not in allowed_media:
-        raise HTTPException(400, "Only project-scoped GLB and WAV assets can be retrieved")
+        raise HTTPException(400, "Only project-scoped generated GLB, WAV, JSON and GDScript assets can be retrieved")
     if not relative.parts or relative.parts[0] != "movie_pipeline" or len(relative.parts) < 3:
         raise HTTPException(400, "Asset path is outside generated movie-pipeline artifacts")
     target = (folder / relative).resolve()
