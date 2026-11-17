@@ -404,7 +404,7 @@ def process_asset(project_id: str, asset_id: str, principal: dict[str, str] = De
     try:
         project = _owned_project(connection, project_id, principal["id"])
         asset = connection.execute(
-            "SELECT * FROM nexora_assets WHERE id=%s AND project_id=%s AND owner_id=%s AND status IN ('ready','processed')",
+            "SELECT * FROM nexora_assets WHERE id=%s AND project_id=%s AND owner_id=%s AND status IN ('ready','processed','failed')",
             (_asset_uuid(asset_id), project["id"], principal["id"]),
         ).fetchone()
         if not asset:
