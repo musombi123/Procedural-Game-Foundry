@@ -21,7 +21,7 @@ The creator's authored text is persisted verbatim. The system does not invent mi
 1. Analysis — FFmpeg/FFprobe metadata, scene-cut candidates and representative keyframes. No automatic speech transcription, visual-language description or story synthesis.
 2. Player — creator-adjustable procedural humanoid mesh; manually selected portrait face crop mapped to a curved 3D head patch; sampled portrait clothing palette; named armature, deterministic proximity skin weights and idle/walk animation strips. The creator reviews the proportions and face crop.
 3. Environment — deterministic terrain heightfield, modular 3D structures, props, lighting, camera and walkable route geometry. Blender exports a GLB. Full navigation-mesh baking and runtime collision integration remain later work.
-4. Actors & props — procedural original NPC/enemy/item geometry, rigs, collision and behavior metadata.
+4. Actors & props — creator-authored NPC/enemy/animal/robot descriptors and item/tool/weapon/vehicle/container/obstacle descriptors become procedural Blender meshes, basic armatures, collision metadata and interaction/behavior manifests. Behavior text is stored as creator-authored metadata; runtime AI/behavior execution is not implied.
 5. Audio — FFmpeg processing and procedural/original sound assets; no speech synthesis model.
 6. Gameplay — movement, camera, interactions, objectives, checkpoints, saves and win/lose flow generated from creator-authored mission data.
 7. Assembly & QA — register GLB assets, generate game config, assemble the playable Godot project, validate references and package exports.
