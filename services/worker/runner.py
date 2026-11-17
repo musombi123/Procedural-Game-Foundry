@@ -117,7 +117,7 @@ def _project_from_job(job: dict[str, Any], workdir: Path):
     payload = job.get("payload") or {}
     source = payload.get("project") or {}
     blender = _executable("BLENDER_BIN", "blender")
-    godot = _executable("GODOT_BIN", "godot") or shutil.which("godot4")
+    godot = _executable("GODOT_BIN", "godot") or shutil.which("godot4") or shutil.which("godot4")
     if not blender:
         raise RuntimeError("Blender is not installed on this worker (set BLENDER_BIN or add blender to PATH).")
     if not godot:
@@ -286,7 +286,7 @@ def _verify_runtime(project: Path, godot: str) -> dict[str, Any]:
 
 
 def _run_scene_generation(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
-    godot = _executable("GODOT_BIN", "godot")
+    godot = _executable("GODOT_BIN", "godot") or shutil.which("godot4")
     if not godot:
         raise RuntimeError("Godot 4 is not installed on this worker (set GODOT_BIN or add godot to PATH).")
     project = _project_from_job(job, workdir)
@@ -302,7 +302,7 @@ def _run_scene_generation(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
 
 
 def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
-    godot = _executable("GODOT_BIN", "godot")
+    godot = _executable("GODOT_BIN", "godot") or shutil.which("godot4")
     if not godot:
         raise RuntimeError("Godot 4 is not installed on this worker (set GODOT_BIN or add godot to PATH).")
     project = _project_from_job(job, workdir)
