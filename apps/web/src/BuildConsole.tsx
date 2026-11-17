@@ -6,7 +6,9 @@ type ToolReport = {
   godot: ToolState; java: ToolState; android_sdk: ToolState; adb: ToolState;
   apksigner: ToolState; aapt: ToolState; android_export_templates: boolean;
   android_export_template_version?: string | null; android_export_template_path?: string | null;
-  missing_android_templates?: string[]; godot_android_settings_configured?: boolean;
+  missing_android_templates?: string[];
+  android_sdk_components?: { available: boolean; missing: string[] };
+  godot_android_settings_configured?: boolean; godot_android_settings_auto_configure?: boolean;
 };
 type Device = { serial: string; state: string; model?: string; product?: string };
 type BuildEntry = {
@@ -287,12 +289,12 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
   const toolRows = tools ? [
     ["Godot 4", tools.godot], ["Java / JDK", tools.java], ["Android SDK", tools.android_sdk],
     ["ADB", tools.adb], ["apksigner", tools.apksigner], ["aapt", tools.aapt],
-    ["Godot Android SDK settings", { available: Boolean(tools.godot_android_settings_configured), path: tools.godot_android_settings_configured ? "Android SDK and Java paths configured in Godot EditorSettings" : "Check local JDK and SDK configuration" }],
+    ["Android SDK packages", { available: Boolean(tools.android_sdk_components?.available), path: tools.android_sdk_components?.available ? "Required SDK components installed" : "Missing: " + (tools.android_sdk_components?.missing ?? []).join(", ") }],
+    ["Godot Android paths", { available: Boolean(tools.godot_android_settings_configured || tools.godot_android_settings_auto_configure), path: tools.godot_android_settings_configured ? "Configured in EditorSettings" : "NEXORA will configure SDK/JDK paths before export" }],
   ] as const : [];
   const canBuild = Boolean(
     tools?.godot.available && tools?.java.available && tools?.android_sdk.available
     && tools?.apksigner.available && tools?.aapt.available && tools?.android_export_templates
-    && tools?.godot_android_settings_configured
   );
   const selected = selectedBuild ?? null;
 
