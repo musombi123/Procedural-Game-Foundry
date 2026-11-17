@@ -59,7 +59,7 @@ class UploadIntent(BaseModel):
 class AndroidBuildSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     app_name: str = Field(default="NEXORA Game", min_length=1, max_length=48)
-    package_id: str = Field(default="com.nexora.game", pattern=r"^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*){1,7}$", max_length=180)
+    package_id: str = Field(default="com.nexora.game", pattern=r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*){1,7}$", max_length=180)
     version_name: str = Field(default="1.0.0", pattern=r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,31}$")
     version_code: int = Field(default=1, ge=1, le=2100000000)
     build_type: str = Field(default="debug", pattern=r"^(debug|release)$")
