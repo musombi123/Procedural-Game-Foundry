@@ -37,10 +37,11 @@ class ActorsPropsRequest(BaseModel):
         if len(ids)!=len(set(ids)): raise ValueError("Actor and prop IDs must be unique within their collection")
         return values
 
-def register_actor_props_routes(app, manager):
+def register_actor_props_routes(app, manager_provider):
     router=APIRouter()
     @router.post("/api/projects/{pid}/movie-pipeline/actors-props/build")
     def build_actors_props(pid: str, request: ActorsPropsRequest):
+        manager=manager_provider()
         try:
             folder=manager.path_for(pid); manager.load(pid); store=PipelineStore(folder); pipeline=store.load()
         except FileNotFoundError as exc: raise HTTPException(404,"Project or movie pipeline not found") from exc
