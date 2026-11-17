@@ -9,7 +9,8 @@ from core.project_engine.models import (
 )
 
 
-def build_documents(project_id: str, project: dict[str, Any]) -> tuple[ProjectDefinition, WorldDocument]:
+def build_documents(project_id: str, project: dict[str, Any], asset_paths: dict[str, str] | None = None) -> tuple[ProjectDefinition, WorldDocument]:
+    asset_paths = asset_paths or {}
     document = project.get("document") if isinstance(project.get("document"), dict) else {}
     settings = document.get("settings") if isinstance(document.get("settings"), dict) else {}
     scene = document.get("scene") if isinstance(document.get("scene"), dict) else {}
@@ -59,6 +60,7 @@ def build_documents(project_id: str, project: dict[str, Any]) -> tuple[ProjectDe
             x=x, y=y, z=z,
             rotation=bounded(rotation[1] if len(rotation) > 1 else 0, -360, 360),
             scale=uniform_scale, color=color,
+            asset_path=asset_paths.get(str(raw.get("asset_id") or "")),
         ))
 
     world = WorldDocument(seed=seed, world=definition.world, objects=objects)
