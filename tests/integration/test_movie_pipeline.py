@@ -47,6 +47,53 @@ def test_movie_pipeline_requires_all_rights_and_persists_stages(tmp_path, monkey
     assert data["stages"][1]["revision"] == 1
 
 
+def test_video_upload_requires_explicit_video_rights(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "manager", api.ProjectManager(tmp_path))
+    client = TestClient(api.app)
+    project = client.post("/api/projects", json={"name": "Rights Gate"}).json()
+    pid = project["id"]
+    rights = {**RIGHTS, "has_video_rights": False}
+    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": rights})
+    assert created.status_code == 201
+
+    denied = client.post(
+        f"/api/projects/{pid}/movie-pipeline/source/video",
+        files={"file": ("movie.mp4", bytes.fromhex("00000018667479706d703432") + b"payload", "video/mp4")},
+    )
+    assert denied.status_code == 403
+
+
+def test_reupload_after_processing_keeps_previous_source_hash(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "manager", api.ProjectManager(tmp_path))
+    client = TestClient(api.app)
+    project = client.post("/api/projects", json={"name": "Re-upload movie"}).json()
+    pid = project["id"]
+    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS})
+    assert created.status_code == 201
+
+    store = PipelineStore(api.manager.path_for(pid))
+    document = store.load()
+    previous_hash = "a" * 64
+    document.source_video = {
+        "filename": "old-source.mp4",
+        "sha256": previous_hash,
+        "original_retained": False,
+        "retention_policy": "extracted_assets_and_sha256_only",
+    }
+    store.save(document)
+
+    payload = bytes.fromhex("00000018667479706d703432") + b"new-video-payload"
+    uploaded = client.post(
+        f"/api/projects/{pid}/movie-pipeline/source/video",
+        files={"file": ("replacement.mp4", payload, "video/mp4")},
+    )
+    assert uploaded.status_code == 201
+    restored = client.get(f"/api/projects/{pid}/movie-pipeline").json()
+    assert restored["source_video_history"][0]["sha256"] == previous_hash
+    assert restored["source_video"]["sha256"] != previous_hash
+    assert restored["source_video"]["storage_key"] == "movie_pipeline/uploads/source-movie.mp4"
+
+
 def test_cannot_approve_stage_without_review_output(tmp_path):
     store = PipelineStore(tmp_path)
     from core.movie_pipeline.models import RightsDeclaration, new_pipeline
@@ -75,10 +122,17 @@ def test_media_uploads_are_signature_checked_and_project_scoped(tmp_path, monkey
     assert photo.status_code == 201
     assert photo.json()["metadata"]["size_bytes"] == len(photo_bytes)
 
+    unsupported = client.post(
+        f"/api/projects/{pid}/movie-pipeline/source/video",
+        files={"file": ("movie.webm", bytes.fromhex("1a45dfa3") + b"payload", "video/webm")},
+    )
+    assert unsupported.status_code == 400
+
     video_bytes = bytes.fromhex("00000018667479706d703432") + b"test-video-payload"
     video = client.post(f"/api/projects/{pid}/movie-pipeline/source/video", files={"file": ("movie.mp4", video_bytes, "video/mp4")})
     assert video.status_code == 201
     assert video.json()["metadata"]["sha256"]
+    assert video.json()["metadata"]["storage_key"] == f"movie_pipeline/uploads/source-movie.mp4"
     restored = client.get(f"/api/projects/{pid}/movie-pipeline").json()
     assert restored["source_photo"]["filename"] == "player-portrait.jpg"
     assert restored["source_video"]["filename"] == "source-movie.mp4"
