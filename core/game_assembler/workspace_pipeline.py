@@ -138,6 +138,24 @@ def build_workspace_specs(
             "damage": 8,
         })
         enemy_ids.append(actor_id)
+    if not actors:
+        actors.append({
+            "id": "nexora_guard",
+            "name": "Outpost Guard",
+            "kind": "enemy",
+            "behavior": "patrol",
+            "scale": 1.0,
+            "position": [6.0, 0.0, -6.0],
+        })
+        actor_behaviours.append({
+            "actor_id": "nexora_guard",
+            "behaviour": "patrol",
+            "move_speed": 2.5,
+            "detection_range": 12.0,
+            "attack_range": 1.8,
+            "damage": 8,
+        })
+        enemy_ids.append("nexora_guard")
 
     props: list[dict[str, Any]] = []
     prop_ids: set[str] = set()
@@ -189,39 +207,44 @@ def build_workspace_specs(
         })
         prop_ids.add(object_id)
 
-    mission_objectives: list[dict[str, Any]] = []
-    interactions: list[dict[str, Any]] = []
-    if not raw_objectives:
-        if enemy_ids:
-            for index, enemy_id in enumerate(enemy_ids):
-                mission_objectives.append({
-                    "id": f"defeat_{index + 1}",
-                    "title": f"Defeat {actors[index]['name']}",
-                    "description": "Defeat the hostile actor.",
-                    "kind": "defeat",
-                    "target_id": enemy_id,
-                    "required_count": 1,
-                })
-        else:
-            props.append({
-                "id": "nexora_exit",
-                "name": "Mission Exit",
-                "kind": "item",
-                "interaction": "activate",
-                "scale": 1.0,
-                "position": [0.0, 0.0, -18.0],
-            })
-            prop_ids.add("nexora_exit")
-            mission_objectives.append({
-                "id": "reach_exit",
-                "title": "Reach the mission exit",
-                "description": "Travel through the world and reach the marked exit.",
-                "kind": "reach",
-                "target_id": "nexora_exit",
-                "required_count": 1,
-            })
-    else:
-        for index, raw in enumerate(raw_objectives[:64]):
+    # Every new workspace game receives a small, playable tutorial loop:
+    # collect a supply key, then defeat one guard. Creator-authored objectives
+    # are appended and remain visible for review; this default is declared in
+    # the build manifest rather than being represented as creator-authored data.
+    props.append({
+        "id": "nexora_supply_key",
+        "name": "Mission Supply Key",
+        "kind": "item",
+        "interaction": "collect",
+        "scale": 0.8,
+        "position": [0.0, 0.0, 8.0],
+    })
+    prop_ids.add("nexora_supply_key")
+    mission_objectives: list[dict[str, Any]] = [
+        {
+            "id": "nexora_collect_supply",
+            "title": "Collect the supply key",
+            "description": "Find and collect the mission supply key.",
+            "kind": "collect",
+            "target_id": "nexora_supply_key",
+            "required_count": 1,
+        },
+        {
+            "id": "nexora_defeat_guard",
+            "title": f"Defeat {actors[0]['name']}",
+            "description": "Defeat the hostile actor guarding the area.",
+            "kind": "defeat",
+            "target_id": enemy_ids[0],
+            "required_count": 1,
+        },
+    ]
+    interactions: list[dict[str, Any]] = [{
+        "prop_id": "nexora_supply_key",
+        "action": "collect",
+        "objective_id": "nexora_collect_supply",
+        "item_id": "nexora_supply_key",
+    }]
+    for index, raw in enumerate(raw_objectives[:64]):
             if not isinstance(raw, dict):
                 continue
             objective_id = _safe_id(raw.get("id"), f"objective_{index + 1}")
@@ -259,10 +282,10 @@ def build_workspace_specs(
                 "target_id": target_id,
                 "required_count": required,
             })
-            if kind == "collect":
+            if kind in {"collect", "reach"}:
                 interactions.append({
                     "prop_id": target_id,
-                    "action": "collect",
+                    "action": "collect" if kind == "collect" else "activate",
                     "objective_id": objective_id,
                     "item_id": target_id,
                 })
