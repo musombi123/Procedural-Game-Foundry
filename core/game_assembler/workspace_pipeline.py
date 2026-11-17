@@ -211,22 +211,25 @@ def build_workspace_specs(
     # collect a supply key, then defeat one guard. Creator-authored objectives
     # are appended and remain visible for review; this default is declared in
     # the build manifest rather than being represented as creator-authored data.
+    supply_key_id = "nexora_supply_key"
+    while supply_key_id in prop_ids:
+        supply_key_id += "_generated"
     props.append({
-        "id": "nexora_supply_key",
+        "id": supply_key_id,
         "name": "Mission Supply Key",
         "kind": "item",
         "interaction": "collect",
         "scale": 0.8,
         "position": [0.0, 0.0, 8.0],
     })
-    prop_ids.add("nexora_supply_key")
+    prop_ids.add(supply_key_id)
     mission_objectives: list[dict[str, Any]] = [
         {
             "id": "nexora_collect_supply",
             "title": "Collect the supply key",
             "description": "Find and collect the mission supply key.",
             "kind": "collect",
-            "target_id": "nexora_supply_key",
+            "target_id": supply_key_id,
             "required_count": 1,
         },
         {
@@ -239,15 +242,19 @@ def build_workspace_specs(
         },
     ]
     interactions: list[dict[str, Any]] = [{
-        "prop_id": "nexora_supply_key",
+        "prop_id": supply_key_id,
         "action": "collect",
         "objective_id": "nexora_collect_supply",
-        "item_id": "nexora_supply_key",
+        "item_id": supply_key_id,
     }]
+    objective_ids = {"nexora_collect_supply", "nexora_defeat_guard"}
     for index, raw in enumerate(raw_objectives[:64]):
             if not isinstance(raw, dict):
                 continue
-            objective_id = _safe_id(raw.get("id"), f"objective_{index + 1}")
+            objective_id = "creator_" + _safe_id(raw.get("id"), f"objective_{index + 1}")
+            if objective_id in objective_ids:
+                objective_id = f"{objective_id}_{index + 1}"
+            objective_ids.add(objective_id)
             kind = str(raw.get("kind") or "reach").lower()
             if kind not in ALLOWED_OBJECTIVES:
                 kind = "reach"
@@ -426,6 +433,7 @@ def assemble_workspace_game(
         "scene_object_count": specs["scene_object_count"],
         "enemy_count": specs["enemy_count"],
         "objective_count": specs["objective_count"],
+        "default_mission_seeded": True,
         "player_avatar": "creator_glb" if player_asset and player_asset.is_file() else "procedural_default",
         "requires_creator_review": True,
     }
