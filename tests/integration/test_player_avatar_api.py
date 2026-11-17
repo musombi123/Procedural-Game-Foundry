@@ -39,3 +39,6 @@ def test_story_first_unlocks_player_and_builds_procedural_glb(tmp_path,monkeypat
     assert response.json()["glb_scene"].endswith("player-avatar.glb")
     assert response.json()["stage"]["state"]=="REVIEW"
     assert response.json()["stage"]["output"]["bone_count"]==16
+    download=client.get(f"/api/projects/{pid}/movie-pipeline/assets/{response.json()[\"glb_scene\"]}")
+    assert download.status_code==200
+    assert download.content.startswith(b"glb")
