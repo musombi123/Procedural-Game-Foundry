@@ -103,7 +103,15 @@ jobs:
         with:
           packages: "platform-tools"
       - name: Install Android export SDK components
-        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmdline-tools;latest"
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.1" \
+            "cmdline-tools;latest" \
+            "cmake;3.10.2.4988404" \
+            "ndk;28.1.13356709"
       - uses: chickensoft-games/setup-godot@v2
         with:
           version: "4.6.1"
@@ -117,6 +125,9 @@ jobs:
         run: |
           mkdir -p "$HOME/.config/godot" "$HOME/.android"
           keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000 -noprompt
+          test -x "$ANDROID_HOME/build-tools/35.0.1/apksigner"
+          test -d "$ANDROID_HOME/ndk/28.1.13356709"
+          test -d "$ANDROID_HOME/cmake/3.10.2.4988404"
           cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
           [resource]
@@ -150,12 +161,17 @@ jobs:
             exit 1
           fi
       - name: Export and verify Android debug APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
         run: |
+          cp "$HOME/.android/debug.keystore" "$GODOT_ANDROID_KEYSTORE_DEBUG_PATH"
           mkdir -p "${{ runner.temp }}/nexora-export-game/build/android"
           godot --verbose --headless --path "${{ runner.temp }}/nexora-export-game" --export-debug "Android" "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
           APK="${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose "$APK"
           sha256sum "$APK" > "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk.sha256"
       - name: Stage emulator smoke-test package
         run: |
