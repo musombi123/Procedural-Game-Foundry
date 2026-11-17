@@ -45,7 +45,7 @@ def pair_wireless(host: str, pairing_port: int, pairing_code: str, connect_port:
     if not 1024 <= int(connect_port) <= 65535:
         raise ValueError("ADB connection port must be between 1024 and 65535.")
     code = str(pairing_code).strip()
-    if not re.fullmatch(r"\\d{6}", code):
+    if not re.fullmatch(r"^[0-9]{6}$", code):
         raise ValueError("Android Wireless Debugging pairing code must contain six digits.")
     paired = run_adb(["pair", f"{host}:{pairing_port}", code], timeout=30)
     connected = run_adb(["connect", f"{host}:{int(connect_port)}"], timeout=20)
@@ -93,6 +93,7 @@ def install_apk_file(serial: str, package_id: str, path: Path) -> dict[str, Any]
     serial, package_id = validate_serial(serial), validate_package_id(package_id)
     if not path.is_file() or path.stat().st_size <= 0 or path.stat().st_size > MAX_APK_BYTES:
         raise AdbError("APK file is empty or exceeds the 1 GB transfer limit.")
+    verify_apk_signature(path)
     metadata = inspect_apk(path)
     if metadata["package_id"] != package_id:
         raise AdbError(f"APK package ID mismatch: expected {package_id}, found {metadata['package_id']}.")
