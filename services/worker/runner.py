@@ -149,11 +149,17 @@ def _project_from_job(job: dict[str, Any], workdir: Path):
 
     target = workdir / "assembled-workspace"
     project_dir, manifest = assemble_workspace_game(source, asset_paths, target, blender, godot)
-    _write_export_presets(project_dir)
+    _write_export_presets(project_dir, (job.get("payload") or {}).get("android"))
     return project_dir
 
 
-def _write_export_presets(project: Path) -> None:
+def _write_export_presets(project: Path, android: dict[str, Any] | None = None) -> None:
+    android = android or {}
+    package_id = str(android.get("package_id") or "com.nexora.game")
+    app_name = str(android.get("app_name") or "NEXORA Game").replace('"', "")
+    version_name = str(android.get("version_name") or "1.0.0").replace('"', "")
+    version_code = int(android.get("version_code") or 1)
+    orientation = {"portrait": 0, "landscape": 1, "sensor": 4}.get(str(android.get("orientation") or "landscape"), 1)
     text = """[preset.0]
 name="Linux/X11"
 platform="Linux/X11"
@@ -213,7 +219,7 @@ custom_features=""
 export_filter="all_resources"
 include_filter=""
 exclude_filter=""
-export_path="build/android/NexoraFoundry-debug.apk"
+export_path="build/android/NexoraFoundry.apk"
 encryption_include_filters=""
 encryption_exclude_filters=""
 encrypt_pck=false
@@ -226,14 +232,29 @@ gradle_build/use_gradle_build=false
 gradle_build/export_format=0
 architectures/armeabi-v7a=false
 architectures/arm64-v8a=true
-package/unique_name="com.nexora.foundry"
-package/name="Nexora Foundry"
+package/unique_name="__PACKAGE_ID__"
+package/name="__APP_NAME__"
 package/signed=true
-version/code=1
-version/name="1.0.0"
+version/code=__VERSION_CODE__
+version/name="__VERSION_NAME__"
 screen/immersive_mode=true
-permissions/internet=true
+screen/orientation=__ORIENTATION__
+permissions/internet=__INTERNET__
+permissions/camera=__CAMERA__
+permissions/record_audio=__MICROPHONE__
 """
+    replacements = {
+        "__PACKAGE_ID__": package_id,
+        "__APP_NAME__": app_name,
+        "__VERSION_CODE__": str(version_code),
+        "__VERSION_NAME__": version_name,
+        "__ORIENTATION__": str(orientation),
+        "__INTERNET__": str(bool(android.get("internet_permission", True))).lower(),
+        "__CAMERA__": str(bool(android.get("camera_permission", False))).lower(),
+        "__MICROPHONE__": str(bool(android.get("microphone_permission", False))).lower(),
+    }
+    for marker, value in replacements.items():
+        text = text.replace(marker, value)
     (project / "export_presets.cfg").write_text(text, encoding="utf-8")
 
 
