@@ -264,18 +264,24 @@ def _write_android_preset(project: Path, request: AndroidBuildRequest, output: P
     icon_ref = ""
     if request.icon_path:
         source = Path(request.icon_path).expanduser().resolve()
-        if not source.is_file():
-            raise HTTPException(status_code=400, detail="Launcher icon file does not exist on this desktop.")
+        if project.resolve() not in source.parents or not source.is_file():
+            raise HTTPException(status_code=400, detail="Launcher icon must be uploaded through this project's Build Console.")
         width, height = _png_dimensions(source)
-        if width < 192 or height < 192 or width != height:
-            raise HTTPException(status_code=400, detail="Launcher icon must be a square PNG at least 192×192 pixels.")
+        if width < 432 or height < 432 or width != height:
+            raise HTTPException(status_code=400, detail="Launcher icon must be a square PNG at least 432×432 pixels for Android adaptive icons.")
         assets = project / "android_assets"
         assets.mkdir(parents=True, exist_ok=True)
         destination = assets / "launcher-icon.png"
-        shutil.copy2(source, destination)
+        if source != destination.resolve():
+            shutil.copy2(source, destination)
         icon_ref = "res://android_assets/launcher-icon.png"
 
     orientation = {"landscape": 0, "portrait": 1, "sensor": 6}[request.orientation]
+    viewport_width, viewport_height = (720, 1280) if request.orientation == "portrait" else (1280, 720)
+    project_file = project / "project.godot"
+    set_project_ini_value(project_file, "display", "window/handheld/orientation", str(orientation))
+    set_project_ini_value(project_file, "display", "window/size/viewport_width", str(viewport_width))
+    set_project_ini_value(project_file, "display", "window/size/viewport_height", str(viewport_height))
     use_gradle = request.output_format == "aab"
     options = request.permissions.model_dump()
     permission_lines = "\n".join(
@@ -315,7 +321,6 @@ package/signed=true
 version/code={request.version_code}
 version/name={_quote(request.version_name)}
 screen/immersive_mode=true
-screen/orientation={orientation}
 launcher_icons/main_192x192={_quote(icon_ref)}
 launcher_icons/adaptive_foreground_432x432={_quote(icon_ref)}
 {permission_lines}
@@ -327,7 +332,7 @@ keystore/release_password=""
 
 
 def _debug_signing_environment(env: dict[str, str]) -> None:
-    keytool = shutil.which("keytool")
+    keytool = java_tool("keytool", env)
     if not keytool:
         raise RuntimeError("Java keytool is required to prepare the desktop debug signing key.")
     key_path = Path.home() / ".android" / "debug.keystore"
@@ -342,12 +347,10 @@ def _debug_signing_environment(env: dict[str, str]) -> None:
     env["GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD"] = "android"
 
 
-def _signing_environment(request: AndroidBuildRequest) -> dict[str, str]:
+def _signing_environment(request: AndroidBuildRequest, godot: str) -> dict[str, str]:
     env = os.environ.copy()
     sdk = _android_sdk()
-    if sdk:
-        env["ANDROID_HOME"] = str(sdk)
-        env["ANDROID_SDK_ROOT"] = str(sdk)
+    configure_godot_android(godot, sdk, env)
     if request.build_type == "debug":
         _debug_signing_environment(env)
         return env
