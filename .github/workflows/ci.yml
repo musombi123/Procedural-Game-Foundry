@@ -150,6 +150,7 @@ jobs:
           DESKTOP_BUILD="${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64"
           test -s "$DESKTOP_BUILD"
           chmod +x "$DESKTOP_BUILD"
+          sha256sum "$DESKTOP_BUILD" > "${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64.sha256"
           set +e
           timeout 20s xvfb-run -a "$DESKTOP_BUILD" > "${{ runner.temp }}/nexora-desktop-runtime.log" 2>&1
           runtime_status=$?
@@ -175,12 +176,15 @@ jobs:
           APK="${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging "$APK" | grep -F "package: name='com.nexora.foundry'"
           sha256sum "$APK" > "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk.sha256"
       - name: Stage emulator smoke-test package
         run: |
           mkdir -p "${{ runner.temp }}/nexora-emulator-package"
           cp "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk" "${{ runner.temp }}/nexora-emulator-package/"
+          cp "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk.sha256" "${{ runner.temp }}/nexora-emulator-package/"
           cp "${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64" "${{ runner.temp }}/nexora-emulator-package/"
+          cp "${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64.sha256" "${{ runner.temp }}/nexora-emulator-package/"
       - uses: actions/upload-artifact@v4
         with:
           name: nexora-foundry-native-builds
