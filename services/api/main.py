@@ -396,7 +396,7 @@ def build_procedural_player(pid: str, request: dict):
                                     "identity_source":"uploaded_portrait","creator_review_required":True},indent=2),encoding="utf-8")
     glb = avatar_dir / "player-avatar.glb"
     script = Path(__file__).resolve().parents[2] / "blender" / "scripts" / "build_player_avatar.py"
-    stage.state = __import__("core.movie_pipeline.models",fromlist=["StageState"]).StageState.RUNNING
+    stage.state = StageState.RUNNING
     stage.summary = "Building procedural humanoid mesh and armature with Blender"
     store.save(pipeline)
     try:
@@ -404,13 +404,13 @@ def build_procedural_player(pid: str, request: dict):
                                  "--output",str(glb),"--spec",str(spec_path)],
                                 capture_output=True,text=True,timeout=900,check=True)
     except (subprocess.TimeoutExpired,subprocess.CalledProcessError) as exc:
-        stage.state = __import__("core.movie_pipeline.models",fromlist=["StageState"]).StageState.FAILED
+        stage.state = StageState.FAILED
         stage.error = (getattr(exc,"stderr",None) or str(exc))[-2500:]
         stage.summary = "Procedural player generation failed"
         store.save(pipeline)
         raise HTTPException(500,stage.error) from exc
     if not glb.is_file() or glb.stat().st_size < 1024:
-        stage.state = __import__("core.movie_pipeline.models",fromlist=["StageState"]).StageState.FAILED
+        stage.state = StageState.FAILED
         stage.error = "Blender did not produce a valid GLB avatar"
         store.save(pipeline)
         raise HTTPException(500,stage.error)
