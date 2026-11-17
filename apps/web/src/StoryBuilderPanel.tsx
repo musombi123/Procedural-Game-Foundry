@@ -9,13 +9,13 @@ export default function StoryBuilderPanel({projectId,api}:Props) {
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("Write the story or instructions that define how your game should unfold.");
   const [world,setWorld]=useState<any>(null);
-  useEffect(()=>{ void (async()=>{ try { const r=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/story"); if(r.ok){const s=await r.json(); setBrief({...empty,...s});} } catch {} })(); },[api,projectId]);
+  useEffect(()=>{ void (async()=>{ try { const r=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/story"); if(r.ok){const s=await r.json(); setBrief({mode:s.mode??empty.mode,title:s.title??empty.title,premise:s.premise??"",player_role:s.player_role??empty.player_role,setting:s.setting??"",tone:s.tone??"",instructions:s.instructions??"",ending:s.ending??"",mission_count:s.mission_count??5,world_scale:s.world_scale??"medium"});} } catch {} })(); },[api,projectId]);
   const set=(key:keyof Brief,value:string|number)=>setBrief(current=>({...current,[key]:value}));
-  async function save(){
+  async function save():Promise<boolean>{
     setBusy(true);
     try { const r=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/story",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(brief)});
       const data=await r.json(); if(!r.ok) throw new Error(data.detail??"Could not save story"); setBrief({...empty,...data.story}); setMessage("Creator story saved. The uploaded portrait remains the player's identity source.");
-    } catch(e){setMessage(e instanceof Error?e.message:"Story save failed");} finally{setBusy(false);}
+    } catch(e){setMessage(e instanceof Error?e.message:"Story save failed"); return false;} finally{setBusy(false);}
   }
   async function buildWorld(){
     setBusy(true);
@@ -37,8 +37,8 @@ export default function StoryBuilderPanel({projectId,api}:Props) {
       <label>Mission count<input type="number" min="1" max="20" value={brief.mission_count} onChange={e=>set("mission_count",Number(e.target.value))}/></label>
       <label>World scale<select value={brief.world_scale} onChange={e=>set("world_scale",e.target.value)}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
     </div>
-    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button disabled={busy||!brief.title.trim()} onClick={()=>void save()}>Save story direction</button><button disabled={busy||!brief.title.trim()} onClick={()=>void (async()=>{await save(); await buildWorld();})()}>Save & build 3D world</button></div>
-    {world&&<p style={{margin:0,color:"#8fd1a8"}}>World spec ready · {world.dimensions?.join(" × ")} units · {world.landmarks} landmarks · {world.props} props · {world.geometry_spec}</p>}
+    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button disabled={busy||!brief.title.trim()} onClick={()=>void save()}>Save story direction</button><button disabled={busy||!brief.title.trim()} onClick={()=>void (async()=>{if(await save()) await buildWorld();})()}>Save & build 3D world</button></div>
+    {world&&<p style={{margin:0,color:"#8fd1a8"}}>3D GLB ready · {world.dimensions?.join(" × ")} units · {world.landmarks} landmarks · {world.props} props · {world.glb_scene}</p>}
     <p aria-live="polite" style={{margin:0,color:"#d5c28e",fontSize:12}}>{message}</p>
   </article>;
 }
