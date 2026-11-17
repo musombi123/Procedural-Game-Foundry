@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import StoryBuilderPanel from "./StoryBuilderPanel";
+import PlayerAvatarBuilder from "./PlayerAvatarBuilder";
 
 type StageState = "LOCKED" | "READY" | "RUNNING" | "REVIEW" | "APPROVED" | "FAILED";
 type Stage = { stage: string; state: StageState; revision: number; progress: number; summary: string; output: Record<string, unknown>; error?: string | null };
@@ -106,7 +107,8 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
           <small style={{ display: "block", marginTop: 6, color: pipeline.source_video ? "#7ec79c" : "#9fb0c4" }}>{pipeline.source_video ? pipeline.source_video.filename : "MP4, MOV, MKV, WebM or AVI · max 8 GB"}</small>
         </label>
       </div>
-      <StoryBuilderPanel projectId={projectId} api={api} />
+      <StoryBuilderPanel projectId={projectId} api={api} onStorySaved={() => void refresh()} />
+      <PlayerAvatarBuilder projectId={projectId} api={api} portraitReady={!!pipeline.source_photo} playerReady={pipeline.stages.some(stage => stage.stage === "player" && stage.state === "READY")} onBuilt={() => void refresh()} />
       {pipeline.stages.map((stage) => <article key={stage.stage} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: 13, border: "1px solid #2b3a4e", borderRadius: 10, background: "#142235" }}>
         <div style={{ minWidth: 180, flex: 1 }}><b>{stageNames[stage.stage] ?? stage.stage}</b><div style={{ fontSize: 12, color: "#9fb0c4", marginTop: 5 }}>{stage.summary} · revision {stage.revision + 1}</div>{stage.error && <div style={{ color: "#ef9696", fontSize: 12 }}>{stage.error}</div>}</div>
         <span style={{ color: statusColor[stage.state], fontSize: 11, fontWeight: 800, letterSpacing: .8 }}>{stage.state}</span>
