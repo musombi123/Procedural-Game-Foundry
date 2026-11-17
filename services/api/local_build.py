@@ -234,7 +234,7 @@ def _android_template_status(godot: str | None) -> dict[str, Any]:
         directory = _godot_template_directory(godot)
     except RuntimeError as exc:
         return {"available": False, "version": None, "path": None, "missing": [str(exc)]}
-    required = ("android_debug.apk", "android_release.apk", "android_source.zip")
+    required = ("android_debug.apk", "android_release.apk", "android_source.zip", "version.txt")
     missing = [name for name in required if not (directory / name).is_file()]
     return {
         "available": not missing,
@@ -428,7 +428,8 @@ def _write_android_preset(project: Path, request: AndroidBuildRequest, output: P
         assets = project / "android_assets"
         assets.mkdir(parents=True, exist_ok=True)
         destination = assets / "launcher-icon.png"
-        shutil.copy2(source, destination)
+        if source != destination.resolve():
+            shutil.copy2(source, destination)
         icon_ref = "res://android_assets/launcher-icon.png"
 
     orientation = {"landscape": 0, "portrait": 1, "sensor": 6}[request.orientation]
@@ -476,7 +477,6 @@ package/signed=true
 version/code={request.version_code}
 version/name={_quote(request.version_name)}
 screen/immersive_mode=true
-screen/orientation={orientation}
 launcher_icons/main_192x192={_quote(icon_ref)}
 launcher_icons/adaptive_foreground_432x432={_quote(icon_ref)}
 {permission_lines}
