@@ -57,4 +57,4 @@ async def store_upload(upload: UploadFile, kind: str, destination: Path) -> dict
         temporary.unlink(missing_ok=True)
         raise
     return {"filename": final_path.name, "content_type": content_type, "size_bytes": total,
-            "sha256": digest.hexdigest(), "storage_key": str(final_path.relative_to(destination.parent))}
+            "sha256": digest.hexdigest(), "storage_key": str(final_path.relative_to(destination.parent.parent))}
