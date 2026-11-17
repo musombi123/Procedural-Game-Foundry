@@ -19,8 +19,7 @@ from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
 
-from core.game_assembler.godot import assemble_godot_project
-from core.game_assembler.workspace_adapter import build_documents
+from core.game_assembler.workspace_pipeline import assemble_workspace_game
 from services.storage.postgres import database, ensure_schema
 from services.storage import object_store
 
@@ -117,14 +116,20 @@ def _artifact(job: dict[str, Any], path: Path, filename: str, content_type: str)
 def _project_from_job(job: dict[str, Any], workdir: Path):
     payload = job.get("payload") or {}
     source = payload.get("project") or {}
-    target = workdir / "game"
-    asset_directory = target / "assets"
-    asset_directory.mkdir(parents=True, exist_ok=True)
-    asset_paths: dict[str, str] = {}
+    blender = _executable("BLENDER_BIN", "blender")
+    godot = _executable("GODOT_BIN", "godot") or shutil.which("godot4")
+    if not blender:
+        raise RuntimeError("Blender is not installed on this worker (set BLENDER_BIN or add blender to PATH).")
+    if not godot:
+        raise RuntimeError("Godot 4 is not installed on this worker (set GODOT_BIN or add godot to PATH).")
 
-    # Only server-selected, owner-scoped GLBs from the queued job are copied into
-    # the project. Filenames are generated from UUIDs; user filenames never form
-    # an output path and cannot escape the build directory.
+    asset_directory = workdir / "creator-assets"
+    asset_directory.mkdir(parents=True, exist_ok=True)
+    asset_paths: dict[str, Path] = {}
+
+    # Only server-selected, owner-scoped GLBs from the queued job are downloaded.
+    # Generated local filenames prevent creator filenames from escaping the worker
+    # directory or becoming executable paths.
     for asset in payload.get("assets") or []:
         try:
             asset_id = str(UUID(str(asset.get("id") or "")))
@@ -139,12 +144,12 @@ def _project_from_job(job: dict[str, Any], workdir: Path):
         object_store.download_file(object_key, destination)
         if not destination.is_file() or destination.stat().st_size < 20:
             raise RuntimeError(f"Creator asset {asset_id} is empty or invalid.")
-        asset_paths[asset_id] = f"res://assets/{asset_id}.glb"
+        asset_paths[asset_id] = destination
 
-    definition, world = build_documents(str(job["project_id"]), source, asset_paths)
-    assemble_godot_project(definition, target, world.model_dump(mode="json"))
-    _write_export_presets(target)
-    return target
+    target = workdir / "assembled-workspace"
+    project_dir, manifest = assemble_workspace_game(source, asset_paths, target, blender, godot)
+    _write_export_presets(project_dir)
+    return project_dir
 
 
 def _write_export_presets(project: Path) -> None:
