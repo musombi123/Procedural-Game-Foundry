@@ -1,31 +1,14 @@
-# Local-only model adapter configuration. Download weights separately and verify each license.
-# No remote inference endpoint or paid API key is supported by this profile.
-profile: local-default
-models:
-  video_vision:
-    provider: ollama
-    model: qwen2.5vl:7b
-    enabled: false
-    license_review: required
-  story_planner:
-    provider: ollama
-    model: qwen2.5:7b-instruct
-    enabled: false
-    license_review: required
-  transcription:
-    provider: faster-whisper
-    model: small
-    compute_type: int8
-    enabled: false
-    license: MIT
-  image_generation:
-    provider: local-diffusers
-    model: stable-diffusion-xl-base-1.0
-    enabled: false
-    license_review: required
-  image_to_3d:
-    provider: local-process
-    model: triposr
-    enabled: false
-    license_review: required
-# Hardware policy is enforced by worker preflight, not inferred from this example.
+# Tools-only local pipeline configuration. No neural model weights or inference runtimes.
+profile: local-tools
+media:
+  ffmpeg: required
+  ffprobe: required
+  scene_cut_threshold: 0.35
+  maximum_keyframes: 24
+geometry:
+  blender: required_for_glb_export
+  generator: deterministic-procedural-v1
+  coordinate_system: right-handed-y-up
+runtime:
+  godot: required_for_playable_game_export
+

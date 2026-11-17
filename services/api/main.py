@@ -1,7 +1,10 @@
+import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.project_engine.models import ProjectCreate, WorldDocument
@@ -137,7 +140,7 @@ def project_files(pid: str):
 
 
 # Movie-to-game pipeline: persisted, creator-approved stage state machine.
-from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, new_pipeline
+from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, StageState, new_pipeline
 from core.movie_pipeline.service import PipelineError, PipelineStore
 from core.movie_pipeline.worker import analyze_project
 
@@ -151,8 +154,8 @@ def create_movie_pipeline(pid: str, request: PipelineCreate):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     rights = request.rights
-    if not (rights.has_video_rights and rights.has_photo_rights and rights.likeness_consent and rights.accepts_original_assets_only):
-        raise HTTPException(400, "Confirm video rights, photo rights, likeness consent and original-asset generation before processing")
+    if not (rights.has_photo_rights and rights.likeness_consent and rights.accepts_original_assets_only):
+        raise HTTPException(400, "Confirm photo rights, likeness consent and original-asset generation before processing")
     store = PipelineStore(folder)
     if store.path.exists():
         raise HTTPException(409, "A movie pipeline already exists for this project")
@@ -258,3 +261,213 @@ def run_movie_analysis_job(job_id: str, folder: Path):
                     message=f"Analysis ready for review ({len(result.get('keyframes', []))} keyframes)", error=None)
     except Exception as exc:
         jobs.update(job_id, state=JobState.FAILED, message="Movie analysis failed", error=str(exc))
+
+
+# Creator-authored story and deterministic procedural 3D world tools.
+from core.movie_pipeline.story import StoryBrief
+from core.movie_pipeline.procedural_world import build_world_spec
+
+@app.put("/api/projects/{pid}/movie-pipeline/story")
+def save_creator_story(pid: str, brief: StoryBrief):
+    """Save a creator-written story/instruction set; no model or inference service is called."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        pipeline = PipelineStore(folder).load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if brief.mode in ("movie", "guided") and not pipeline.source_video:
+        raise HTTPException(409, "Upload a movie clip for movie or guided mode")
+    if brief.mode in ("movie", "guided") and not pipeline.rights.has_video_rights:
+        raise HTTPException(409, "Confirm that you own or have permission to use the movie clip before selecting movie or guided mode")
+    if not pipeline.source_photo:
+        raise HTTPException(409, "Upload the player's portrait before creating the player avatar")
+    story = brief.as_manifest()
+    path = PipelineStore(folder).folder / "story.json"
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(story, indent=2), encoding="utf-8")
+    temporary.replace(path)
+    # A story-first project has no film-analysis prerequisite; explicitly skip that stage.
+    if brief.mode == "story":
+        records = {record.stage: record for record in pipeline.stages}
+        records[StageId.ANALYSIS].state = StageState.APPROVED
+        records[StageId.ANALYSIS].summary = "Skipped by creator: story-first workflow"
+        records[StageId.PLAYER].state = __import__("core.movie_pipeline.models", fromlist=["StageState"]).StageState.READY
+        records[StageId.PLAYER].summary = "Portrait and creator story ready for procedural player generation"
+        pipeline.active_stage = StageId.PLAYER
+        PipelineStore(folder).save(pipeline)
+    return {"saved": True, "story": story}
+
+@app.get("/api/projects/{pid}/movie-pipeline/story")
+def get_creator_story(pid: str):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    path = PipelineStore(folder).folder / "story.json"
+    if not path.is_file():
+        raise HTTPException(404, "No creator story has been saved")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+@app.post("/api/projects/{pid}/movie-pipeline/environment/build")
+def build_procedural_environment(pid: str):
+    """Create a deterministic 3D scene specification for Blender; no AI models involved."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    store = PipelineStore(folder)
+    try:
+        pipeline = store.load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Movie pipeline not found") from exc
+    stage = next(item for item in pipeline.stages if item.stage == StageId.ENVIRONMENT)
+    if stage.state != StageState.READY:
+        raise HTTPException(409, "Approve the procedural player stage before generating the environment")
+    story_path = store.folder / "story.json"
+    if not story_path.is_file():
+        raise HTTPException(409, "Save the creator story before generating the 3D environment")
+    story = json.loads(story_path.read_text(encoding="utf-8"))
+    spec = build_world_spec(story)
+    output = PipelineStore(folder).folder / "environment" / "world-spec.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+    temporary.replace(output)
+    blender = shutil.which("blender")
+    if not blender:
+        raise HTTPException(503, "Blender is required to turn the saved 3D geometry specification into a GLB scene")
+    script = Path(__file__).resolve().parents[2] / "blender" / "scripts" / "build_movie_world.py"
+    glb = output.parent / "environment.glb"
+    stage.state = StageState.RUNNING
+    stage.summary = "Building procedural 3D environment with Blender"
+    store.save(pipeline)
+    try:
+        result = subprocess.run([blender, "--background", "--python", str(script), "--",
+                                 "--spec", str(output), "--output", str(glb)],
+                                capture_output=True, text=True, timeout=900, check=True)
+    except subprocess.TimeoutExpired as exc:
+        stage.state = StageState.FAILED; stage.error = "Blender environment generation exceeded 15 minutes"; store.save(pipeline)
+        raise HTTPException(504, stage.error) from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "Blender failed")[-2500:]
+        stage.state = StageState.FAILED; stage.error = detail; stage.summary = "3D environment generation failed"; store.save(pipeline)
+        raise HTTPException(500, "3D environment generation failed: " + detail) from exc
+    if not glb.is_file() or glb.stat().st_size < 1024:
+        stage.state = StageState.FAILED; stage.error = "Blender did not produce a valid GLB scene"; store.save(pipeline)
+        raise HTTPException(500, stage.error)
+    reviewed = store.mark_review(StageId.ENVIRONMENT, {"glb_scene":str(glb.relative_to(folder)), "geometry_spec":str(output.relative_to(folder)), "landmarks":len(spec["landmarks"]), "props":len(spec["props"]), "dimensions":spec["dimensions"], "glb_bytes":glb.stat().st_size, "requires_creator_review":True}, "Procedural 3D environment generated; inspect geometry and navigation before approval")
+    return {"generated": True, "stage":next(item.model_dump(mode="json") for item in reviewed.stages if item.stage==StageId.ENVIRONMENT), "geometry_spec": str(output.relative_to(folder)),
+            "glb_scene": str(glb.relative_to(folder)), "glb_bytes": glb.stat().st_size,
+            "landmarks": len(spec["landmarks"]), "props": len(spec["props"]),
+            "dimensions": spec["dimensions"], "requires_creator_review": True}
+
+
+@app.post("/api/projects/{pid}/movie-pipeline/player/build")
+def build_procedural_player(pid: str, request: dict):
+    """Build a portrait-referenced, editable procedural humanoid using Blender only."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        store = PipelineStore(folder)
+        pipeline = store.load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not pipeline.source_photo:
+        raise HTTPException(409, "Upload a full-body player portrait first")
+    story_path = store.folder / "story.json"
+    if not story_path.is_file():
+        raise HTTPException(409, "Save the creator story before generating the player")
+    stage = next(item for item in pipeline.stages if item.stage == StageId.PLAYER)
+    if stage.state.value != "READY":
+        raise HTTPException(409, "Approve movie analysis first, or save a story-first brief, before generating the player")
+    blender = shutil.which("blender")
+    if not blender:
+        raise HTTPException(503, "Blender is required for procedural character generation")
+    proportions = request.get("proportions", {})
+    if not isinstance(proportions, dict):
+        raise HTTPException(400, "Proportions must be an object")
+    allowed = {"height", "shoulder_width", "hip_width", "leg_ratio", "build", "face_center_x", "face_top", "face_width", "face_height"}
+    if set(proportions) - allowed:
+        raise HTTPException(400, "Unknown avatar proportion field")
+    defaults = {"height":1.78,"shoulder_width":0.46,"hip_width":0.34,"leg_ratio":0.52,"build":1.0,"face_center_x":0.5,"face_top":0.035,"face_width":0.22,"face_height":0.16}
+    values = {**defaults, **proportions}
+    bounds = {"height":(1.35,2.2),"shoulder_width":(.32,.7),"hip_width":(.24,.55),"leg_ratio":(.42,.62),"build":(.75,1.3),"face_center_x":(.1,.9),"face_top":(0,.6),"face_width":(.12,.4),"face_height":(.08,.3)}
+    for key,(low,high) in bounds.items():
+        try: values[key] = float(values[key])
+        except (TypeError,ValueError) as exc: raise HTTPException(400,f"{key} must be numeric") from exc
+        if not low <= values[key] <= high: raise HTTPException(400,f"{key} must be between {low} and {high}")
+    if values["face_top"] + values["face_height"] > 1 or values["face_center_x"] - values["face_width"]/2 < 0 or values["face_center_x"] + values["face_width"]/2 > 1:
+        raise HTTPException(400, "Face crop rectangle must stay inside the uploaded portrait")
+    portrait = (folder / pipeline.source_photo["storage_key"]).resolve()
+    uploads = (store.folder / "uploads").resolve()
+    if uploads not in portrait.parents or not portrait.is_file():
+        raise HTTPException(400, "Player portrait is missing or outside the upload directory")
+    avatar_dir = store.folder / "player" / f"revision-{stage.revision}"
+    avatar_dir.mkdir(parents=True,exist_ok=True)
+    spec_path = avatar_dir / "avatar.json"
+    spec_path.write_text(json.dumps({"proportions":values,"face_crop":{"center_x":values["face_center_x"],"top":values["face_top"],"width":values["face_width"],"height":values["face_height"]},"portrait_sha256":pipeline.source_photo.get("sha256"),
+                                    "identity_source":"uploaded_portrait","creator_review_required":True},indent=2),encoding="utf-8")
+    glb = avatar_dir / "player-avatar.glb"
+    script = Path(__file__).resolve().parents[2] / "blender" / "scripts" / "build_player_avatar.py"
+    stage.state = StageState.RUNNING
+    stage.summary = "Building procedural humanoid mesh and armature with Blender"
+    store.save(pipeline)
+    try:
+        result = subprocess.run([blender,"--background","--python",str(script),"--","--portrait",str(portrait),
+                                 "--output",str(glb),"--spec",str(spec_path)],
+                                capture_output=True,text=True,timeout=900,check=True)
+    except (subprocess.TimeoutExpired,subprocess.CalledProcessError) as exc:
+        stage.state = StageState.FAILED
+        stage.error = (getattr(exc,"stderr",None) or str(exc))[-2500:]
+        stage.summary = "Procedural player generation failed"
+        store.save(pipeline)
+        raise HTTPException(500,stage.error) from exc
+    if not glb.is_file() or glb.stat().st_size < 1024:
+        stage.state = StageState.FAILED
+        stage.error = "Blender did not produce a valid GLB avatar"
+        store.save(pipeline)
+        raise HTTPException(500,stage.error)
+    rig_summary = {}
+    for line in reversed((result.stdout or "").splitlines()):
+        try:
+            rig_summary = json.loads(line)
+            break
+        except json.JSONDecodeError:
+            continue
+    updated = store.mark_review(StageId.PLAYER,{"glb_scene":str(glb.relative_to(folder)),
+        "spec":str(spec_path.relative_to(folder)),"glb_bytes":glb.stat().st_size,
+        "portrait_sha256":pipeline.source_photo.get("sha256"),"generator":"PGF procedural humanoid v1",
+        "proportions":values,"bone_count":rig_summary.get("bone_count"),"requires_creator_review":True},
+        "Procedural player avatar generated; inspect proportions, face and rig before approval")
+    return {"generated":True,"stage":next(item.model_dump(mode="json") for item in updated.stages if item.stage==StageId.PLAYER),
+            "glb_scene":str(glb.relative_to(folder)),"glb_bytes":glb.stat().st_size,
+            "proportions":values,"requires_creator_review":True}
+
+
+@app.get("/api/projects/{pid}/movie-pipeline/assets/{asset_path:path}")
+def get_movie_pipeline_asset(pid: str, asset_path: str):
+    """Serve only generated, project-scoped GLB artifacts for creator preview/download."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    relative = Path(asset_path)
+    if relative.is_absolute() or ".." in relative.parts or relative.suffix.lower() != ".glb":
+        raise HTTPException(400, "Only project-scoped GLB assets can be retrieved")
+    if not relative.parts or relative.parts[0] != "movie_pipeline" or len(relative.parts) < 3:
+        raise HTTPException(400, "Asset path is outside generated movie-pipeline artifacts")
+    target = (folder / relative).resolve()
+    root = (folder / "movie_pipeline").resolve()
+    if root not in target.parents or not target.is_file():
+        raise HTTPException(404, "Generated asset not found")
+    return FileResponse(target, media_type="model/gltf-binary", filename=target.name)

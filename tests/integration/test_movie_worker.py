@@ -19,7 +19,8 @@ def _project(tmp_path):
     upload.mkdir()
     video = upload / "source-movie.mp4"
     video.write_bytes(b"fixture")
-    doc.source_photo = {"storage_key": "movie_pipeline/uploads/player-portrait.jpg"}\n    doc.source_video = {"storage_key": "movie_pipeline/uploads/source-movie.mp4", "sha256": "abc"}
+    doc.source_photo = {"storage_key": "movie_pipeline/uploads/player-portrait.jpg"}
+    doc.source_video = {"storage_key": "movie_pipeline/uploads/source-movie.mp4", "sha256": "abc"}
     store.save(doc)
     return folder, store, video
 
@@ -65,11 +66,12 @@ def test_analysis_run_endpoint_queues_job_and_completes(tmp_path, monkeypatch):
     client = TestClient(api.app)
     project = client.post("/api/projects", json={"name": "Worker API"}).json()
     pid = project["id"]
-    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS})
+    created = client.post(f"/api/projects/{pid}/movie-pipeline", json={"rights": RIGHTS.model_dump(mode="json")})
     assert created.status_code == 201
     store = PipelineStore(api.manager.path_for(pid))
     document = store.load()
-    document.source_photo = {"storage_key": "movie_pipeline/uploads/player-portrait.jpg"}\n    document.source_video = {"storage_key": "movie_pipeline/uploads/source-movie.mp4"}
+    document.source_photo = {"storage_key": "movie_pipeline/uploads/player-portrait.jpg"}
+    document.source_video = {"storage_key": "movie_pipeline/uploads/source-movie.mp4"}
     store.save(document)
     queued = client.post(f"/api/projects/{pid}/movie-pipeline/stages/analysis/run")
     assert queued.status_code == 202

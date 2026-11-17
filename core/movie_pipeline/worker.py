@@ -1,4 +1,4 @@
-"""Local, model-optional media analysis worker for the movie-to-game pipeline."""
+"""Local, tools-only media analysis worker for the movie-to-game pipeline."""
 from __future__ import annotations
 
 import json
@@ -86,21 +86,9 @@ def _extract_frames(video: Path, output_dir: Path, times: list[float]) -> list[d
     return frames
 
 def _transcribe(video: Path, output_dir: Path) -> dict[str, Any]:
-    model_name = os.environ.get("PGF_WHISPER_MODEL", "").strip()
-    if not model_name:
-        return {"status": "skipped", "reason": "Set PGF_WHISPER_MODEL to enable local faster-whisper transcription"}
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError:
-        return {"status": "unavailable", "reason": "faster-whisper is not installed"}
-    model = WhisperModel(model_name, device=os.environ.get("PGF_WHISPER_DEVICE", "cpu"),
-                         compute_type=os.environ.get("PGF_WHISPER_COMPUTE_TYPE", "int8"))
-    segments, info = model.transcribe(str(video), vad_filter=True)
-    transcript = [{"start": round(s.start, 3), "end": round(s.end, 3), "text": s.text.strip()} for s in segments]
-    path = output_dir / "transcript.json"
-    path.write_text(json.dumps({"language": info.language, "segments": transcript}, indent=2), encoding="utf-8")
-    return {"status": "completed", "language": info.language, "segments": len(transcript),
-            "path": str(path.relative_to(output_dir.parent))}
+    """No speech-recognition model is loaded in tools-only mode."""
+    return {"status": "skipped", "reason": "Tools-only mode: speech transcription models are disabled; provide story/dialogue context in the creator brief"}
+
 
 def analyze_project(project_folder: Path) -> dict[str, Any]:
     store = PipelineStore(project_folder)
@@ -141,8 +129,8 @@ def analyze_project(project_folder: Path) -> dict[str, Any]:
                                            for i, t in enumerate(times)]},
             "keyframes": frames,
             "transcription": transcription,
-            "vision_analysis": {"status": "not_configured", "reason": "No local vision model adapter is configured"},
-            "story_design": {"status": "pending_creator_review", "reason": "Local language/vision model synthesis is a subsequent adapter stage"},
+            "vision_analysis": {"status": "disabled_tools_only", "reason": "Visual interpretation is creator-guided; no machine-learning vision models are loaded"},
+            "story_design": {"status": "creator_authored", "reason": "Use the creator story editor to define plot, missions and instructions; no generated text is used"},
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         manifest = analysis_dir / "analysis.json"
