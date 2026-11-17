@@ -140,3 +140,40 @@ def test_production_jobs_are_persisted_and_owner_scoped(owner_client):
     api.app.dependency_overrides[current_principal] = lambda: {"id": "different-user", "name": ""}
     assert client.get(f"/api/v1/workspace/jobs/{job_id}").status_code == 404
     api.app.dependency_overrides[current_principal] = lambda: {"id": owner_id, "name": "Test Creator"}
+
+
+
+def test_project_delete_cleans_private_artifacts_and_rejects_active_jobs(owner_client, monkeypatch):
+    owner_id, client = owner_client
+    project = create_cloud_project(client)
+    project_id = project["id"]
+
+    queued = client.post(f"/api/v1/workspace/projects/{project_id}/jobs", json={
+        "kind": "scene.generate",
+        "target": "desktop",
+    })
+    assert queued.status_code == 202, queued.text
+    job_id = queued.json()["job_id"]
+
+    blocked = client.delete(f"/api/v1/workspace/projects/{project_id}")
+    assert blocked.status_code == 409
+
+    artifact_id = uuid4()
+    object_key = f"nexora-artifacts/{owner_id}/{job_id}/{artifact_id}/scene.zip"
+    with database() as connection:
+        connection.execute(
+            "UPDATE nexora_jobs SET state='completed' WHERE id=%s AND owner_id=%s",
+            (job_id, owner_id),
+        )
+        connection.execute(
+            "INSERT INTO nexora_artifacts (id, job_id, owner_id, object_key, filename, content_type, size) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (artifact_id, job_id, owner_id, object_key, "scene.zip", "application/zip", 2048),
+        )
+
+    removed = []
+    monkeypatch.setattr(workspace.object_store, "delete", lambda key: removed.append(key))
+    deleted = client.delete(f"/api/v1/workspace/projects/{project_id}")
+    assert deleted.status_code == 204
+    assert removed == [object_key]
+    assert client.get(f"/api/v1/workspace/projects/{project_id}").status_code == 404
