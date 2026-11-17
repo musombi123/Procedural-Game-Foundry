@@ -60,7 +60,7 @@ def verify_identity_token(authorization: str | None) -> dict[str, str]:
         response = httpx.get(
             _identity_url(),
             headers={"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"},
-            timeout=httpx.Timeout(60.0, connect=5.0),
+            timeout=httpx.Timeout(15.0, connect=4.0),
             follow_redirects=False,
         )
     except httpx.HTTPError as exc:
