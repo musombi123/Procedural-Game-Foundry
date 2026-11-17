@@ -15,7 +15,7 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
 
@@ -115,9 +115,33 @@ def _artifact(job: dict[str, Any], path: Path, filename: str, content_type: str)
 
 
 def _project_from_job(job: dict[str, Any], workdir: Path):
-    source = (job.get("payload") or {}).get("project") or {}
-    definition, world = build_documents(str(job["project_id"]), source)
+    payload = job.get("payload") or {}
+    source = payload.get("project") or {}
     target = workdir / "game"
+    asset_directory = target / "assets"
+    asset_directory.mkdir(parents=True, exist_ok=True)
+    asset_paths: dict[str, str] = {}
+
+    # Only server-selected, owner-scoped GLBs from the queued job are copied into
+    # the project. Filenames are generated from UUIDs; user filenames never form
+    # an output path and cannot escape the build directory.
+    for asset in payload.get("assets") or []:
+        try:
+            asset_id = str(UUID(str(asset.get("id") or "")))
+        except ValueError:
+            continue
+        if not str(asset.get("filename") or "").lower().endswith(".glb"):
+            continue
+        object_key = str(asset.get("object_key") or "")
+        if not object_key or not object_key.startswith("owners/"):
+            raise RuntimeError("A creator asset has an invalid private object key.")
+        destination = asset_directory / f"{asset_id}.glb"
+        object_store.download_file(object_key, destination)
+        if not destination.is_file() or destination.stat().st_size < 20:
+            raise RuntimeError(f"Creator asset {asset_id} is empty or invalid.")
+        asset_paths[asset_id] = f"res://assets/{asset_id}.glb"
+
+    definition, world = build_documents(str(job["project_id"]), source, asset_paths)
     assemble_godot_project(definition, target, world.model_dump(mode="json"))
     _write_export_presets(target)
     return target
