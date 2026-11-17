@@ -616,18 +616,25 @@ def register_local_build_routes(app, manager: ProjectManager, jobs: JobRegistry)
         godot = _godot()
         adb = _adb()
         sdk = _android_sdk()
-        java = shutil.which("java")
-        apksigner = _sdk_tool("apksigner") or shutil.which("apksigner")
-        aapt = _sdk_tool("aapt") or shutil.which("aapt")
+        jdk = java_home()
+        apksigner = _sdk_tool("apksigner")
+        aapt = _sdk_tool("aapt")
+        components = sdk_components(sdk)
+        templates = template_status(godot)
         return {
             "godot": {"available": bool(godot), "path": godot},
-            "java": {"available": bool(java), "path": java},
-            "android_sdk": {"available": bool(sdk), "path": str(sdk) if sdk else None},
+            "java": {"available": bool(jdk), "path": str(jdk) if jdk else None},
+            "android_sdk": {"available": components["available"], "path": str(sdk) if sdk else None},
+            "android_sdk_components": components,
             "adb": {"available": bool(adb), "path": adb},
             "apksigner": {"available": bool(apksigner), "path": apksigner},
             "aapt": {"available": bool(aapt), "path": aapt},
-            "android_export_templates": bool(Path.home().joinpath(".local/share/godot/export_templates").is_dir()
-                                             or Path.home().joinpath("AppData/Roaming/Godot/export_templates").is_dir()),
+            "android_export_templates": templates["available"],
+            "android_export_template_version": templates["version"],
+            "android_export_template_path": templates["path"],
+            "missing_android_templates": templates["missing"],
+            "godot_android_settings_configured": settings_match(godot, sdk, jdk),
+            "godot_android_settings_auto_configure": bool(godot and sdk and jdk),
             "desktop_local": True,
         }
 
@@ -706,6 +713,36 @@ def register_local_build_routes(app, manager: ProjectManager, jobs: JobRegistry)
         if not (root / "pgf.json").is_file():
             raise HTTPException(status_code=404, detail="Project not found.")
         return {"builds": _read_history(root)}
+
+    @app.post("/api/projects/{project_id}/android-icon", status_code=201)
+    async def upload_android_icon(project_id: str, file: UploadFile = File(...)):
+        _require_desktop()
+        try:
+            root = manager.path_for(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid project ID.") from exc
+        if not (root / "pgf.json").is_file():
+            raise HTTPException(status_code=404, detail="Project not found.")
+        if Path(file.filename or "").suffix.casefold() != ".png":
+            raise HTTPException(status_code=415, detail="Launcher icon must be a PNG file.")
+        data = await file.read(6 * 1024 * 1024 + 1)
+        if len(data) > 6 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Launcher icon files are limited to 6 MB.")
+        if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+            raise HTTPException(status_code=415, detail="The uploaded file is not a valid PNG image.")
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        if width != height or width < 432:
+            raise HTTPException(status_code=422, detail="Use a square PNG at least 432×432 pixels for Android adaptive icons.")
+        game = _ensure_game(manager, project_id)
+        assets = game / "android_assets"
+        assets.mkdir(parents=True, exist_ok=True)
+        destination = assets / "launcher-icon.png"
+        temporary = assets / "launcher-icon.png.tmp"
+        temporary.write_bytes(data)
+        temporary.replace(destination)
+        return {"icon_path": str(destination.resolve()), "width": width, "height": height, "size": len(data)}
+
 
     @app.post("/api/projects/{project_id}/android-build", status_code=202)
     def create_android_build(project_id: str, request: AndroidBuildRequest, background: BackgroundTasks):
