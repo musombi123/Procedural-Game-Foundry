@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
+import shutil
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
