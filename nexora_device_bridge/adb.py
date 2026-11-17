@@ -77,19 +77,19 @@ def inspect_apk(path: Path) -> dict[str, str]:
         raise AdbError("Could not read the Android application ID from the APK.")
     return {"package_id": validate_package_id(match.group(1))}
 
-def install_apk(serial: str, package_id: str, content: bytes) -> dict[str, Any]:
+def install_apk_file(serial: str, package_id: str, path: Path) -> dict[str, Any]:
     serial, package_id = validate_serial(serial), validate_package_id(package_id)
-    if not content or len(content) > MAX_APK_BYTES:
+    if not path.is_file() or path.stat().st_size <= 0 or path.stat().st_size > MAX_APK_BYTES:
         raise AdbError("APK file is empty or exceeds the 1 GB transfer limit.")
-    with tempfile.TemporaryDirectory(prefix="nexora-apk-") as directory:
-        path = Path(directory) / "creator-build.apk"
-        path.write_bytes(content)
-        metadata = inspect_apk(path)
-        if metadata["package_id"] != package_id:
-            raise AdbError(f"APK package ID mismatch: expected {package_id}, found {metadata['package_id']}.")
-        checksum = hashlib.sha256(content).hexdigest()
-        output = run_adb(["-s", serial, "install", "-r", "-t", str(path)], timeout=180)
-        return {"serial": serial, "package_id": package_id, "sha256": checksum, "install_output": output[-1000:]}
+    metadata = inspect_apk(path)
+    if metadata["package_id"] != package_id:
+        raise AdbError(f"APK package ID mismatch: expected {package_id}, found {metadata['package_id']}.")
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    output = run_adb(["-s", serial, "install", "-r", "-t", str(path)], timeout=180)
+    return {"serial": serial, "package_id": package_id, "sha256": digest.hexdigest(), "install_output": output[-1000:]}
 
 def launch_app(serial: str, package_id: str) -> dict[str, str]:
     serial, package_id = validate_serial(serial), validate_package_id(package_id)
