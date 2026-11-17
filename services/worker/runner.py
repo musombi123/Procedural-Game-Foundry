@@ -370,7 +370,7 @@ def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
     outputs = {
         "Linux/X11": project / "build" / "linux" / "NexoraFoundry.x86_64",
         "Windows Desktop": project / "build" / "windows" / "NexoraFoundry.exe",
-        "Android": project / "build" / "android" / ("NexoraFoundry-release." if build_type == "release" else "NexoraFoundry-debug.") + artifact_format,
+        "Android": project / "build" / "android" / (("NexoraFoundry-release." if build_type == "release" else "NexoraFoundry-debug.") + artifact_format),
     }
     export_results = []
     for preset in requested:
