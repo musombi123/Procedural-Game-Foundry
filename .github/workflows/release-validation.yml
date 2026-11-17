@@ -112,9 +112,9 @@ jobs:
 
       - name: Verify release checksums
         run: |
-          sha256sum -c dist/release/linux/checksums.sha256
-          sha256sum -c dist/release/windows/checksums.sha256
-          sha256sum -c dist/release/android/checksums.sha256
+          (cd dist/release/linux && sha256sum -c checksums.sha256)
+          (cd dist/release/windows && sha256sum -c checksums.sha256)
+          (cd dist/release/android && sha256sum -c checksums.sha256)
 
       - name: Upload creator-test release candidates
         uses: actions/upload-artifact@v4
