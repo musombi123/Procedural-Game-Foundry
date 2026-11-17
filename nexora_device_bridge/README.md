@@ -13,7 +13,7 @@ The bridge is a local companion for the desktop-first NEXORA game-production wor
 ## Requirements
 - Windows 10/11, macOS or Linux desktop.
 - Python 3.11+ for source mode.
-- Android SDK Platform Tools (adb) and Android SDK Build Tools (apkanalyzer or aapt).
+- Android SDK Platform Tools (adb) and Android SDK Build Tools (apksigner plus apkanalyzer or aapt).
 - Android device with Developer Options and USB Debugging enabled, or Wireless Debugging paired by the creator.
 
 ## Run from source
