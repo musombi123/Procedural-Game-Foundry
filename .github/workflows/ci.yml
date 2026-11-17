@@ -208,11 +208,11 @@ jobs:
             APK="$(find artifacts -type f -name 'NexoraFoundry-debug.apk' -print -quit)"
             test -n "$APK"
             adb install "$APK"
-            adb shell monkey -p org.nexora.foundry 1
+            adb shell monkey -p com.nexora.foundry 1
             sleep 25
-            adb shell pidof org.nexora.foundry
-            if adb logcat -d -t 2000 | grep -E "FATAL EXCEPTION|Process: org.nexora.foundry.*has died"; then
+            adb shell pidof com.nexora.foundry
+            if adb logcat -d -t 2000 | grep -E "FATAL EXCEPTION|Process: com.nexora.foundry.*has died"; then
               echo "NEXORA Android process crashed during launch smoke test."
               exit 1
             fi
-            adb shell dumpsys activity activities | grep -F 'org.nexora.foundry'
+            adb shell dumpsys activity activities | grep -F 'com.nexora.foundry'
