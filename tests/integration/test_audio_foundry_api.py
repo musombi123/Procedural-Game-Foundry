@@ -61,4 +61,4 @@ def test_audio_build_rejects_empty_and_duplicate_cues(tmp_path,monkeypatch):
     assert empty.status_code==400
     duplicate=client.post(f"/api/projects/{pid}/movie-pipeline/audio/build",json={"cues":[
         {"id":"same","label":"A"},{"id":"same","label":"B"}]})
-    assert duplicate.status_code==422
+    assert duplicate.status_code==400
