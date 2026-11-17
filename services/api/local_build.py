@@ -191,6 +191,7 @@ def _sdk_tool(name: str) -> str | None:
     sdk = _android_sdk()
     if sdk:
         choices = sorted((sdk / "build-tools").glob(f"*/{name}"), reverse=True)
+        choices += sorted((sdk / "build-tools").glob(f"*/{name}.exe"), reverse=True)
         choices += sorted((sdk / "build-tools").glob(f"*/{name}.bat"), reverse=True)
         for item in choices:
             if item.is_file():
