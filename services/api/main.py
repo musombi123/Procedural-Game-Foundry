@@ -291,8 +291,21 @@ async def _attach_movie_input(pid: str, kind: str, upload: UploadFile):
     if kind == "video" and not document.rights.has_video_rights:
         raise HTTPException(403, "Confirm video ownership or permission before uploading movie footage")
     attribute = "source_photo" if kind == "photo" else "source_video"
-    if getattr(document, attribute):
-        raise HTTPException(409, f"A {kind} input is already attached; remove it before replacing")
+    existing = getattr(document, attribute)
+    if existing:
+        # A processed source movie has already been deleted. Keep its checksum
+        # in history and allow a replacement so the creator can regenerate analysis.
+        can_replace_processed_video = (
+            kind == "video"
+            and not existing.get("storage_key")
+            and existing.get("original_retained") is False
+        )
+        if not can_replace_processed_video:
+            raise HTTPException(409, f"A {kind} input is already attached; remove it before replacing")
+        document.source_video_history.append({
+            key: value for key, value in existing.items()
+            if key != "storage_key"
+        })
     try:
         metadata = await store_upload(upload, kind, store.folder / "uploads")
     except UploadRejected as exc:
