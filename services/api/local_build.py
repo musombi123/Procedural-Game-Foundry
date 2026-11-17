@@ -431,7 +431,9 @@ keystore/release_password=""
 
 
 def _debug_signing_environment(env: dict[str, str]) -> None:
-    keytool = shutil.which("keytool")
+    java_home = Path(env.get("JAVA_HOME", "")).expanduser()
+    keytool_candidates = [java_home / "bin" / ("keytool.exe" if os.name == "nt" else "keytool")]
+    keytool = next((str(path) for path in keytool_candidates if path.is_file()), None) or shutil.which("keytool")
     if not keytool:
         raise RuntimeError("Java keytool is required to prepare the desktop debug signing key.")
     key_path = Path.home() / ".android" / "debug.keystore"
@@ -477,17 +479,25 @@ def _validate_export(project: Path, output: Path, request: AndroidBuildRequest, 
             raise RuntimeError("Android build-tools apksigner is required to verify the APK signature.")
         verification = _run(_command(apksigner, "verify", "--verbose", str(output)), timeout=180, env=env)
         aapt = _sdk_tool("aapt") or shutil.which("aapt")
-        package_validation = None
-        if aapt:
-            badging = _run(_command(aapt, "dump", "badging", str(output)), timeout=120, env=env)
-            package_validation = next((line.strip() for line in badging["stdout"].splitlines() if line.startswith("package:")), None)
-            if package_validation and f"name='{request.package_id}'" not in package_validation:
-                raise RuntimeError("APK manifest package ID does not match the Build Console configuration.")
+        if not aapt:
+            raise RuntimeError("Android SDK Build-Tools aapt is required to verify the APK package ID.")
+        badging = _run(_command(aapt, "dump", "badging", str(output)), timeout=120, env=env)
+        package_validation = next((line.strip() for line in badging["stdout"].splitlines() if line.startswith("package:")), None)
+        if not package_validation or f"name='{request.package_id}'" not in package_validation:
+            raise RuntimeError("APK manifest package ID does not match the Build Console configuration.")
         return {"signature_verified": True, "signature_output": verification["stdout"][-3000:], "package_manifest": package_validation}
     with zipfile.ZipFile(output) as archive:
         names = set(archive.namelist())
         if "base/manifest/AndroidManifest.xml" not in names or "BundleConfig.pb" not in names:
             raise RuntimeError("AAB validation failed: bundle manifest or BundleConfig.pb is missing.")
+        signature_files = [
+            name for name in names
+            if name.upper().startswith("META-INF/")
+            and name.upper().endswith((".RSA", ".DSA", ".EC"))
+        ]
+        signature_metadata = [name for name in names if name.upper().startswith("META-INF/") and name.upper().endswith(".SF")]
+        if not signature_files or not signature_metadata:
+            raise RuntimeError("AAB validation failed: release signature files are missing.")
     jarsigner = shutil.which("jarsigner")
     if not jarsigner:
         raise RuntimeError("Java jarsigner is required to verify the Android App Bundle signature.")
