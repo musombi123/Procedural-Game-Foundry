@@ -196,3 +196,28 @@ def test_worker_claims_persisted_production_jobs_with_postgres_locking(owner_cli
     assert claimed["state"] == "running"
     assert claimed["worker_id"]
     assert claimed["lease_expires_at"] is not None
+
+def test_failed_blender_asset_can_be_requeued(owner_client):
+    owner_id, client = owner_client
+    project = create_cloud_project(client)
+    asset_id = uuid4()
+    object_key = f"owners/test-owner/projects/{project['id']}/assets/{asset_id}/creator.glb"
+    with database() as connection:
+        connection.execute(
+            "INSERT INTO nexora_assets (id, project_id, owner_id, object_key, filename, content_type, expected_size, size, status) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'failed')",
+            (asset_id, project["id"], owner_id, object_key, "creator.glb", "model/gltf-binary", 2048, 2048),
+        )
+
+    retried = client.post(
+        f"/api/v1/workspace/projects/{project['id']}/assets/{asset_id}/process"
+    )
+    assert retried.status_code == 202, retried.text
+    assert retried.json()["state"] == "queued"
+
+    with database() as connection:
+        row = connection.execute(
+            "SELECT status FROM nexora_assets WHERE id=%s AND owner_id=%s",
+            (asset_id, owner_id),
+        ).fetchone()
+    assert row["status"] == "processing"
