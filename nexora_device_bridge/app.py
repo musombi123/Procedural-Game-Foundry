@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, shutil
 from typing import Annotated
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile\nfrom fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from . import adb
@@ -13,7 +13,7 @@ ALLOWED_ORIGINS = {v.strip().rstrip("/") for v in os.getenv("NEXORA_BRIDGE_ALLOW
 pairing = PairingState()
 app = FastAPI(title="NEXORA Desktop Device Bridge", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=sorted(ALLOWED_ORIGINS), allow_credentials=False,
-                   allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Authorization", "Content-Type"], max_age=300)
+                   allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "Access-Control-Request-Private-Network"], max_age=300)
 
 @app.middleware("http")
 async def loopback_only(request: Request, call_next):
