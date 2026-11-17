@@ -118,21 +118,54 @@ def build(args):
         hp=(sx*hip*.32*build_ratio,hip_y,0); kn=(sx*hip*.34*build_ratio,height*(1-leg_ratio*.48),0); an=(sx*hip*.36*build_ratio,height*(1-leg_ratio),0)
         bone("thigh."+label,hp,kn,"pelvis"); bone("shin."+label,kn,an,"thigh."+label); bone("foot."+label,an,(an[0],an[1]-.04*s,.1*s),"shin."+label)
     bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.select_all(action="DESELECT"); body.select_set(True); rig.select_set(True); bpy.context.view_layer.objects.active=rig
-    bpy.ops.object.parent_set(type="ARMATURE_AUTO")
+    # Deterministic proximity weights avoid Blender's heat-weight solver failing on a
+    # joined mesh made from multiple procedural body volumes.
+    deform_bones=[b for b in arm_data.bones if b.use_deform]
+    groups={b.name:body.vertex_groups.new(name=b.name) for b in deform_bones}
+    segments=[]
+    for b in deform_bones:
+        head=rig.matrix_world @ b.head_local; tail=rig.matrix_world @ b.tail_local
+        segments.append((b.name,head,tail))
+    def distance_to_segment(point,a,b):
+        ab=b-a
+        if ab.length_squared==0: return (point-a).length
+        t=max(0.0,min(1.0,(point-a).dot(ab)/ab.length_squared))
+        return (point-(a+t*ab)).length
+    for vertex in body.data.vertices:
+        point=body.matrix_world @ vertex.co
+        nearest=sorted(((distance_to_segment(point,a,b),name) for name,a,b in segments))[:2]
+        weights=[1.0/max(distance,0.025)**2 for distance,_ in nearest]
+        total=sum(weights)
+        for (_,name),weight in zip(nearest,weights):
+            groups[name].add([vertex.index],weight/total,"REPLACE")
+    modifier=body.modifiers.new("PlayerAvatar_Skinning","ARMATURE"); modifier.object=rig
+    body.parent=rig
     # Creator-editable material and rig metadata travel in the GLB custom properties.
     rig["identity_source"]="uploaded_portrait"; rig["portrait_reference"]=os.path.basename(args.portrait)
     rig["generator"]="PGF procedural humanoid v1"; rig["creator_review_required"]=True
     rig["proportions_json"]=json.dumps(p)
-    # Add a neutral idle animation and a simple alternating walk cycle.
-    rig.animation_data_create(); action=bpy.data.actions.new("PGF_Idle"); rig.animation_data.action=action
-    for frame in (1,24):
-        for name in ("upper_arm.L","upper_arm.R","thigh.L","thigh.R"):
-            pose=rig.pose.bones[name]; pose.rotation_mode="XYZ"; pose.rotation_euler=(0,0,0); pose.keyframe_insert(data_path="rotation_euler",frame=frame,group=name)
-    bpy.context.scene.frame_start=1; bpy.context.scene.frame_end=24
-    # Export skinned avatar and armature.
+    # Build authored idle and walk cycles; store both as NLA strips for GLB export.
+    rig.animation_data_create()
+    idle=bpy.data.actions.new("PGF_Idle"); rig.animation_data.action=idle
+    for frame,breath in ((1,0.0),(12,.025),(24,0.0)):
+        spine=rig.pose.bones["spine"]; spine.rotation_mode="XYZ"; spine.rotation_euler=(breath,0,0)
+        spine.keyframe_insert(data_path="rotation_euler",frame=frame,group="spine")
+        head=rig.pose.bones["head"]; head.rotation_mode="XYZ"; head.rotation_euler=(0,0,math.sin(frame/24*math.pi)*.025)
+        head.keyframe_insert(data_path="rotation_euler",frame=frame,group="head")
+    rig.animation_data.action=None
+    track=rig.animation_data.nla_tracks.new(); track.name="PGF_Idle"; strip=track.strips.new("PGF_Idle",1,idle)
+    walk=bpy.data.actions.new("PGF_Walk")
+    for frame,phase in ((1,0),(7,math.pi/2),(13,math.pi),(19,3*math.pi/2),(25,2*math.pi)):
+        for name,offset in (("upper_arm.L",0),("upper_arm.R",math.pi),("thigh.L",math.pi),("thigh.R",0)):
+            pose=rig.pose.bones[name]; pose.rotation_mode="XYZ"
+            pose.rotation_euler=(math.sin(phase+offset)*.42,0,0)
+            pose.keyframe_insert(data_path="rotation_euler",frame=frame,group=name)
+    walk_track=rig.animation_data.nla_tracks.new(); walk_track.name="PGF_Walk"
+    walk_strip=walk_track.strips.new("PGF_Walk",1,walk)
+    bpy.context.scene.frame_start=1; bpy.context.scene.frame_end=25
+    # Export skinned avatar, armature and both animation strips.
     bpy.ops.object.select_all(action="DESELECT"); body.select_set(True); rig.select_set(True); bpy.context.view_layer.objects.active=rig
-    bpy.ops.export_scene.gltf(filepath=args.output,export_format="GLB",use_selection=True,export_animations=True)
+    bpy.ops.export_scene.gltf(filepath=args.output,export_format="GLB",use_selection=True,export_animations=True,export_nla_strips=True)
     return {"height":height,"bone_count":len(arm_data.bones),"mesh":"PlayerAvatar_Mesh","rig":"PlayerAvatar_Rig"}
 
 if __name__=="__main__":
