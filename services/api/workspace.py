@@ -413,7 +413,7 @@ def create_production_job(project_id: str, request: JobCreateRequest, principal:
         asset_rows = connection.execute(
             "SELECT id, filename, object_key, processed_object_key, status "
             "FROM nexora_assets WHERE project_id=%s AND owner_id=%s "
-            "AND status IN ('ready','processed') AND lower(filename) LIKE '%.glb'",
+            "AND status IN ('ready','processed') AND lower(right(filename, 4)) = '.glb'",
             (project["id"], principal["id"]),
         ).fetchall()
         payload = {
