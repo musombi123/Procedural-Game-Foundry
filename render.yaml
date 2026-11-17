@@ -12,7 +12,7 @@ services:
       - key: PGF_DATA_DIR
         value: /tmp/nexora-foundry
       - key: PGF_CORS_ORIGINS
-        value: https://revelacode.co.ke,https://www.revelacode.co.ke
+        value: https://revelacode.co.ke,https://www.revelacode.co.ke,https://revelacode-frontend.onrender.com
       - key: DATABASE_URL
         sync: false
       - key: PGF_OBJECT_STORAGE_ENDPOINT
