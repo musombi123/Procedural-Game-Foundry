@@ -193,6 +193,8 @@ func _create_director() -> void:
     add_child(director)
     director.add_to_group("gameplay_director")
     director.configure(gameplay, _read_json("res://gameplay/audio-events.json"))
+    # Restore the last creator save when one exists; a new game keeps its defaults.
+    director.load_progress()
 
 func _create_player() -> void:
     player = CharacterBody3D.new()
@@ -245,8 +247,13 @@ func _bind_actor_behaviours(visuals: Node) -> void:
         if rig == null:
             push_warning("Actor visual not found for behaviour: " + actor_id)
             continue
+        var actor_config: Dictionary = config.duplicate(true)
+        for actor_descriptor in actor_spec.get("actors", []):
+            if str(actor_descriptor.get("id", "")) == actor_id:
+                actor_config["origin"] = actor_descriptor.get("position", [0.0, 0.0, 0.0])
+                break
         rig.set_script(ACTOR_SCRIPT)
-        rig.call("configure", config, player, director)
+        rig.call("configure", actor_config, player, director)
 
 func _create_actor_hitboxes(visuals: Node) -> void:
     for config in gameplay.get("actor_behaviours", []):
@@ -263,7 +270,8 @@ func _create_actor_hitboxes(visuals: Node) -> void:
             continue
         var area := Area3D.new()
         area.name = "Hitbox_" + actor_id
-        area.position = Vector3(descriptor.position[0], descriptor.position[1] + 1.0, descriptor.position[2])
+        # Keep the hitbox in the imported rig's local space so it follows the actor.
+        area.position = Vector3(float(descriptor.position[0]), float(descriptor.position[1]) + 1.0, float(descriptor.position[2]))
         area.collision_layer = 4
         area.collision_mask = 0
         var collision := CollisionShape3D.new()
@@ -273,7 +281,7 @@ func _create_actor_hitboxes(visuals: Node) -> void:
         area.add_child(collision)
         area.set_script(load("res://scripts/ActorHitbox.gd"))
         area.call("configure", rig)
-        add_child(area)
+        rig.add_child(area)
 
 func _create_interaction_areas() -> void:
     for interaction in gameplay.get("interactions", []):
@@ -363,7 +371,10 @@ func _create_audio() -> void:
         if ResourceLoader.exists(music_path):
             var music_player := AudioStreamPlayer.new()
             music_player.name = "BackgroundMusic"
-            music_player.stream = load(music_path)
+            var music_stream = load(music_path)
+            if music_stream is AudioStreamWAV and bool(music.get("loop", false)):
+                music_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+            music_player.stream = music_stream
             add_child(music_player)
             music_player.play()
 
@@ -383,11 +394,58 @@ func _create_hud() -> void:
     label.text = "WASD move · SPACE jump · E interact · F attack · F5 save"
     layer.add_child(label)
     add_child(layer)
+    # Touch controls are displayed on Android/iOS and touchscreen desktops.
+    if OS.has_feature("mobile") or DisplayServer.is_touchscreen_available():
+        _create_touch_controls(layer)
     director.connect("objective_updated", func(_id: String, current: int, required: int):
         label.text = "Objective progress: %d / %d   ·   WASD move · E interact · F5 save" % [current, required]
     )
     director.connect("game_won", func(): label.text = "MISSION COMPLETE")
     director.connect("game_lost", func(): label.text = "GAME OVER")
+
+func _make_touch_button(parent: Control, button_name: String, caption: String, action: String, x_offset: float, bottom_offset: float, on_right: bool = false, button_size: float = 72.0) -> void:
+    var button := Button.new()
+    button.name = button_name
+    button.text = caption
+    button.focus_mode = Control.FOCUS_NONE
+    button.mouse_filter = Control.MOUSE_FILTER_STOP
+    button.custom_minimum_size = Vector2(button_size, button_size)
+    button.add_theme_font_size_override("font_size", 22)
+    button.modulate = Color(0.16, 0.22, 0.30, 0.88)
+    button.anchor_top = 1.0
+    button.anchor_bottom = 1.0
+    if on_right:
+        button.anchor_left = 1.0
+        button.anchor_right = 1.0
+        button.offset_left = -x_offset - button_size
+        button.offset_right = -x_offset
+    else:
+        button.anchor_left = 0.0
+        button.anchor_right = 0.0
+        button.offset_left = x_offset
+        button.offset_right = x_offset + button_size
+    button.offset_top = -bottom_offset - button_size
+    button.offset_bottom = -bottom_offset
+    button.button_down.connect(func() -> void: Input.action_press(action))
+    button.button_up.connect(func() -> void: Input.action_release(action))
+    button.tree_exiting.connect(func() -> void: Input.action_release(action))
+    parent.add_child(button)
+
+func _create_touch_controls(layer: CanvasLayer) -> void:
+    var controls := Control.new()
+    controls.name = "TouchControls"
+    controls.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    controls.mouse_filter = Control.MOUSE_FILTER_PASS
+    layer.add_child(controls)
+    # Left-side directional pad; the action map is shared with keyboard input.
+    _make_touch_button(controls, "Touch_Forward", "▲", "move_forward", 104, 112)
+    _make_touch_button(controls, "Touch_Backward", "▼", "move_backward", 104, 28)
+    _make_touch_button(controls, "Touch_Left", "◀", "move_left", 26, 70)
+    _make_touch_button(controls, "Touch_Right", "▶", "move_right", 182, 70)
+    # Right-side action buttons.
+    _make_touch_button(controls, "Touch_Jump", "JUMP", "jump", 28, 112, true)
+    _make_touch_button(controls, "Touch_Interact", "USE", "interact", 106, 28, true)
+    _make_touch_button(controls, "Touch_Attack", "ATK", "attack", 28, 28, true)
 
 func save_game() -> void:
     director.save_progress()
@@ -459,7 +517,9 @@ var damage := 10
 var health := 50
 var target: Node3D
 var director: Node
-var patrol_origin := Vector3.ZERO
+# Blender exports actor geometry in world coordinates with the rig origin at zero.
+# Keep the authored spawn location separate from the rig's movement offset.
+var spawn_origin := Vector3.ZERO
 var attack_cooldown := 0.0
 func configure(config: Dictionary, player: Node3D, gameplay_director: Node) -> void:
     actor_id = str(config.get("actor_id", ""))
@@ -470,20 +530,22 @@ func configure(config: Dictionary, player: Node3D, gameplay_director: Node) -> v
     damage = int(config.get("damage", 10))
     target = player
     director = gameplay_director
-    patrol_origin = global_position
+    var origin_data: Array = config.get("origin", [0.0, 0.0, 0.0])
+    spawn_origin = Vector3(float(origin_data[0]), float(origin_data[1]), float(origin_data[2]))
 func _process(delta: float) -> void:
+    var actor_world_position := spawn_origin + global_position
     if behaviour == "patrol":
         var phase := sin(Time.get_ticks_msec() / 1600.0) * 3.0
-        global_position.x = patrol_origin.x + phase
+        global_position.x = phase
     elif behaviour in ["chase", "attack"] and is_instance_valid(target):
-        var offset := target.global_position - global_position
+        var offset := target.global_position - actor_world_position
         var distance := offset.length()
         if distance <= detection_range and distance > attack_range:
-            offset.y = 0
+            offset.y = 0.0
             global_position += offset.normalized() * move_speed * delta
         elif distance <= attack_range:
             attack_cooldown -= delta
-            if attack_cooldown <= 0 and is_instance_valid(director):
+            if attack_cooldown <= 0.0 and is_instance_valid(director):
                 director.damage_player(damage)
                 attack_cooldown = 1.2
 func take_damage(amount: int) -> void:
@@ -595,18 +657,17 @@ def assemble_movie_game(project_folder: Path, pipeline: Any, godot_executable: s
     (scripts / "InteractableProp.gd").write_text(_prop_script(), encoding="utf-8")
     shutil.copy2(Path(__file__).resolve().parents[2] / "gameplay" / "runtime_templates" / "ActorHitbox.gd", scripts / "ActorHitbox.gd")
     (scripts / "ObjectiveTrigger.gd").write_text(_objective_trigger_script(), encoding="utf-8")
-    shutil.copy2(Path(__file__).resolve().parents[2] / "gameplay" / "runtime_templates" / "ActorHitbox.gd", scripts / "ActorHitbox.gd")
-    (scripts / "assembly_smoke.gd").write_text("extends SceneTree\nfunc _initialize() -> void:\n    call_deferred(\"_run_checks\")\nfunc _fail(message: String) -> void:\n    push_error(\"PGF ASSEMBLY SMOKE FAILURE: \" + message)\n    quit(1)\nfunc _run_checks() -> void:\n    var packed := load(\"res://main.tscn\") as PackedScene\n    if packed == null:\n        _fail(\"main scene did not load\")\n        return\n    var game := packed.instantiate()\n    root.add_child(game)\n    await process_frame\n    var player := game.get_node_or_null(\"Player\")\n    var director := game.get_node_or_null(\"GameplayDirector\")\n    if player == null or director == null:\n        _fail(\"player or gameplay director missing\")\n        return\n    if game.get_node_or_null(\"EnvironmentAsset\") == null:\n        _fail(\"environment GLB was not instantiated\")\n        return\n    if game.get_node_or_null(\"ActorsAndPropsAsset\") == null:\n        _fail(\"actors/props GLB was not instantiated\")\n        return\n    var audio_players := game.find_children(\"SFX_*\", \"AudioStreamPlayer\", true, false)\n    if audio_players.is_empty():\n        _fail(\"procedural audio cue player was not wired\")\n        return\n    var interactions := game.find_children(\"Interact_*\", \"Area3D\", true, false)\n    if interactions.is_empty():\n        _fail(\"prop interaction area missing\")\n        return\n    var interaction = interactions[0]\n    interaction.pgf_interact(player)\n    var definition: Dictionary = director.get(\"definition\")\n    var first_objective: Dictionary = definition.missions[0].objectives[0]\n    var progress: Dictionary = director.get(\"progress\")\n    if int(progress.get(first_objective.id, 0)) != 1:\n        _fail(\"prop interaction did not advance objective\")\n        return\n    var inventory: Dictionary = director.get(\"inventory\")\n    if inventory.is_empty():\n        _fail(\"collect interaction did not update inventory\")\n        return\n    var hitboxes := game.find_children(\"Hitbox_*\", \"Area3D\", true, false)\n    if hitboxes.is_empty():\n        _fail(\"actor combat hitbox was not attached\")\n        return\n    hitboxes[0].take_damage(50)\n    if not bool(director.get(\"finished\")):\n        _fail(\"collect and defeat objectives did not trigger win condition\")\n        return\n    var loss_director := Node.new()\n    loss_director.set_script(load(\"res://scripts/runtime/GameplayDirector.gd\"))\n    root.add_child(loss_director)\n    loss_director.configure(definition, {})\n    loss_director.damage_player(int(loss_director.get(\"health\")))\n    if not bool(loss_director.get(\"finished\")):\n        _fail(\"health depletion did not trigger lose condition\")\n        return\n    if not loss_director.save_progress(\"user://pgf-assembly-smoke.json\"):\n        _fail(\"save system failed\")\n        return\n    loss_director.set(\"health\", 1)\n    if not loss_director.load_progress(\"user://pgf-assembly-smoke.json\") or int(loss_director.get(\"health\")) != 0:\n        _fail(\"save/load round trip failed\")\n        return\n    print(\"PGF_ASSEMBLY_SMOKE_OK\")\n    quit(0)\n", encoding="utf-8")
+    (scripts / "assembly_smoke.gd").write_text("extends SceneTree\nfunc _initialize() -> void:\n    call_deferred(\"_run_checks\")\nfunc _fail(message: String) -> void:\n    push_error(\"PGF ASSEMBLY SMOKE FAILURE: \" + message)\n    quit(1)\nfunc _run_checks() -> void:\n    var packed := load(\"res://main.tscn\") as PackedScene\n    if packed == null:\n        _fail(\"main scene did not load\")\n        return\n    var game := packed.instantiate()\n    root.add_child(game)\n    await process_frame\n    var hud := game.get_node_or_null(\"GameHUD\") as CanvasLayer\\n    if hud == null:\\n        _fail(\"game HUD missing\")\\n        return\\n    if game.find_children(\"Touch_*\", \"Button\", true, false).is_empty():\\n        game.call(\"_create_touch_controls\", hud)\\n    var touch_buttons := game.find_children(\"Touch_*\", \"Button\", true, false)\\n    if touch_buttons.size() != 7:\\n        _fail(\"Android touch controls were not created (expected 7 buttons)\")\\n        return\\n    if not InputMap.has_action(\"move_forward\") or not InputMap.has_action(\"jump\") or not InputMap.has_action(\"interact\"):\\n        _fail(\"touch controls are not bound to the shared input map\")\\n        return\\n    var player := game.get_node_or_null(\"Player\")\n    var director := game.get_node_or_null(\"GameplayDirector\")\n    if player == null or director == null:\n        _fail(\"player or gameplay director missing\")\n        return\n    if game.get_node_or_null(\"EnvironmentAsset\") == null:\n        _fail(\"environment GLB was not instantiated\")\n        return\n    if game.get_node_or_null(\"ActorsAndPropsAsset\") == null:\n        _fail(\"actors/props GLB was not instantiated\")\n        return\n    var audio_players := game.find_children(\"SFX_*\", \"AudioStreamPlayer\", true, false)\n    if audio_players.is_empty():\n        _fail(\"procedural audio cue player was not wired\")\n        return\n    var interactions := game.find_children(\"Interact_*\", \"Area3D\", true, false)\n    if interactions.is_empty():\n        _fail(\"prop interaction area missing\")\n        return\n    var interaction = interactions[0]\n    interaction.pgf_interact(player)\n    var definition: Dictionary = director.get(\"definition\")\n    var first_objective: Dictionary = definition.missions[0].objectives[0]\n    var progress: Dictionary = director.get(\"progress\")\n    if int(progress.get(first_objective.id, 0)) != 1:\n        _fail(\"prop interaction did not advance objective\")\n        return\n    var inventory: Dictionary = director.get(\"inventory\")\n    if inventory.is_empty():\n        _fail(\"collect interaction did not update inventory\")\n        return\n    var hitboxes := game.find_children(\"Hitbox_*\", \"Area3D\", true, false)\n    if hitboxes.is_empty():\n        _fail(\"actor combat hitbox was not attached\")\n        return\n    if hitboxes[0].get_parent() == null or not hitboxes[0].get_parent().name.ends_with(\"_rig\"):\\n        _fail(\"actor hitbox is not parented to its moving rig\")\\n        return\\n        hitboxes[0].take_damage(50)\n    if not bool(director.get(\"finished\")):\n        _fail(\"collect and defeat objectives did not trigger win condition\")\n        return\n    var loss_director := Node.new()\n    loss_director.set_script(load(\"res://scripts/runtime/GameplayDirector.gd\"))\n    root.add_child(loss_director)\n    loss_director.configure(definition, {})\n    loss_director.damage_player(int(loss_director.get(\"health\")))\n    if not bool(loss_director.get(\"finished\")):\n        _fail(\"health depletion did not trigger lose condition\")\n        return\n    if not loss_director.save_progress(\"user://pgf-assembly-smoke.json\"):\n        _fail(\"save system failed\")\n        return\n    loss_director.set(\"health\", 1)\n    if not loss_director.load_progress(\"user://pgf-assembly-smoke.json\") or int(loss_director.get(\"health\")) != 0:\n        _fail(\"save/load round trip failed\")\n        return\n    print(\"PGF_ASSEMBLY_SMOKE_OK\")\n    quit(0)\n", encoding="utf-8")
     (destination / "main.tscn").write_text(
-        '[gd_scene load_steps=2 format=3]\n[ext_resource type="Script" path="res://scripts/main.gd" id="1"]\n[node name="PGFPlayableGame" type="Node3D"]\nscript = ExtResource("1")\n',
+        '[gd_scene load_steps=2 format=3]\n[ext_resource type="Script" path="res://scripts/main.gd" id="1"]\n[node name="NexoraFoundryGame" type="Node3D"]\nscript = ExtResource("1")\n',
         encoding="utf-8",
     )
     (destination / "project.godot").write_text(
-        'config_version=5\n[application]\nconfig/name="Procedural Game Foundry - Assembled Game"\nrun/main_scene="res://main.tscn"\n[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n[rendering]\nrenderer/rendering_method="gl_compatibility"\nrenderer/rendering_method.mobile="gl_compatibility"\n',
+        'config_version=5\n[application]\nconfig/name="Nexora Foundry - Assembled Game"\nrun/main_scene="res://main.tscn"\n[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n[rendering]\nrenderer/rendering_method="gl_compatibility"\nrenderer/rendering_method.mobile="gl_compatibility"\n',
         encoding="utf-8",
     )
     manifest = {
-        "schema_version": "1.0", "assembler": "PGF Movie Pipeline Godot Assembler v1",
+        "schema_version": "1.0", "assembler": "Nexora Foundry Godot Assembler v1",
         "project": "game/project.godot", "main_scene": "game/main.tscn",
         "player_asset": "game/assets/player-avatar.glb",
         "environment_asset": "game/assets/environment.glb",
@@ -715,8 +776,8 @@ def register_assembly_routes(app, manager_provider):
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
             for item in game.rglob("*"):
                 if item.is_file():
-                    bundle.write(item, Path("ProceduralGameFoundry") / item.relative_to(game))
+                    bundle.write(item, Path("NexoraFoundry") / item.relative_to(game))
         from fastapi.responses import FileResponse
-        return FileResponse(archive, media_type="application/zip", filename="procedural-game-foundry.zip")
+        return FileResponse(archive, media_type="application/zip", filename="nexora-foundry-game.zip")
 
     app.include_router(router)
