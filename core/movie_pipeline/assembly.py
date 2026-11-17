@@ -756,7 +756,7 @@ func _run_checks() -> void:
         encoding="utf-8",
     )
     (destination / "project.godot").write_text(
-        'config_version=5\n[application]\nconfig/name="Nexora Foundry - Assembled Game"\nrun/main_scene="res://main.tscn"\n[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n[rendering]\nrenderer/rendering_method="gl_compatibility"\nrenderer/rendering_method.mobile="gl_compatibility"\n',
+        'config_version=5\n[application]\nconfig/name="Nexora Foundry - Assembled Game"\nrun/main_scene="res://main.tscn"\n[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n[rendering]\nrenderer/rendering_method="gl_compatibility"\nrenderer/rendering_method.mobile="gl_compatibility"\ntextures/vram_compression/import_etc2_astc=true\n',
         encoding="utf-8",
     )
     (destination / "export_presets.cfg").write_text(
