@@ -320,7 +320,15 @@ def build_procedural_environment(pid: str):
         manager.load(pid)
     except FileNotFoundError as exc:
         raise HTTPException(404, "Project not found") from exc
-    story_path = PipelineStore(folder).folder / "story.json"
+    store = PipelineStore(folder)
+    try:
+        pipeline = store.load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Movie pipeline not found") from exc
+    stage = next(item for item in pipeline.stages if item.stage == StageId.ENVIRONMENT)
+    if stage.state != StageState.READY:
+        raise HTTPException(409, "Approve the procedural player stage before generating the environment")
+    story_path = store.folder / "story.json"
     if not story_path.is_file():
         raise HTTPException(409, "Save the creator story before generating the 3D environment")
     story = json.loads(story_path.read_text(encoding="utf-8"))
@@ -335,18 +343,25 @@ def build_procedural_environment(pid: str):
         raise HTTPException(503, "Blender is required to turn the saved 3D geometry specification into a GLB scene")
     script = Path(__file__).resolve().parents[2] / "blender" / "scripts" / "build_movie_world.py"
     glb = output.parent / "environment.glb"
+    stage.state = StageState.RUNNING
+    stage.summary = "Building procedural 3D environment with Blender"
+    store.save(pipeline)
     try:
         result = subprocess.run([blender, "--background", "--python", str(script), "--",
                                  "--spec", str(output), "--output", str(glb)],
                                 capture_output=True, text=True, timeout=900, check=True)
     except subprocess.TimeoutExpired as exc:
-        raise HTTPException(504, "Blender environment generation exceeded 15 minutes") from exc
+        stage.state = StageState.FAILED; stage.error = "Blender environment generation exceeded 15 minutes"; store.save(pipeline)
+        raise HTTPException(504, stage.error) from exc
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "Blender failed")[-2500:]
+        stage.state = StageState.FAILED; stage.error = detail; stage.summary = "3D environment generation failed"; store.save(pipeline)
         raise HTTPException(500, "3D environment generation failed: " + detail) from exc
     if not glb.is_file() or glb.stat().st_size < 1024:
-        raise HTTPException(500, "Blender did not produce a valid GLB scene")
-    return {"generated": True, "geometry_spec": str(output.relative_to(folder)),
+        stage.state = StageState.FAILED; stage.error = "Blender did not produce a valid GLB scene"; store.save(pipeline)
+        raise HTTPException(500, stage.error)
+    reviewed = store.mark_review(StageId.ENVIRONMENT, {"glb_scene":str(glb.relative_to(folder)), "geometry_spec":str(output.relative_to(folder)), "landmarks":len(spec["landmarks"]), "props":len(spec["props"]), "dimensions":spec["dimensions"], "glb_bytes":glb.stat().st_size, "requires_creator_review":True}, "Procedural 3D environment generated; inspect geometry and navigation before approval")
+    return {"generated": True, "stage":next(item.model_dump(mode="json") for item in reviewed.stages if item.stage==StageId.ENVIRONMENT), "geometry_spec": str(output.relative_to(folder)),
             "glb_scene": str(glb.relative_to(folder)), "glb_bytes": glb.stat().st_size,
             "landmarks": len(spec["landmarks"]), "props": len(spec["props"]),
             "dimensions": spec["dimensions"], "requires_creator_review": True}
