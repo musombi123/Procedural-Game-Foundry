@@ -88,7 +88,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
   }
   return <section style={{ marginTop: 24, padding: 22, border: "1px solid #2c3b50", borderRadius: 16, background: "#101a29", color: "#e8eef7" }}>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-      <div><small style={{ color: "#91a9c4", letterSpacing: 1.2 }}>NEW PRODUCTION WORKFLOW</small><h2 style={{ margin: "6px 0" }}>Movie → playable game</h2><p style={{ margin: 0, color: "#a9b8c9" }}>One player portrait + one authorized movie. Seven review-gated stages.</p></div>
+      <div><small style={{ color: "#91a9c4", letterSpacing: 1.2 }}>NEW PRODUCTION WORKFLOW</small><h2 style={{ margin: "6px 0" }}>Movie → playable game</h2><p style={{ margin: 0, color: "#a9b8c9" }}>One player portrait + your story, an optional movie clip, or both. Seven review-gated stages.</p></div>
       <span style={{ fontSize: 12, color: "#9fb5ca" }}>LOCAL-FIRST · NO PAID APIs</span>
     </div>
     {!pipeline ? <div style={{ marginTop: 18 }}>
