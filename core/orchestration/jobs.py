@@ -14,6 +14,7 @@ class Job:
     message: str="Queued"
     error: str|None=None
     created_at: str=""
+    result: dict|None=None
     @classmethod
     def create(cls,pid): return cls(uuid4().hex,pid,created_at=datetime.now(timezone.utc).isoformat())
     def as_dict(self):
