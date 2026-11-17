@@ -448,14 +448,6 @@ def _android_export_command(godot: str, project: Path, mode: str, output: Path, 
     return command
 
 
-def _android_export_command(godot: str, project: Path, mode: str, output: Path, install_gradle_template: bool) -> list[str]:
-    command = [godot, "--headless", "--path", str(project)]
-    if install_gradle_template:
-        command.append("--install-android-build-template")
-    command.extend([mode, "Android", str(output)])
-    return command
-
-
 def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
                    manager: ProjectManager, jobs: JobRegistry) -> None:
     try:
