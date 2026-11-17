@@ -12,6 +12,7 @@ export default function GameplayFoundry({ projectId, api, ready, busy, onBuilt }
   const [source, setSource] = useState(JSON.stringify(starter, null, 2));
   const [message, setMessage] = useState("Define missions, objective logic, actor behaviours, prop interactions and audio event bindings. Blank mission text must be completed by you.");
   const [working, setWorking] = useState(false);
+  const [artifacts, setArtifacts] = useState<string[]>([]);
   async function compile() {
     let spec: unknown;
     try { spec = JSON.parse(source); } catch { setMessage("Gameplay definition is not valid JSON. Correct the syntax and try again."); return; }
@@ -22,6 +23,7 @@ export default function GameplayFoundry({ projectId, api, ready, busy, onBuilt }
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Gameplay compilation failed");
+      setArtifacts([data.manifest, data.gameplay_spec, data.audio_events, ...(data.runtime_files ?? [])].filter(Boolean));
       setMessage("Gameplay compiled into deterministic Godot runtime files. Review and approve this stage to unlock assembly.");
       onBuilt();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Gameplay compilation failed"); }
@@ -38,6 +40,7 @@ export default function GameplayFoundry({ projectId, api, ready, busy, onBuilt }
       <button disabled={!ready||busy||working} onClick={()=>void compile()} style={{border:0,borderRadius:8,padding:"10px 15px",background:"#2878bb",color:"white",fontWeight:700,cursor:"pointer",opacity:!ready||busy||working?.5:1}}>{working?"Compiling…":"Compile gameplay"}</button>
       <button disabled={working} onClick={()=>setSource(JSON.stringify(starter,null,2))} style={{border:"1px solid #42546a",borderRadius:8,padding:"10px 12px",background:"transparent",color:"#cbd8e7"}}>Reset template</button>
     </div>
+    {artifacts.length > 0 && <div style={{marginTop:12,padding:12,border:"1px solid #354b64",borderRadius:8}}><b style={{fontSize:13}}>Compiled files</b><div style={{display:"grid",gap:7,marginTop:8}}>{artifacts.map(path=><a key={path} href={api + "/api/projects/" + projectId + "/movie-pipeline/assets/" + path} target="_blank" rel="noreferrer" style={{color:"#8fc9f3",fontSize:12,overflowWrap:"anywhere"}}>{path.split("/").pop()} ↗</a>)}</div></div>}
     <p aria-live="polite" style={{margin:"10px 0 0",color:"#a9b8c9",fontSize:12}}>{message}</p>
   </div>;
 }
