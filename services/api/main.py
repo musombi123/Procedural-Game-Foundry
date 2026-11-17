@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -285,6 +286,15 @@ def save_creator_story(pid: str, brief: StoryBrief):
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(story, indent=2), encoding="utf-8")
     temporary.replace(path)
+    # A story-first project has no film-analysis prerequisite; explicitly skip that stage.
+    if brief.mode == "story":
+        records = {record.stage: record for record in pipeline.stages}
+        records[StageId.ANALYSIS].state = __import__("core.movie_pipeline.models", fromlist=["StageState"]).StageState.APPROVED
+        records[StageId.ANALYSIS].summary = "Skipped by creator: story-first workflow"
+        records[StageId.PLAYER].state = __import__("core.movie_pipeline.models", fromlist=["StageState"]).StageState.READY
+        records[StageId.PLAYER].summary = "Portrait and creator story ready for procedural player generation"
+        pipeline.active_stage = StageId.PLAYER
+        PipelineStore(folder).save(pipeline)
     return {"saved": True, "story": story}
 
 @app.get("/api/projects/{pid}/movie-pipeline/story")
@@ -337,3 +347,78 @@ def build_procedural_environment(pid: str):
             "glb_scene": str(glb.relative_to(folder)), "glb_bytes": glb.stat().st_size,
             "landmarks": len(spec["landmarks"]), "props": len(spec["props"]),
             "dimensions": spec["dimensions"], "requires_creator_review": True}
+
+
+@app.post("/api/projects/{pid}/movie-pipeline/player/build")
+def build_procedural_player(pid: str, request: dict):
+    """Build a portrait-referenced, editable procedural humanoid using Blender only."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        store = PipelineStore(folder)
+        pipeline = store.load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not pipeline.source_photo:
+        raise HTTPException(409, "Upload a full-body player portrait first")
+    story_path = store.folder / "story.json"
+    if not story_path.is_file():
+        raise HTTPException(409, "Save the creator story before generating the player")
+    stage = next(item for item in pipeline.stages if item.stage == StageId.PLAYER)
+    if stage.state.value != "READY":
+        raise HTTPException(409, "Approve movie analysis first, or save a story-first brief, before generating the player")
+    blender = shutil.which("blender")
+    if not blender:
+        raise HTTPException(503, "Blender is required for procedural character generation")
+    proportions = request.get("proportions", {})
+    if not isinstance(proportions, dict):
+        raise HTTPException(400, "Proportions must be an object")
+    allowed = {"height", "shoulder_width", "hip_width", "leg_ratio", "build"}
+    if set(proportions) - allowed:
+        raise HTTPException(400, "Unknown avatar proportion field")
+    defaults = {"height":1.78,"shoulder_width":0.46,"hip_width":0.34,"leg_ratio":0.52,"build":1.0}
+    values = {**defaults, **proportions}
+    bounds = {"height":(1.35,2.2),"shoulder_width":(.32,.7),"hip_width":(.24,.55),"leg_ratio":(.42,.62),"build":(.75,1.3)}
+    for key,(low,high) in bounds.items():
+        try: values[key] = float(values[key])
+        except (TypeError,ValueError) as exc: raise HTTPException(400,f"{key} must be numeric") from exc
+        if not low <= values[key] <= high: raise HTTPException(400,f"{key} must be between {low} and {high}")
+    portrait = (folder / pipeline.source_photo["storage_key"]).resolve()
+    uploads = (store.folder / "uploads").resolve()
+    if uploads not in portrait.parents or not portrait.is_file():
+        raise HTTPException(400, "Player portrait is missing or outside the upload directory")
+    avatar_dir = store.folder / "player" / f"revision-{stage.revision}"
+    avatar_dir.mkdir(parents=True,exist_ok=True)
+    spec_path = avatar_dir / "avatar.json"
+    spec_path.write_text(json.dumps({"proportions":values,"portrait_sha256":pipeline.source_photo.get("sha256"),
+                                    "identity_source":"uploaded_portrait","creator_review_required":True},indent=2),encoding="utf-8")
+    glb = avatar_dir / "player-avatar.glb"
+    script = Path(__file__).resolve().parents[2] / "blender" / "scripts" / "build_player_avatar.py"
+    stage.state = __import__("core.movie_pipeline.models",fromlist=["StageState"]).StageState.RUNNING
+    stage.summary = "Building procedural humanoid mesh and armature with Blender"
+    store.save(pipeline)
+    try:
+        result = subprocess.run([blender,"--background","--python",str(script),"--","--portrait",str(portrait),
+                                 "--output",str(glb),"--spec",str(spec_path)],
+                                capture_output=True,text=True,timeout=900,check=True)
+    except (subprocess.TimeoutExpired,subprocess.CalledProcessError) as exc:
+        stage.state = __import__("core.movie_pipeline.models",fromlist=["StageState"]).StageState.FAILED
+        stage.error = (getattr(exc,"stderr",None) or str(exc))[-2500:]
+        stage.summary = "Procedural player generation failed"
+        store.save(pipeline)
+        raise HTTPException(500,stage.error) from exc
+    if not glb.is_file() or glb.stat().st_size < 1024:
+        stage.state = __import__("core.movie_pipeline.models",fromlist=["StageState"]).StageState.FAILED
+        stage.error = "Blender did not produce a valid GLB avatar"
+        store.save(pipeline)
+        raise HTTPException(500,stage.error)
+    updated = store.mark_review(StageId.PLAYER,{"glb_scene":str(glb.relative_to(folder)),
+        "spec":str(spec_path.relative_to(folder)),"glb_bytes":glb.stat().st_size,
+        "portrait_sha256":pipeline.source_photo.get("sha256"),"generator":"PGF procedural humanoid v1",
+        "proportions":values,"requires_creator_review":True},
+        "Procedural player avatar generated; inspect proportions, face and rig before approval")
+    return {"generated":True,"stage":next(item.model_dump(mode="json") for item in updated.stages if item.stage==StageId.PLAYER),
+            "glb_scene":str(glb.relative_to(folder)),"glb_bytes":glb.stat().st_size,
+            "proportions":values,"requires_creator_review":True}
