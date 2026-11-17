@@ -95,6 +95,13 @@ def _safe_filename(value: str) -> str:
     return name[:180]
 
 
+def _asset_uuid(asset_id: str) -> UUID:
+    try:
+        return _asset_uuid(asset_id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=404, detail="Asset not found.") from exc
+
+
 def _owned_project(connection, project_id: str, owner_id: str):
     try:
         pid = UUID(project_id)
@@ -146,7 +153,7 @@ def list_projects(principal: dict[str, str] = Depends(current_principal)):
         ).fetchall()
         return {"projects": [_project_result(row) for row in rows]}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.post("/projects", status_code=201)
@@ -172,7 +179,7 @@ def create_project(request: ProjectCreateRequest, principal: dict[str, str] = De
             raise
         raise HTTPException(status_code=503, detail="Could not persist the NEXORA project.") from exc
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.get("/projects/{project_id}")
@@ -181,7 +188,7 @@ def get_project(project_id: str, principal: dict[str, str] = Depends(current_pri
     try:
         return _project_result(_owned_project(connection, project_id, principal["id"]))
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.put("/projects/{project_id}")
@@ -190,6 +197,7 @@ def update_project(project_id: str, request: ProjectUpdateRequest, principal: di
     context, connection = _db()
     try:
         current = _owned_project(connection, project_id, principal["id"])
+        document = {**document, "id": str(current["id"])}
         row = connection.execute(
             "UPDATE nexora_projects SET name=%s, description=%s, document=%s, version=version+1, updated_at=now() "
             "WHERE id=%s AND owner_id=%s AND version=%s "
@@ -204,7 +212,7 @@ def update_project(project_id: str, request: ProjectUpdateRequest, principal: di
         )
         return _project_result(row)
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.get("/projects/{project_id}/revisions")
@@ -222,7 +230,7 @@ def list_revisions(project_id: str, principal: dict[str, str] = Depends(current_
             for row in rows
         ]}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.delete("/projects/{project_id}", status_code=204)
@@ -250,7 +258,7 @@ def delete_project(project_id: str, principal: dict[str, str] = Depends(current_
         connection.execute("DELETE FROM nexora_projects WHERE id=%s AND owner_id=%s", (project["id"], principal["id"]))
         return None
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.post("/projects/{project_id}/assets/upload-url", status_code=201)
@@ -278,7 +286,7 @@ def create_asset_upload(project_id: str, request: UploadIntent, principal: dict[
             raise HTTPException(status_code=503, detail="Private object storage is unavailable.") from exc
         return {"asset_id": str(asset_id), "upload_url": url, "method": "PUT", "headers": {"Content-Type": expected_type}, "expires_in": 600}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.post("/projects/{project_id}/assets/{asset_id}/complete")
@@ -314,7 +322,7 @@ def complete_asset_upload(project_id: str, asset_id: str, principal: dict[str, s
         ).fetchone()
         return {"asset_id": str(row["id"]), "filename": row["filename"], "content_type": row["content_type"], "size": row["size"], "status": row["status"]}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.get("/projects/{project_id}/assets")
@@ -332,7 +340,7 @@ def list_assets(project_id: str, principal: dict[str, str] = Depends(current_pri
             for row in rows
         ]}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.get("/projects/{project_id}/assets/{asset_id}/download-url")
@@ -353,7 +361,7 @@ def asset_download_url(project_id: str, asset_id: str, principal: dict[str, str]
             raise HTTPException(status_code=503, detail="Private object storage is unavailable.") from exc
         return {"download_url": url, "expires_in": 600, "filename": asset["filename"]}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.delete("/projects/{project_id}/assets/{asset_id}", status_code=204)
@@ -376,7 +384,7 @@ def delete_asset(project_id: str, asset_id: str, principal: dict[str, str] = Dep
         connection.execute("DELETE FROM nexora_assets WHERE id=%s", (asset["id"],))
         return None
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.post("/projects/{project_id}/assets/{asset_id}/process", status_code=202)
@@ -401,7 +409,7 @@ def process_asset(project_id: str, asset_id: str, principal: dict[str, str] = De
         connection.execute("UPDATE nexora_assets SET status='processing' WHERE id=%s", (asset["id"],))
         return {"job_id": str(job_id), "state": "queued", "message": "Queued for Blender asset inspection and normalization."}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.post("/projects/{project_id}/jobs", status_code=202)
@@ -440,7 +448,7 @@ def create_production_job(project_id: str, request: JobCreateRequest, principal:
         )
         return {"job_id": str(job_id), "state": "queued", "kind": request.kind, "message": "Production job queued for a registered NEXORA build worker."}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.get("/projects/{project_id}/jobs")
@@ -458,7 +466,7 @@ def list_project_jobs(project_id: str, principal: dict[str, str] = Depends(curre
             for row in rows
         ]}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 @router.get("/jobs/{job_id}")
@@ -478,7 +486,7 @@ def get_production_job(job_id: str, principal: dict[str, str] = Depends(current_
             raise HTTPException(status_code=404, detail="Job not found.")
         return {"id": str(row["id"]), "project_id": str(row["project_id"]), "kind": row["kind"], "state": row["state"], "progress": row["progress"], "message": row["message"], "result": row["result"], "error": row["error"], "created_at": row["created_at"].isoformat(), "updated_at": row["updated_at"].isoformat()}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
 
 
 
@@ -518,4 +526,4 @@ def list_job_artifacts(job_id: str, principal: dict[str, str] = Depends(current_
             })
         return {"artifacts": artifacts}
     finally:
-        context.__exit__(None, None, None)
+        context.__exit__(*sys.exc_info())
