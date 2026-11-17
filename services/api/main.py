@@ -3,8 +3,8 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.project_engine.models import ProjectCreate, WorldDocument
@@ -13,16 +13,70 @@ from core.orchestration.jobs import Job, JobRegistry, JobState
 from core.game_assembler.godot import assemble_godot_project
 from core.validation.validator import validate_project
 from core.build_engine.godot_cli import headless_check
+from services.api.platform import router as platform_router
 
+HOSTED_MODE = os.getenv("PGF_REQUIRE_CLOUD_DEPENDENCIES", "false").lower() == "true"
 DATA = Path(os.environ.get("PGF_DATA_DIR", ".pgf-data")).resolve()
 manager = ProjectManager(DATA / "projects")
 jobs = JobRegistry()
-app = FastAPI(title="Procedural Game Foundry API", version="0.2.0", description="Model-free local-first game creation service")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "tauri://localhost"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(
+    title="Nexora Foundry API",
+    version="0.3.0",
+    description="NEXORA creator workspace and deterministic game production API",
+    docs_url=None if HOSTED_MODE else "/docs",
+    redoc_url=None if HOSTED_MODE else "/redoc",
+    openapi_url=None if HOSTED_MODE else "/openapi.json",
+)
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "PGF_CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,tauri://localhost",
+    ).split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+)
+
+
+@app.middleware("http")
+async def hosted_api_safety_gate(request: Request, call_next):
+    """Do not expose local-filesystem project routes before Stage 2 auth exists."""
+    if (
+        HOSTED_MODE
+        and request.url.path.startswith("/api/")
+        and os.getenv("PGF_AUTH_ENFORCEMENT_ENABLED", "false").lower() != "true"
+    ):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "workspace_api_not_open",
+                "message": "Hosted project operations are locked until identity and ownership enforcement is deployed.",
+                "stage": "identity-and-projects",
+            },
+        )
+    return await call_next(request)
+
+
+app.include_router(platform_router)
+
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "product": "Procedural Game Foundry", "model_free": True, "staged_movie_pipeline": True, "local_model_workers_ready": False}
+    return {
+        "status": "ok",
+        "product": "Nexora Foundry",
+        "model_free": True,
+        "staged_movie_pipeline": True,
+        "local_model_workers_ready": False,
+        "hosted_mode": HOSTED_MODE,
+    }
+
 
 @app.get("/api/capabilities")
 def capabilities():
