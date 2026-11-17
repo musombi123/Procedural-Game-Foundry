@@ -378,16 +378,18 @@ def build_procedural_player(pid: str, request: dict):
     proportions = request.get("proportions", {})
     if not isinstance(proportions, dict):
         raise HTTPException(400, "Proportions must be an object")
-    allowed = {"height", "shoulder_width", "hip_width", "leg_ratio", "build"}
+    allowed = {"height", "shoulder_width", "hip_width", "leg_ratio", "build", "face_center_x", "face_top", "face_width", "face_height"}
     if set(proportions) - allowed:
         raise HTTPException(400, "Unknown avatar proportion field")
-    defaults = {"height":1.78,"shoulder_width":0.46,"hip_width":0.34,"leg_ratio":0.52,"build":1.0}
+    defaults = {"height":1.78,"shoulder_width":0.46,"hip_width":0.34,"leg_ratio":0.52,"build":1.0,"face_center_x":0.5,"face_top":0.035,"face_width":0.22,"face_height":0.16}
     values = {**defaults, **proportions}
-    bounds = {"height":(1.35,2.2),"shoulder_width":(.32,.7),"hip_width":(.24,.55),"leg_ratio":(.42,.62),"build":(.75,1.3)}
+    bounds = {"height":(1.35,2.2),"shoulder_width":(.32,.7),"hip_width":(.24,.55),"leg_ratio":(.42,.62),"build":(.75,1.3),"face_center_x":(.1,.9),"face_top":(0,.6),"face_width":(.12,.4),"face_height":(.08,.3)}
     for key,(low,high) in bounds.items():
         try: values[key] = float(values[key])
         except (TypeError,ValueError) as exc: raise HTTPException(400,f"{key} must be numeric") from exc
         if not low <= values[key] <= high: raise HTTPException(400,f"{key} must be between {low} and {high}")
+    if values["face_top"] + values["face_height"] > 1 or values["face_center_x"] - values["face_width"]/2 < 0 or values["face_center_x"] + values["face_width"]/2 > 1:
+        raise HTTPException(400, "Face crop rectangle must stay inside the uploaded portrait")
     portrait = (folder / pipeline.source_photo["storage_key"]).resolve()
     uploads = (store.folder / "uploads").resolve()
     if uploads not in portrait.parents or not portrait.is_file():
@@ -395,7 +397,7 @@ def build_procedural_player(pid: str, request: dict):
     avatar_dir = store.folder / "player" / f"revision-{stage.revision}"
     avatar_dir.mkdir(parents=True,exist_ok=True)
     spec_path = avatar_dir / "avatar.json"
-    spec_path.write_text(json.dumps({"proportions":values,"portrait_sha256":pipeline.source_photo.get("sha256"),
+    spec_path.write_text(json.dumps({"proportions":values,"face_crop":{"center_x":values["face_center_x"],"top":values["face_top"],"width":values["face_width"],"height":values["face_height"]},"portrait_sha256":pipeline.source_photo.get("sha256"),
                                     "identity_source":"uploaded_portrait","creator_review_required":True},indent=2),encoding="utf-8")
     glb = avatar_dir / "player-avatar.glb"
     script = Path(__file__).resolve().parents[2] / "blender" / "scripts" / "build_player_avatar.py"
