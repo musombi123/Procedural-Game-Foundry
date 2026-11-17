@@ -12,7 +12,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: nexora
-          POSTGRES_PASSWORD: nexora_test
+          POSTGRES_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-nexora-ci
           POSTGRES_DB: nexora_test
         ports:
           - 5432:5432
@@ -22,7 +22,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      DATABASE_URL: postgresql://nexora:nexora_test@localhost:5432/nexora_test
+      DATABASE_URL: postgresql://nexora:${{ github.run_id }}-${{ github.run_attempt }}-nexora-ci@localhost:5432/nexora_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
