@@ -1,0 +1,64 @@
+name: Provision NEXORA Neon infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: "Type PROVISION to apply the Neon config to the production branch"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexora-neon-production
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    if: ${{ inputs.confirm_production == 'PROVISION' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEON_API_KEY: ${{ secrets.NEXORA }}
+      NEON_ORG_ID: org-winter-thunder-85666375
+      NEON_PROJECT_ID: ancient-night-84591728
+      NEON_BRANCH: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate credential and install Neon tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${NEON_API_KEY}" || { echo "::error::GitHub secret NEXORA is missing."; exit 1; }
+          npm install --global neon@latest
+          npm install --no-save @neondatabase/config@latest
+          umask 077
+
+      - name: Link the existing production branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          neon link --org-id "${NEON_ORG_ID}" --project-id "${NEON_PROJECT_ID}" --branch "${NEON_BRANCH}"
+
+      - name: Review planned Neon changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          neon config plan
+
+      - name: Apply private storage infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          neon deploy
+          neon config status
+
+      - name: Remove generated credential files
+        if: always()
+        shell: bash
+        run: |
+          rm -f .env .env.local
+          rm -f .neon
