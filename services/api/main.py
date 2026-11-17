@@ -510,3 +510,7 @@ register_gameplay_routes(app, lambda: manager)
 # Approval-gated Godot assembly for the movie-to-game pipeline.
 from core.movie_pipeline.assembly import register_assembly_routes
 register_assembly_routes(app, lambda: manager)
+
+# Project-scoped Blender/creator asset ingestion with structural glTF validation.
+from core.asset_registry.api import register_asset_routes
+register_asset_routes(app, lambda: manager)
