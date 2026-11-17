@@ -1,4 +1,4 @@
-"""Private S3-compatible storage helpers (Cloudflare R2 supported)."""
+"""Private S3-compatible storage helpers (Neon Object Storage and Cloudflare R2)."""
 from __future__ import annotations
 
 import os
@@ -6,12 +6,16 @@ from pathlib import Path
 from typing import Any
 
 
+def _setting(primary: str, fallback: str = "") -> str:
+    return os.getenv(primary, "").strip() or (os.getenv(fallback, "").strip() if fallback else "")
+
+
 def configured() -> bool:
-    return all(os.getenv(key, "").strip() for key in (
-        "PGF_OBJECT_STORAGE_ENDPOINT",
-        "PGF_OBJECT_STORAGE_BUCKET",
-        "PGF_OBJECT_STORAGE_ACCESS_KEY",
-        "PGF_OBJECT_STORAGE_SECRET_KEY",
+    return all((
+        _setting("PGF_OBJECT_STORAGE_ENDPOINT", "AWS_ENDPOINT_URL_S3"),
+        _setting("PGF_OBJECT_STORAGE_BUCKET", "NEXORA_OBJECT_STORAGE_BUCKET"),
+        _setting("PGF_OBJECT_STORAGE_ACCESS_KEY", "AWS_ACCESS_KEY_ID"),
+        _setting("PGF_OBJECT_STORAGE_SECRET_KEY", "AWS_SECRET_ACCESS_KEY"),
     ))
 
 
@@ -23,12 +27,13 @@ def client():
 
     return boto3.client(
         "s3",
-        endpoint_url=os.environ["PGF_OBJECT_STORAGE_ENDPOINT"],
-        region_name=os.getenv("PGF_OBJECT_STORAGE_REGION", "auto"),
-        aws_access_key_id=os.environ["PGF_OBJECT_STORAGE_ACCESS_KEY"],
-        aws_secret_access_key=os.environ["PGF_OBJECT_STORAGE_SECRET_KEY"],
+        endpoint_url=_setting("PGF_OBJECT_STORAGE_ENDPOINT", "AWS_ENDPOINT_URL_S3"),
+        region_name=_setting("PGF_OBJECT_STORAGE_REGION", "AWS_REGION") or "auto",
+        aws_access_key_id=_setting("PGF_OBJECT_STORAGE_ACCESS_KEY", "AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=_setting("PGF_OBJECT_STORAGE_SECRET_KEY", "AWS_SECRET_ACCESS_KEY"),
         config=Config(
             signature_version="s3v4",
+            s3={"addressing_style": "path"},
             connect_timeout=5,
             read_timeout=60,
             retries={"max_attempts": 2},
@@ -37,9 +42,9 @@ def client():
 
 
 def bucket() -> str:
-    value = os.getenv("PGF_OBJECT_STORAGE_BUCKET", "").strip()
+    value = _setting("PGF_OBJECT_STORAGE_BUCKET", "NEXORA_OBJECT_STORAGE_BUCKET")
     if not value:
-        raise RuntimeError("PGF_OBJECT_STORAGE_BUCKET is not configured.")
+        raise RuntimeError("PGF_OBJECT_STORAGE_BUCKET (or NEXORA_OBJECT_STORAGE_BUCKET) is not configured.")
     return value
 
 
