@@ -154,8 +154,8 @@ def create_movie_pipeline(pid: str, request: PipelineCreate):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     rights = request.rights
-    if not (rights.has_video_rights and rights.has_photo_rights and rights.likeness_consent and rights.accepts_original_assets_only):
-        raise HTTPException(400, "Confirm video rights, photo rights, likeness consent and original-asset generation before processing")
+    if not (rights.has_photo_rights and rights.likeness_consent and rights.accepts_original_assets_only):
+        raise HTTPException(400, "Confirm photo rights, likeness consent and original-asset generation before processing")
     store = PipelineStore(folder)
     if store.path.exists():
         raise HTTPException(409, "A movie pipeline already exists for this project")
@@ -280,6 +280,8 @@ def save_creator_story(pid: str, brief: StoryBrief):
         raise HTTPException(400, str(exc)) from exc
     if brief.mode in ("movie", "guided") and not pipeline.source_video:
         raise HTTPException(409, "Upload a movie clip for movie or guided mode")
+    if brief.mode in ("movie", "guided") and not pipeline.rights.has_video_rights:
+        raise HTTPException(409, "Confirm that you own or have permission to use the movie clip before selecting movie or guided mode")
     if not pipeline.source_photo:
         raise HTTPException(409, "Upload the player's portrait before creating the player avatar")
     story = brief.as_manifest()
