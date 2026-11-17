@@ -68,6 +68,7 @@ class AndroidBuildSettings(BaseModel):
     internet_permission: bool = True
     camera_permission: bool = False
     microphone_permission: bool = False
+    icon_asset_id: UUID | None = None
 
 class JobCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -449,9 +450,20 @@ def create_production_job(project_id: str, request: JobCreateRequest, principal:
             "AND status IN ('ready','processed') AND lower(right(filename, 4)) = '.glb'",
             (project["id"], principal["id"]),
         ).fetchall()
+        android_payload = request.android.model_dump() if request.android else None
+        if android_payload and request.android.icon_asset_id:
+            icon_asset = connection.execute(
+                "SELECT id, filename, object_key, content_type, status FROM nexora_assets "
+                "WHERE id=%s AND project_id=%s AND owner_id=%s",
+                (request.android.icon_asset_id, project["id"], principal["id"]),
+            ).fetchone()
+            if not icon_asset or icon_asset["status"] not in ("ready", "processed") or icon_asset["content_type"] != "image/png":
+                raise HTTPException(status_code=422, detail="Android launcher icon must be an uploaded, ready PNG asset in this project.")
+            android_payload["icon_object_key"] = icon_asset["processed_object_key"] or icon_asset["object_key"]
+            android_payload["icon_filename"] = icon_asset["filename"]
         payload = {
             "target": request.target,
-            "android": request.android.model_dump() if request.android else None,
+            "android": android_payload,
             "project": {
                 "name": project["name"],
                 "description": project["description"],
