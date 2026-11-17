@@ -66,7 +66,7 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
   const [iconName, setIconName] = useState("");
   const [iconUploading, setIconUploading] = useState(false);
   const [minSdk, setMinSdk] = useState(23);
-  const [targetSdk, setTargetSdk] = useState(35);
+  const [targetSdk, setTargetSdk] = useState(36);
   const [arm64, setArm64] = useState(true);
   const [arm32, setArm32] = useState(false);
   const [permissions, setPermissions] = useState<Record<PermissionName, boolean>>({
