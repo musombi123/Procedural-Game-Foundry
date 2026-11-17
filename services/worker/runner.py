@@ -269,6 +269,17 @@ def _run_asset_process(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
     return {"processor": "Blender", "asset_id": asset_id, "normalized_object": key, "report": report_data, "artifacts": [artifact]}
 
 
+def _verify_runtime(project: Path, godot: str) -> dict[str, Any]:
+    runtime = _run(
+        [godot, "--headless", "--path", str(project), "--quit-after", "120"],
+        timeout=180,
+    )
+    output = f"{runtime.get('stdout', '')}\\n{runtime.get('stderr', '')}"
+    if "SCRIPT ERROR:" in output or "Parse Error" in output:
+        raise RuntimeError(f"Generated Godot gameplay scene failed its runtime smoke test:\\n{output[-6000:]}")
+    return runtime
+
+
 def _run_scene_generation(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
     godot = _executable("GODOT_BIN", "godot")
     if not godot:
@@ -278,10 +289,11 @@ def _run_scene_generation(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
     required = [project / "project.godot", project / "main.tscn", project / "scripts" / "main.gd"]
     if not all(path.is_file() for path in required):
         raise RuntimeError("Generated Godot project is missing required scene files.")
+    runtime = _verify_runtime(project, godot)
     archive = workdir / "nexora-godot-project.zip"
     _zip_folder(project, archive)
     artifact = _artifact(job, archive, "nexora-godot-project.zip", "application/zip")
-    return {"engine": "Godot 4", "scene_generated": True, "headless_editor_check": check, "artifacts": [artifact]}
+    return {"engine": "Godot 4", "scene_generated": True, "headless_editor_check": check, "headless_runtime_smoke": runtime, "artifacts": [artifact]}
 
 
 def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
@@ -290,6 +302,7 @@ def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
         raise RuntimeError("Godot 4 is not installed on this worker (set GODOT_BIN or add godot to PATH).")
     project = _project_from_job(job, workdir)
     check = _run([godot, "--headless", "--path", str(project), "--editor", "--quit"], timeout=600)
+    runtime = _verify_runtime(project, godot)
     target = (job.get("payload") or {}).get("target", "desktop")
     requested = {"desktop": ["Linux/X11", "Windows Desktop"], "android": ["Android"], "desktop_android": ["Linux/X11", "Windows Desktop", "Android"]}.get(target)
     if not requested:
@@ -310,7 +323,7 @@ def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
     archive = workdir / "nexora-builds.zip"
     _zip_folder(project / "build", archive)
     artifact = _artifact(job, archive, "nexora-builds.zip", "application/zip")
-    return {"engine": "Godot 4", "headless_editor_check": check, "exports": export_results, "artifacts": [artifact], "release_type": "unsigned-or-debug; sign production releases on a protected release runner"}
+    return {"engine": "Godot 4", "headless_editor_check": check, "headless_runtime_smoke": runtime, "exports": export_results, "artifacts": [artifact], "release_type": "development/debug; production signing and approval remain separate"}
 
 
 def process(job: dict[str, Any]) -> dict[str, Any]:
