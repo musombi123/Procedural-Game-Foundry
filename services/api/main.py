@@ -488,3 +488,8 @@ register_audio_routes(app, lambda: manager)
 # Deterministic, creator-authored Gameplay Compiler routes.
 from core.movie_pipeline.gameplay_api import register_gameplay_routes
 register_gameplay_routes(app, lambda: manager)
+
+
+# Approval-gated Godot assembly for the movie-to-game pipeline.
+from core.movie_pipeline.assembly import register_assembly_routes
+register_assembly_routes(app, lambda: manager)
