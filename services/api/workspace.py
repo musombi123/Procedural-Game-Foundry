@@ -9,11 +9,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from psycopg.types.json import Jsonb
 
 from services.api.auth import current_principal
@@ -122,12 +123,15 @@ def _project_result(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _db():
+    context = None
     try:
         context = database()
         connection = context.__enter__()
         ensure_schema(connection)
         return context, connection
     except Exception as exc:
+        if context is not None:
+            context.__exit__(*sys.exc_info())
         raise HTTPException(status_code=503, detail="NEXORA PostgreSQL is unavailable.") from exc
 
 
@@ -429,5 +433,45 @@ def get_production_job(job_id: str, principal: dict[str, str] = Depends(current_
         if not row:
             raise HTTPException(status_code=404, detail="Job not found.")
         return {"id": str(row["id"]), "project_id": str(row["project_id"]), "kind": row["kind"], "state": row["state"], "progress": row["progress"], "message": row["message"], "result": row["result"], "error": row["error"], "created_at": row["created_at"].isoformat(), "updated_at": row["updated_at"].isoformat()}
+    finally:
+        context.__exit__(None, None, None)
+
+
+
+@router.get("/jobs/{job_id}/artifacts")
+def list_job_artifacts(job_id: str, principal: dict[str, str] = Depends(current_principal)):
+    context, connection = _db()
+    try:
+        try:
+            jid = UUID(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Job not found.") from exc
+        job = connection.execute(
+            "SELECT id FROM nexora_jobs WHERE id=%s AND owner_id=%s",
+            (jid, principal["id"]),
+        ).fetchone()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found.")
+        rows = connection.execute(
+            "SELECT id, object_key, filename, content_type, size, created_at "
+            "FROM nexora_artifacts WHERE job_id=%s AND owner_id=%s ORDER BY created_at",
+            (jid, principal["id"]),
+        ).fetchall()
+        artifacts = []
+        for row in rows:
+            try:
+                url = object_store.presigned_get(row["object_key"], row["filename"], expires=900)
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="Private artifact storage is unavailable.") from exc
+            artifacts.append({
+                "id": str(row["id"]),
+                "filename": row["filename"],
+                "content_type": row["content_type"],
+                "size": row["size"],
+                "download_url": url,
+                "expires_in": 900,
+                "created_at": row["created_at"].isoformat(),
+            })
+        return {"artifacts": artifacts}
     finally:
         context.__exit__(None, None, None)
