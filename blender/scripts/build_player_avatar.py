@@ -43,7 +43,7 @@ def uv(name,loc,scale,material,segments=20,rings=12):
     o=bpy.context.object; o.name=name; o.scale=scale; bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
     o.data.materials.append(material); return o
 
-def portrait_face_material(path,crop):
+def portrait_face_material(path,crop,output_dir):
     """Crop a creator-selected face region with Blender's image API; no recognition model."""
     source=bpy.data.images.load(path,check_existing=False)
     width,height=source.size
@@ -59,7 +59,9 @@ def portrait_face_material(path,crop):
             offset=(sy*width+sx)*4
             cropped.extend(source_pixels[offset:offset+4])
     image=bpy.data.images.new("Player_Portrait_Face_Crop",width=size,height=size,alpha=True)
-    image.pixels[:]=cropped; image.pack()
+    image.pixels[:]=cropped
+    image.filepath_raw=os.path.join(output_dir,"player-face-texture.png")
+    image.file_format="PNG"; image.save(); image.pack()
     material=bpy.data.materials.new("Uploaded_Portrait_Face"); material.use_nodes=True
     nodes=material.node_tree.nodes; links=material.node_tree.links
     shader=nodes.get("Principled BSDF"); texture=nodes.new("ShaderNodeTexImage"); texture.image=image
@@ -115,7 +117,7 @@ def build(args):
     parts.append(uv("Chest",(0,height*.69,0),(shoulder*.5*build_ratio,.19*s,.16*s),cloth))
     parts.append(uv("Neck",(0,height*.81,0),(.075*s,.09*s,.075*s),skin))
     parts.append(uv("Head",(0,height*.89,0),(.115*s,.145*s,.105*s),skin))
-    face_material=portrait_face_material(args.portrait,spec.get("face_crop",{}))
+    face_material=portrait_face_material(args.portrait,spec.get("face_crop",{}),os.path.dirname(os.path.abspath(args.output)))
     parts.append(face_patch(height,s,face_material))
     parts.append(uv("Hair",(0,height*.965,-.005),(.12*s,.07*s,.11*s),dark))
     parts.append(uv("Ear_L",(-.115*s,height*.89,0),(.025*s,.045*s,.025*s),skin))
