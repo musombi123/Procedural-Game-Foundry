@@ -453,7 +453,7 @@ def create_production_job(project_id: str, request: JobCreateRequest, principal:
         android_payload = request.android.model_dump() if request.android else None
         if android_payload and request.android.icon_asset_id:
             icon_asset = connection.execute(
-                "SELECT id, filename, object_key, content_type, status FROM nexora_assets "
+                "SELECT id, filename, object_key, processed_object_key, content_type, status FROM nexora_assets "
                 "WHERE id=%s AND project_id=%s AND owner_id=%s",
                 (request.android.icon_asset_id, project["id"], principal["id"]),
             ).fetchone()
