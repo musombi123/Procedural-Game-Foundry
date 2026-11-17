@@ -28,7 +28,7 @@ export default function PlayerAvatarBuilder({projectId,api,portraitReady,playerR
    {range("Body build",build,.75,1.3,.01,setBuild)}
   </div>
   <button disabled={busy||!portraitReady||!playerReady} onClick={()=>void generate()}>{busy?"Building avatar in Blender…":"Generate procedural player avatar"}</button>
-  {asset&&<p style={{margin:0,color:"#8fd1a8",fontSize:12}}>GLB scene: {asset}</p>}
+  {asset&&<p style={{margin:0,color:"#8fd1a8",fontSize:12}}>GLB scene: <a href={api+"/api/projects/"+projectId+"/movie-pipeline/assets/"+asset} target="_blank" rel="noreferrer">Download player avatar</a></p>}
   <p aria-live="polite" style={{margin:0,color:"#d5c28e",fontSize:12}}>{result}</p>
  </article>;
 }
