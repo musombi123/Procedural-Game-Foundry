@@ -6,6 +6,7 @@ Blender/Godot/export templates are installed.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -236,6 +237,23 @@ permissions/internet=true
     (project / "export_presets.cfg").write_text(text, encoding="utf-8")
 
 
+def _find_apksigner() -> str | None:
+    configured = os.getenv("APKSIGNER_BIN", "").strip()
+    if configured and Path(configured).is_file():
+        return configured
+    for variable in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        root = Path(os.getenv(variable, ""))
+        if root.is_dir():
+            candidates = sorted(
+                [*root.glob("build-tools/*/apksigner"), *root.glob("build-tools/*/apksigner.bat")],
+                reverse=True,
+            )
+            for candidate in candidates:
+                if candidate.is_file():
+                    return str(candidate)
+    return shutil.which("apksigner")
+
+
 def _zip_folder(folder: Path, output: Path) -> None:
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for file in folder.rglob("*"):
@@ -325,10 +343,33 @@ def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
         export_results.append({"preset": preset, **_run([godot, "--headless", "--path", str(project), mode, preset, str(output)], timeout=2400)})
         if not output.is_file() or output.stat().st_size < 1024:
             raise RuntimeError(f"{preset} export did not produce a valid artifact.")
+        if preset == "Android":
+            apksigner = _find_apksigner()
+            if not apksigner:
+                raise RuntimeError("Android export verification requires apksigner (set APKSIGNER_BIN or Android SDK build-tools).")
+            _run([apksigner, "verify", "--verbose", str(output)], timeout=180)
+        checksum = hashlib.sha256(output.read_bytes()).hexdigest()
+        checksum_path = output.with_name(output.name + ".sha256")
+        checksum_path.write_text(f"{checksum}  {output.name}\\n", encoding="utf-8")
+        export_results[-1]["sha256"] = checksum
+        export_results[-1]["checksum_file"] = checksum_path.name
+    release_manifest = {
+        "product": "NEXORA Foundry",
+        "project_id": str(job.get("project_id") or ""),
+        "project_version": (job.get("payload") or {}).get("project", {}).get("version"),
+        "job_id": str(job.get("id") or ""),
+        "target": target,
+        "exports": export_results,
+        "release_channel": "development",
+        "android_signing": "debug-only",
+        "production_signing": False,
+        "creator_review_required": True,
+    }
+    (project / "build" / "release-manifest.json").write_text(json.dumps(release_manifest, indent=2), encoding="utf-8")
     archive = workdir / "nexora-builds.zip"
     _zip_folder(project / "build", archive)
     artifact = _artifact(job, archive, "nexora-builds.zip", "application/zip")
-    return {"engine": "Godot 4", "headless_editor_check": check, "headless_runtime_smoke": runtime, "exports": export_results, "artifacts": [artifact], "release_type": "development/debug; production signing and approval remain separate"}
+    return {"engine": "Godot 4", "headless_editor_check": check, "headless_runtime_smoke": runtime, "exports": export_results, "release_manifest": release_manifest, "artifacts": [artifact], "release_type": "development/debug; production signing and approval remain separate"}
 
 
 def process(job: dict[str, Any]) -> dict[str, Any]:
