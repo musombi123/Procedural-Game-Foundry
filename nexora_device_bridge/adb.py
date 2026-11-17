@@ -77,6 +77,18 @@ def inspect_apk(path: Path) -> dict[str, str]:
         raise AdbError("Could not read the Android application ID from the APK.")
     return {"package_id": validate_package_id(match.group(1))}
 
+def verify_apk_signature(path: Path) -> None:
+    configured = os.getenv("NEXORA_APKSIGNER_PATH", "").strip()
+    signer = configured or shutil.which("apksigner")
+    if not signer or not Path(signer).is_file():
+        raise AdbError("Android SDK Build Tools apksigner is required to verify APK signatures before installation.")
+    try:
+        result = subprocess.run([signer, "verify", "--verbose", str(path)], capture_output=True, text=True, timeout=45, check=False, shell=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AdbError("Could not verify the APK signature.") from exc
+    if result.returncode != 0:
+        raise AdbError((result.stderr or result.stdout or "APK signature verification failed.")[-2000:])
+
 def install_apk_file(serial: str, package_id: str, path: Path) -> dict[str, Any]:
     serial, package_id = validate_serial(serial), validate_package_id(package_id)
     if not path.is_file() or path.stat().st_size <= 0 or path.stat().st_size > MAX_APK_BYTES:
