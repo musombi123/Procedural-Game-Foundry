@@ -70,7 +70,10 @@ def verify_identity_token(authorization: str | None) -> dict[str, str]:
     if response.status_code != 200:
         raise HTTPException(status_code=503, detail="RevelaCode identity verification failed.")
 
-    profile = _canonical_profile(response.json())
+    try:
+        profile = _canonical_profile(response.json())
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=503, detail="RevelaCode identity verification returned an invalid response.") from exc
     if not profile:
         raise HTTPException(status_code=401, detail="The identity service did not return a canonical user ID.")
     return profile
