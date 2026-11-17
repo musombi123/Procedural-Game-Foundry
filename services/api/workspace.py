@@ -96,7 +96,7 @@ def _safe_filename(value: str) -> str:
 
 def _asset_uuid(asset_id: str) -> UUID:
     try:
-        return _asset_uuid(asset_id)
+        return UUID(asset_id)
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=404, detail="Asset not found.") from exc
 
