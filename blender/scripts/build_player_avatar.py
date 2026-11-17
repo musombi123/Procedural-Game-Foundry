@@ -43,6 +43,55 @@ def uv(name,loc,scale,material,segments=20,rings=12):
     o=bpy.context.object; o.name=name; o.scale=scale; bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
     o.data.materials.append(material); return o
 
+def portrait_face_material(path,crop):
+    """Crop a creator-selected face region with Blender's image API; no recognition model."""
+    source=bpy.data.images.load(path,check_existing=False)
+    width,height=source.size
+    cx=float(crop.get("center_x",.5)); top=float(crop.get("top",.035))
+    cw=float(crop.get("width",.22)); ch=float(crop.get("height",.16))
+    left=max(0.0,min(1.0-cw,cx-cw/2)); top=max(0.0,min(1.0-ch,top))
+    size=256; source_pixels=source.pixels[:]; cropped=[]
+    for y in range(size):
+        for x in range(size):
+            sx=min(width-1,max(0,int((left+(x/(size-1))*cw)*(width-1))))
+            top_y=top+(1-y/(size-1))*ch
+            sy=min(height-1,max(0,int((1-top_y)*(height-1))))
+            offset=(sy*width+sx)*4
+            cropped.extend(source_pixels[offset:offset+4])
+    image=bpy.data.images.new("Player_Portrait_Face_Crop",width=size,height=size,alpha=True)
+    image.pixels[:]=cropped; image.pack()
+    material=bpy.data.materials.new("Uploaded_Portrait_Face"); material.use_nodes=True
+    nodes=material.node_tree.nodes; links=material.node_tree.links
+    shader=nodes.get("Principled BSDF"); texture=nodes.new("ShaderNodeTexImage"); texture.image=image
+    links.new(texture.outputs["Color"],shader.inputs["Base Color"])
+    shader.inputs["Roughness"].default_value=.82
+    return material
+
+def face_patch(height,scale,material):
+    """Curved UV patch follows the front ellipsoid of the procedural head."""
+    columns=24; rows=24; width=.19*scale; patch_height=.215*scale
+    center_y=height*.89; radius_x=.115*scale; radius_y=.145*scale; radius_z=.105*scale
+    vertices=[]; faces=[]; uvs=[]
+    for row in range(rows+1):
+        v=row/rows; y=center_y+(0.105*scale)-v*patch_height
+        for col in range(columns+1):
+            u=col/columns; x=(u-.5)*width
+            inside=max(.02,1-(x/radius_x)**2-((y-center_y)/radius_y)**2)
+            z=radius_z*math.sqrt(inside)+.003*scale
+            vertices.append((x,y,z)); uvs.append((u,1-v))
+    for row in range(rows):
+        for col in range(columns):
+            a=row*(columns+1)+col; b=a+1; d=(row+1)*(columns+1)+col; cc=d+1
+            faces.append((a,d,cc,b))
+    mesh=bpy.data.meshes.new("PortraitFacePatchMesh"); mesh.from_pydata(vertices,[],faces); mesh.update()
+    uv_layer=mesh.uv_layers.new(name="PortraitUV")
+    for poly in mesh.polygons:
+        for loop_index in poly.loop_indices:
+            vertex_index=mesh.loops[loop_index].vertex_index
+            uv_layer.data[loop_index].uv=uvs[vertex_index]
+    obj=bpy.data.objects.new("Uploaded_Portrait_Face_Patch",mesh); bpy.context.collection.objects.link(obj)
+    obj.data.materials.append(material); return obj
+
 def cylinder(name,a,b,radius,material,vertices=16):
     start,end=Vector(a),Vector(b); direction=end-start
     bpy.ops.mesh.primitive_cone_add(vertices=vertices,radius1=radius,radius2=radius*.92,depth=direction.length,location=(start+end)/2)
@@ -66,6 +115,8 @@ def build(args):
     parts.append(uv("Chest",(0,height*.69,0),(shoulder*.5*build_ratio,.19*s,.16*s),cloth))
     parts.append(uv("Neck",(0,height*.81,0),(.075*s,.09*s,.075*s),skin))
     parts.append(uv("Head",(0,height*.89,0),(.115*s,.145*s,.105*s),skin))
+    face_material=portrait_face_material(args.portrait,spec.get("face_crop",{}))
+    parts.append(face_patch(height,s,face_material))
     parts.append(uv("Hair",(0,height*.965,-.005),(.12*s,.07*s,.11*s),dark))
     parts.append(uv("Ear_L",(-.115*s,height*.89,0),(.025*s,.045*s,.025*s),skin))
     parts.append(uv("Ear_R",(.115*s,height*.89,0),(.025*s,.045*s,.025*s),skin))
