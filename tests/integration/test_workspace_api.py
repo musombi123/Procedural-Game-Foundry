@@ -77,6 +77,7 @@ def test_project_crud_revision_and_owner_isolation(owner_client):
     })
     assert updated.status_code == 200
     assert updated.json()["version"] == 2
+    assert updated.json()["document"]["id"] == project_id
 
     conflict = client.put(f"/api/v1/workspace/projects/{project_id}", json={
         "name": "Stale update",
@@ -98,6 +99,8 @@ def test_project_crud_revision_and_owner_isolation(owner_client):
 def test_private_asset_presign_completion_and_download(owner_client, monkeypatch):
     _, client = owner_client
     project = create_cloud_project(client)
+    invalid_asset = client.get(f"/api/v1/workspace/projects/{project['id']}/assets/not-a-uuid/download-url")
+    assert invalid_asset.status_code == 404
     monkeypatch.setattr(workspace.object_store, "presigned_put", lambda key, content_type, expires=600: "https://r2.invalid/signed-put")
     monkeypatch.setattr(workspace.object_store, "head", lambda key: {"ContentLength": 2048, "ContentType": "model/gltf-binary"})
     monkeypatch.setattr(workspace.object_store, "presigned_get", lambda key, filename, expires=600: "https://r2.invalid/signed-get")
