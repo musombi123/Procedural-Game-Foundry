@@ -11,6 +11,8 @@ Run the Python API from the repository root:
     $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
     $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
     $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17"
+    $env:PGF_ENABLE_DESKTOP_BUILD_CONSOLE = "true"
+    $env:PGF_REQUIRE_CLOUD_DEPENDENCIES = "false"
     python -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000
 
 On Linux/macOS, set PGF_GODOT_BIN, ANDROID_HOME (or ANDROID_SDK_ROOT) and JAVA_HOME to the installed toolchain paths, then run the same uvicorn command.
@@ -22,7 +24,7 @@ In another terminal, start the workspace:
     $env:VITE_PGF_API = "http://127.0.0.1:8000"
     npm run dev
 
-Open the desktop workspace, create or select a project, and open Build Console. The Tauri shell currently wraps the web workspace; its Python API is still a separately started local process. The API is not yet bundled as a managed Tauri sidecar or one-click desktop installer.
+Open the desktop workspace, create or select a project, and open Build Console. The Tauri shell currently wraps the web workspace; its Python API is still a separately started local process. Set PGF_ENABLE_DESKTOP_BUILD_CONSOLE=true only for this local process. Bind it to 127.0.0.1; the API also checks that device/process-control requests originate from loopback clients. The API is not yet bundled as a managed Tauri sidecar or one-click desktop installer.
 
 ## Android toolchain
 
@@ -33,7 +35,7 @@ For the Godot 4.6 toolchain baseline, install:
 - OpenJDK 17.
 - Android SDK Platform-Tools 35.0.0 or later.
 - Android SDK Build-Tools 35.0.1.
-- Android SDK Platform 35.
+- Android SDK Platform 35 as the Godot 4.6/4.7 baseline, plus Android SDK Platform 36 when targeting API 36.
 - Android SDK Command-line Tools (latest).
 - Android NDK 28.1.13356709.
 - CMake 3.10.2.4988404.
@@ -42,7 +44,7 @@ The Build Console detects missing SDK components and reports them before buildin
 
 ## Android export settings
 
-The console configures app name, reverse-DNS package ID, version name/code, minimum/target SDK, ARM64/ARMv7 architectures, orientation, launcher icon and manifest permissions.
+The console configures app name, reverse-DNS package ID, version name/code, minimum/target SDK, ARM64/ARMv7 architectures, orientation, launcher icon and manifest permissions. The default target is API 36. Google Play requires new apps and app updates to target Android 16 (API 36) or higher from 31 August 2026. Install that platform in the SDK for Play-ready exports; platform 35 remains the documented base toolchain for Godot 4.6/4.7.
 
 Upload a square PNG of at least 432×432 pixels. Android adaptive launcher icons require that minimum; keep important artwork inside the icon safe area.
 
