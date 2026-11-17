@@ -78,12 +78,17 @@ python -m services.worker.runner
 ```
 
 The worker:
-- downloads owner-authorized GLB assets from private R2,
-- runs the Blender normalization/validation script,
-- copies selected creator GLBs into the generated Godot project and instantiates them in the scene,
-- runs Godot's headless import/runtime checks,
+- downloads only owner-authorized GLB assets from private R2,
+- runs Blender normalization for explicitly queued asset-processing jobs,
+- generates a default player mesh when the creator has not assigned a player/avatar GLB,
+- builds a procedural environment and actor/prop scene with Blender; assigned creator GLBs are imported into the scene,
+- compiles creator objectives, patrol/chase actors, interactions, inventory, health, save/load and audio bindings into the Godot runtime,
+- assembles the playable Godot project and runs editor-import, gameplay end-to-end and headless runtime checks,
+- generates shared keyboard and seven-button mobile touch controls,
 - exports Linux/Windows desktop or Android debug builds, and
-- uploads private artifacts to R2 for owner-authorized signed downloads.
+- uploads private project/build artifacts to R2 for owner-authorized signed downloads.
+
+New workspace games include a clearly recorded starter loop (collect a supply key and defeat a guard) so the generated project has a testable gameplay path before the creator adds objectives. Creator-authored objectives are preserved and appended. All generated content remains subject to creator review; this is not a claim of finished art direction or a human playtest.
 
 A queued job remains queued until a worker is actually online. A successful API response means the job was accepted, not that a build completed.
 
@@ -109,7 +114,7 @@ This public API origin is not a secret. Access tokens are read from the existing
 
 ## Test gates and release truth
 
-The Foundry CI now covers PostgreSQL-backed API ownership/revision tests, Blender creator-asset normalization, Godot runtime generation, desktop/Android export, and an Android emulator launch smoke test. Passing CI is not equivalent to a human gameplay playthrough or a physical-device acceptance test.
+The Foundry CI covers PostgreSQL-backed API ownership/revision tests, Blender creator-asset normalization, workspace-specific Blender-to-Godot assembly, objective/interaction/combat/save-load gameplay smoke tests, desktop export and launch, Android APK signature/package verification, and Android emulator install/launch. The native export job consumes the exact workspace-generated game artifact. Passing CI is not equivalent to a human gameplay playthrough or a physical-device acceptance test.
 
 Use `docs/testing/creator-playtest.md` for desktop and physical Android acceptance. A debug APK is not a Play Store release. Production signing, store metadata, privacy review, license/provenance review and release promotion require protected credentials and human approval.
 
