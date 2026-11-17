@@ -26,4 +26,6 @@ services:
       - key: PGF_OBJECT_STORAGE_SECRET_KEY
         sync: false
       - key: PGF_AUTH_ENFORCEMENT_ENABLED
-        value: "false"
+        value: "true"
+      - key: PGF_IDENTITY_INTROSPECTION_URL
+        value: https://revelacode-backend.onrender.com/api/auth/me
