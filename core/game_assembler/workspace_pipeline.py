@@ -74,6 +74,7 @@ def build_workspace_specs(
     raw_objects = scene.get("objects") if isinstance(scene.get("objects"), list) else []
     raw_enemies = gameplay.get("enemies") if isinstance(gameplay.get("enemies"), list) else []
     raw_objectives = gameplay.get("objectives") if isinstance(gameplay.get("objectives"), list) else []
+    raw_mechanics = gameplay.get("mechanics") if isinstance(gameplay.get("mechanics"), list) else []
 
     name = str(project.get("name") or document.get("name") or "NEXORA Game")[:80]
     description = str(project.get("description") or document.get("description") or "A creator-authored science-fiction exploration game.")[:2000]
@@ -249,54 +250,53 @@ def build_workspace_specs(
     }]
     objective_ids = {"nexora_collect_supply", "nexora_defeat_guard"}
     for index, raw in enumerate(raw_objectives[:64]):
-            if not isinstance(raw, dict):
-                continue
-            objective_id = "creator_" + _safe_id(raw.get("id"), f"objective_{index + 1}")
-            if objective_id in objective_ids:
-                objective_id = f"{objective_id}_{index + 1}"
-            objective_ids.add(objective_id)
-            kind = str(raw.get("kind") or "reach").lower()
-            if kind not in ALLOWED_OBJECTIVES:
+        if not isinstance(raw, dict):
+            continue
+        objective_id = "creator_" + _safe_id(raw.get("id"), f"objective_{index + 1}")
+        if objective_id in objective_ids:
+            objective_id = f"{objective_id}_{index + 1}"
+        objective_ids.add(objective_id)
+        kind = str(raw.get("kind") or "reach").lower()
+        if kind not in ALLOWED_OBJECTIVES:
+            kind = "reach"
+        target_id = _safe_id(raw.get("target_id"), "")
+        if kind == "defeat":
+            if target_id not in enemy_ids:
+                target_id = enemy_ids[0] if enemy_ids else ""
+            if not target_id:
                 kind = "reach"
-            target_id = _safe_id(raw.get("target_id"), "")
-            if kind == "defeat":
-                if target_id not in enemy_ids:
-                    target_id = enemy_ids[0] if enemy_ids else ""
-                if not target_id:
-                    kind = "reach"
-            if kind in {"collect", "reach"} and (not target_id or target_id not in prop_ids):
-                target_id = f"objective_target_{objective_id}"
-                position = [float((index % 4) * 5 - 7), 0.0, -14.0 - float(index // 4) * 5.0]
-                props.append({
-                    "id": target_id,
-                    "name": str(raw.get("name") or f"Objective {index + 1}")[:80],
-                    "kind": "item",
-                    "interaction": "collect" if kind == "collect" else "activate",
-                    "scale": 1.0,
-                    "position": position,
-                })
-                prop_ids.add(target_id)
-            required = raw.get("required_count", 10 if kind == "survive" else 1)
-            try:
-                required = max(1, min(3600 if kind == "survive" else 100, int(required)))
-            except (TypeError, ValueError):
-                required = 10 if kind == "survive" else 1
-            mission_objectives.append({
-                "id": objective_id,
-                "title": str(raw.get("name") or f"Objective {index + 1}")[:100],
-                "description": str(raw.get("description") or raw.get("name") or "Complete the objective.")[:500],
-                "kind": kind,
-                "target_id": target_id,
-                "required_count": required,
+        if kind in {"collect", "reach"} and (not target_id or target_id not in prop_ids):
+            target_id = f"objective_target_{objective_id}"
+            position = [float((index % 4) * 5 - 7), 0.0, -14.0 - float(index // 4) * 5.0]
+            props.append({
+                "id": target_id,
+                "name": str(raw.get("name") or f"Objective {index + 1}")[:80],
+                "kind": "item",
+                "interaction": "collect" if kind == "collect" else "activate",
+                "scale": 1.0,
+                "position": position,
             })
-            if kind in {"collect", "reach"}:
-                interactions.append({
-                    "prop_id": target_id,
-                    "action": "collect" if kind == "collect" else "activate",
-                    "objective_id": objective_id,
-                    "item_id": target_id,
-                })
-
+            prop_ids.add(target_id)
+        required = raw.get("required_count", 10 if kind == "survive" else 1)
+        try:
+            required = max(1, min(3600 if kind == "survive" else 100, int(required)))
+        except (TypeError, ValueError):
+            required = 10 if kind == "survive" else 1
+        mission_objectives.append({
+            "id": objective_id,
+            "title": str(raw.get("name") or f"Objective {index + 1}")[:100],
+            "description": str(raw.get("description") or raw.get("name") or "Complete the objective.")[:500],
+            "kind": kind,
+            "target_id": target_id,
+            "required_count": required,
+        })
+        if kind in {"collect", "reach"}:
+            interactions.append({
+                "prop_id": target_id,
+                "action": "collect" if kind == "collect" else "activate",
+                "objective_id": objective_id,
+                "item_id": target_id,
+            })
     if not mission_objectives:
         raise ValueError("The NEXORA project has no valid gameplay objectives.")
     gameplay_spec = {
@@ -325,7 +325,7 @@ def build_workspace_specs(
         "lose_condition": "health_depleted",
         "creator_mechanics": [
             str(item.get("name") or "")[:100]
-            for item in gameplay.get("mechanics", [])[:64]
+            for item in raw_mechanics[:64]
             if isinstance(item, dict)
         ],
     }
