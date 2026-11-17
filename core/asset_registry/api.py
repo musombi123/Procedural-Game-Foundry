@@ -34,9 +34,14 @@ def register_asset_routes(app, manager_provider):
             raise HTTPException(400, "An explicit asset license or rights declaration is required")
         original = (file.filename or "").replace("\\", "/").split("/")[-1]
         suffix = Path(original).suffix.lower()
-        if not original or original in {".", ".."} or suffix not in {".glb", ".gltf"}:
-            raise HTTPException(400, "Upload a .glb or .gltf asset")
-        if kind not in {"model", "character", "environment", "prop", "animation"}:
+        if not original or original in {".", ".."}:
+            raise HTTPException(400, "A valid asset filename is required")
+        if kind == "dependency":
+            if suffix not in {".bin", ".png", ".jpg", ".jpeg", ".webp"}:
+                raise HTTPException(400, "Dependencies must be .bin or supported image files")
+        elif suffix not in {".glb", ".gltf"}:
+            raise HTTPException(400, "Upload a .glb or .gltf model asset")
+        if kind not in {"model", "character", "environment", "prop", "animation", "dependency"}:
             raise HTTPException(400, "Unsupported asset kind")
         asset_root = folder / "assets"
         asset_root.mkdir(parents=True, exist_ok=True)
@@ -53,7 +58,10 @@ def register_asset_routes(app, manager_provider):
                         raise HTTPException(413, "Asset exceeds the 512 MiB upload limit")
                     output.write(chunk)
             temporary.replace(destination)
-            report = validate_gltf(destination)
+            report = (
+                {"valid": True, "errors": [], "warnings": ["Dependency file is validated when its parent glTF is ingested"], "stats": {}}
+                if kind == "dependency" else validate_gltf(destination)
+            )
             if not report["valid"]:
                 destination.unlink(missing_ok=True)
                 raise HTTPException(422, {"message": "glTF validation failed", "errors": report["errors"]})
