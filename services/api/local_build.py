@@ -563,6 +563,14 @@ def _write_history(project_root: Path, history: list[dict[str, Any]]) -> None:
     temporary.replace(target)
 
 
+def _android_export_command(godot: str, project: Path, mode: str, output: Path, install_gradle_template: bool) -> list[str]:
+    command = [godot, "--headless", "--path", str(project)]
+    if install_gradle_template:
+        command.append("--install-android-build-template")
+    command.extend([mode, "Android", str(output)])
+    return command
+
+
 def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
                    manager: ProjectManager, jobs: JobRegistry) -> None:
     try:
@@ -583,13 +591,8 @@ def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
         if not templates["available"]:
             raise RuntimeError("Matching Godot Android export templates are missing: " + ", ".join(templates["missing"]))
         project = _ensure_game(manager, project_id)
-        if request.output_format == "aab":
-            gradle_project = project / "android" / "build"
-            if not (gradle_project / "build.gradle").is_file():
-                jobs.update(job_id, progress=12, message="Installing the matching Godot Android Gradle template")
-                _run([godot, "--headless", "--path", str(project), "--install-android-build-template"], timeout=1200, env=env)
-                if not (gradle_project / "build.gradle").is_file():
-                    raise RuntimeError("Godot did not install android/build/build.gradle. Install the matching Android Gradle build template in Godot and retry.")
+        gradle_project = project / "android" / "build"
+        install_gradle_template = request.output_format == "aab" and not (gradle_project / "build.gradle").is_file()
         build_id = uuid4().hex
         extension = request.output_format
         slug = re.sub(r"[^a-z0-9]+", "-", request.app_name.casefold()).strip("-") or "game"
@@ -600,7 +603,12 @@ def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
         _run([godot, "--headless", "--path", str(project), "--editor", "--quit"], timeout=900, env=env)
         jobs.update(job_id, progress=45, message=f"Exporting signed Android {extension.upper()} package")
         export_mode = "--export-debug" if request.build_type == "debug" else "--export-release"
-        export = _run([godot, "--headless", "--path", str(project), export_mode, "Android", str(output)], timeout=3600, env=env)
+        if install_gradle_template:
+            jobs.update(job_id, progress=40, message="Installing the matching Android Gradle template and exporting the AAB")
+        export_command = _android_export_command(godot, project, export_mode, output, install_gradle_template)
+        export = _run(export_command, timeout=3600, env=env)
+        if request.output_format == "aab" and not (gradle_project / "build.gradle").is_file():
+            raise RuntimeError("Godot exported an AAB without leaving android/build/build.gradle. Check the installed Android Gradle template.")
         jobs.update(job_id, progress=82, message="Verifying package structure, application ID and signature")
         validation = _validate_export(project, output, request, env)
         digest = hashlib.sha256(output.read_bytes()).hexdigest()
