@@ -172,7 +172,7 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
   }
 
   async function pollJob(jobId: string): Promise<Job> {
-    for (let attempt = 0; attempt < 1800; attempt += 1) {
+    for (let attempt = 0; attempt < 7200; attempt += 1) {
       await wait(1000);
       const current = await callApi<Job>(api, "/api/jobs/" + encodeURIComponent(jobId));
       setJob(current);
