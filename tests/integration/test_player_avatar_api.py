@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import services.api.main as api
@@ -43,3 +44,8 @@ def test_story_first_unlocks_player_and_builds_procedural_glb(tmp_path,monkeypat
     download=client.get(f"/api/projects/{pid}/movie-pipeline/assets/{asset_path}")
     assert download.status_code==200
     assert download.content.startswith(b"glb")
+
+
+def test_blender_avatar_script_is_valid_python():
+    script=Path(__file__).resolve().parents[2]/"blender"/"scripts"/"build_player_avatar.py"
+    compile(script.read_text(encoding="utf-8"),str(script),"exec")
