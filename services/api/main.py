@@ -483,3 +483,8 @@ register_actor_props_routes(app, lambda: manager)
 # Deterministic, creator-authored procedural audio generation routes.
 from core.movie_pipeline.audio_api import register_audio_routes
 register_audio_routes(app, lambda: manager)
+
+
+# Deterministic, creator-authored Gameplay Compiler routes.
+from core.movie_pipeline.gameplay_api import register_gameplay_routes
+register_gameplay_routes(app, lambda: manager)
