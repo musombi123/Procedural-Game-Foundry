@@ -127,16 +127,36 @@ jobs:
           export/android/debug_keystore_pass = "android"
           EOF
           godot --headless --path "${{ runner.temp }}/nexora-export-game" --editor --quit
-      - name: Export Linux desktop build
+      - name: Install desktop headless display
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y xvfb
+      - name: Export and launch Linux desktop build
         run: |
           mkdir -p "${{ runner.temp }}/nexora-export-game/build/linux"
           godot --headless --path "${{ runner.temp }}/nexora-export-game" --export-release "Linux/X11" "${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64"
-          test -s "${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64"
-      - name: Export Android debug APK
+          DESKTOP_BUILD="${{ runner.temp }}/nexora-export-game/build/linux/NexoraFoundry.x86_64"
+          test -s "$DESKTOP_BUILD"
+          chmod +x "$DESKTOP_BUILD"
+          set +e
+          timeout 20s xvfb-run -a "$DESKTOP_BUILD" > "${{ runner.temp }}/nexora-desktop-runtime.log" 2>&1
+          runtime_status=$?
+          set -e
+          if [ "$runtime_status" -ne 124 ]; then
+            cat "${{ runner.temp }}/nexora-desktop-runtime.log"
+            echo "Desktop game did not remain alive for the 20-second runtime smoke test (exit=$runtime_status)."
+            exit 1
+          fi
+          if grep -E "SCRIPT ERROR:|FATAL|Segmentation fault" "${{ runner.temp }}/nexora-desktop-runtime.log"; then
+            cat "${{ runner.temp }}/nexora-desktop-runtime.log"
+            exit 1
+          fi
+      - name: Export and verify Android debug APK
         run: |
           mkdir -p "${{ runner.temp }}/nexora-export-game/build/android"
           godot --verbose --headless --path "${{ runner.temp }}/nexora-export-game" --export-debug "Android" "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
-          test -s "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
+          APK="${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          sha256sum "$APK" > "${{ runner.temp }}/nexora-export-game/build/android/NexoraFoundry-debug.apk.sha256"
       - name: Stage emulator smoke-test package
         run: |
           mkdir -p "${{ runner.temp }}/nexora-emulator-package"
