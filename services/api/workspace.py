@@ -96,7 +96,7 @@ def _safe_filename(value: str) -> str:
 
 def _asset_uuid(asset_id: str) -> UUID:
     try:
-        return UUID(asset_id)
+        return _asset_uuid(asset_id)
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=404, detail="Asset not found.") from exc
 
@@ -295,7 +295,7 @@ def complete_asset_upload(project_id: str, asset_id: str, principal: dict[str, s
         project = _owned_project(connection, project_id, principal["id"])
         asset = connection.execute(
             "SELECT * FROM nexora_assets WHERE id=%s AND project_id=%s AND owner_id=%s",
-            (UUID(asset_id), project["id"], principal["id"]),
+            (_asset_uuid(asset_id), project["id"], principal["id"]),
         ).fetchone()
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found.")
@@ -349,7 +349,7 @@ def asset_download_url(project_id: str, asset_id: str, principal: dict[str, str]
         project = _owned_project(connection, project_id, principal["id"])
         asset = connection.execute(
             "SELECT * FROM nexora_assets WHERE id=%s AND project_id=%s AND owner_id=%s",
-            (UUID(asset_id), project["id"], principal["id"]),
+            (_asset_uuid(asset_id), project["id"], principal["id"]),
         ).fetchone()
         if not asset or asset["status"] not in {"ready", "processed"}:
             raise HTTPException(status_code=404, detail="Asset not found.")
@@ -370,7 +370,7 @@ def delete_asset(project_id: str, asset_id: str, principal: dict[str, str] = Dep
         project = _owned_project(connection, project_id, principal["id"])
         asset = connection.execute(
             "SELECT * FROM nexora_assets WHERE id=%s AND project_id=%s AND owner_id=%s",
-            (UUID(asset_id), project["id"], principal["id"]),
+            (_asset_uuid(asset_id), project["id"], principal["id"]),
         ).fetchone()
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found.")
@@ -393,7 +393,7 @@ def process_asset(project_id: str, asset_id: str, principal: dict[str, str] = De
         project = _owned_project(connection, project_id, principal["id"])
         asset = connection.execute(
             "SELECT * FROM nexora_assets WHERE id=%s AND project_id=%s AND owner_id=%s AND status IN ('ready','processed')",
-            (UUID(asset_id), project["id"], principal["id"]),
+            (_asset_uuid(asset_id), project["id"], principal["id"]),
         ).fetchone()
         if not asset:
             raise HTTPException(status_code=404, detail="Ready asset not found.")
