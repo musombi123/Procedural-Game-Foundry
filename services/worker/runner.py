@@ -149,7 +149,19 @@ def _project_from_job(job: dict[str, Any], workdir: Path):
 
     target = workdir / "assembled-workspace"
     project_dir, manifest = assemble_workspace_game(source, asset_paths, target, blender, godot)
-    _write_export_presets(project_dir, (job.get("payload") or {}).get("android"))
+    android_settings = (job.get("payload") or {}).get("android") or {}
+    icon_key = str(android_settings.get("icon_object_key") or "")
+    if icon_key:
+        if not icon_key.startswith("owners/"):
+            raise RuntimeError("Android launcher icon must reference an owner-scoped private object.")
+        icon_path = project_dir / "android-launcher-icon.png"
+        object_store.download_file(icon_key, icon_path)
+        if not icon_path.is_file() or icon_path.stat().st_size < 64 or icon_path.read_bytes()[:8] != b"\\x89PNG\\r\\n\\x1a\\n":
+            raise RuntimeError("Android launcher icon is not a valid PNG image.")
+        preset_path = project_dir / "export_presets.cfg"
+        preset_text = preset_path.read_text(encoding="utf-8").replace('package/unique_name=', 'launcher_icons/main_192x192="res://android-launcher-icon.png"\\npackage/unique_name=')
+        preset_path.write_text(preset_text, encoding="utf-8")
+    _write_export_presets(project_dir, android_settings)
     return project_dir
 
 
