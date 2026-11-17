@@ -187,9 +187,9 @@ def _configure_android_editor_settings(env: dict[str, str]) -> None:
         return json.dumps(str(Path(value).resolve()).replace("\\", "/"))
 
     settings.write_text(
-        '[gd_resource type="EditorSettings" format=3]\\n\\n[resource]\\n'
-        f'export/android/android_sdk_path = {quote(sdk)}\\n'
-        f'export/android/java_sdk_path = {quote(java)}\\n',
+        '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n'
+        f'export/android/android_sdk_path = {quote(sdk)}\n'
+        f'export/android/java_sdk_path = {quote(java)}\n',
         encoding="utf-8",
     )
 
@@ -255,11 +255,11 @@ def export_game(
         export_flag, target.preset, str(artifact),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=1800, env=environment)
-    export_output = (result.stdout or "") + "\\n" + (result.stderr or "")
+    export_output = (result.stdout or "") + "\n" + (result.stderr or "")
     if result.returncode != 0 or not artifact.is_file():
         raise RuntimeError(
             f"{target.platform} export failed (exit={result.returncode}). "
-            "Check Godot export templates and platform SDK configuration.\\n"
+            "Check Godot export templates and platform SDK configuration.\n"
             + export_output[-12000:]
         )
     artifact_info = verify_export(target, artifact)
@@ -308,7 +308,7 @@ def export_game(
         checksums.append(f"{sha256_file(package_path)}  {package_path.name}")
     checksums.append(f"{sha256_file(manifest_path)}  release-manifest.json")
     checksum_path = output_dir / "checksums.sha256"
-    checksum_path.write_text("\\n".join(checksums) + "\\n", encoding="utf-8")
+    checksum_path.write_text("\n".join(checksums) + "\n", encoding="utf-8")
     return {
         "target": target.key,
         "artifact": str(artifact),
