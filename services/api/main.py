@@ -139,7 +139,7 @@ def project_files(pid: str):
 
 
 # Movie-to-game pipeline: persisted, creator-approved stage state machine.
-from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, new_pipeline
+from core.movie_pipeline.models import PipelineCreate, StageDecision, StageId, StageState, new_pipeline
 from core.movie_pipeline.service import PipelineError, PipelineStore
 from core.movie_pipeline.worker import analyze_project
 
@@ -289,7 +289,7 @@ def save_creator_story(pid: str, brief: StoryBrief):
     # A story-first project has no film-analysis prerequisite; explicitly skip that stage.
     if brief.mode == "story":
         records = {record.stage: record for record in pipeline.stages}
-        records[StageId.ANALYSIS].state = __import__("core.movie_pipeline.models", fromlist=["StageState"]).StageState.APPROVED
+        records[StageId.ANALYSIS].state = StageState.APPROVED
         records[StageId.ANALYSIS].summary = "Skipped by creator: story-first workflow"
         records[StageId.PLAYER].state = __import__("core.movie_pipeline.models", fromlist=["StageState"]).StageState.READY
         records[StageId.PLAYER].summary = "Portrait and creator story ready for procedural player generation"
