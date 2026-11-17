@@ -37,7 +37,7 @@ def _runtime_main() -> str:
 
 const DIRECTOR_SCRIPT = preload("res://scripts/runtime/GameplayDirector.gd")
 const PLAYER_SCRIPT = preload("res://scripts/runtime/PlayerController.gd")
-const ACTOR_SCRIPT = preload("res://scripts/runtime/ActorBehaviour.gd")
+const ACTOR_SCRIPT = preload("res://scripts/ActorBehaviour.gd")
 const PROP_SCRIPT = preload("res://scripts/InteractableProp.gd")
 
 var gameplay: Dictionary = {}
