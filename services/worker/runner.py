@@ -350,7 +350,7 @@ def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
             _run([apksigner, "verify", "--verbose", str(output)], timeout=180)
         checksum = hashlib.sha256(output.read_bytes()).hexdigest()
         checksum_path = output.with_name(output.name + ".sha256")
-        checksum_path.write_text(f"{checksum}  {output.name}\\n", encoding="utf-8")
+        checksum_path.write_text(f"{checksum}  {output.name}\n", encoding="utf-8")
         export_results[-1]["sha256"] = checksum
         export_results[-1]["checksum_file"] = checksum_path.name
     release_manifest = {
