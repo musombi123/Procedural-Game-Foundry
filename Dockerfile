@@ -14,7 +14,6 @@ COPY pyproject.toml README.md ./
 COPY core ./core
 COPY services ./services
 COPY generators ./generators
-COPY schemas ./schemas
 
 RUN pip install --upgrade pip && pip install ".[cloud]"
 
