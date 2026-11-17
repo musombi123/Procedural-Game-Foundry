@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -30,11 +30,16 @@ from core.game_assembler.godot import assemble_godot_project
 from core.orchestration.jobs import Job, JobRegistry, JobState
 from core.project_engine.models import WorldDocument
 from core.project_engine.manager import ProjectManager
+from services.api.android_toolchain import (
+    configure_godot_android, java_home, java_tool, sdk_components, sdk_tool,
+    settings_match, set_project_ini_value, template_status,
+)
 
 
 router = APIRouter(tags=["desktop-build-console"])
 _RUNS: dict[str, dict[str, Any]] = {}
 _RUNS_LOCK = threading.RLock()
+_HISTORY_LOCK = threading.RLock()
 PACKAGE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 VERSION_PATTERN = re.compile(r"^[0-9]{1,4}(?:\.[0-9]{1,4}){0,3}(?:[-+][A-Za-z0-9.-]+)?$")
 DEVICE_SERIAL_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
@@ -65,8 +70,8 @@ class AndroidBuildRequest(BaseModel):
     package_id: str = Field(min_length=3, max_length=180)
     version_name: str = Field(default="1.0.0", min_length=1, max_length=32)
     version_code: int = Field(default=1, ge=1, le=2100000000)
-    output_format: Literal["apk", "aab"] = "apk"
     build_type: Literal["debug", "release"] = "debug"
+    output_format: Literal["apk", "aab"] = "apk"
     orientation: Literal["landscape", "portrait", "sensor"] = "landscape"
     icon_path: str | None = Field(default=None, max_length=1024)
     min_sdk: int = Field(default=23, ge=23, le=35)
@@ -100,6 +105,13 @@ class AndroidBuildRequest(BaseModel):
         value = value.strip()
         if not VERSION_PATTERN.fullmatch(value):
             raise ValueError("Version name must be a dotted version such as 1.0.0.")
+        return value
+
+    @field_validator("permissions")
+    @classmethod
+    def require_godot_internet_permission(cls, value: AndroidPermissions) -> AndroidPermissions:
+        if not value.internet:
+            raise ValueError("Godot Android exports always include INTERNET; this permission cannot be disabled.")
         return value
 
     @field_validator("target_sdk")
@@ -188,14 +200,7 @@ def _android_sdk() -> Path | None:
 
 
 def _sdk_tool(name: str) -> str | None:
-    sdk = _android_sdk()
-    if sdk:
-        choices = sorted((sdk / "build-tools").glob(f"*/{name}"), reverse=True)
-        choices += sorted((sdk / "build-tools").glob(f"*/{name}.bat"), reverse=True)
-        for item in choices:
-            if item.is_file():
-                return str(item)
-    return shutil.which(name)
+    return sdk_tool(_android_sdk(), name)
 
 
 def _command(executable: str, *arguments: str) -> list[str]:
