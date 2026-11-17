@@ -43,13 +43,29 @@ def test_worker_creates_manifest_and_moves_analysis_to_review(tmp_path, monkeypa
         target.write_bytes(b"frame")
         return [{"index": 1, "timestamp_seconds": 2.0, "path": str(target.relative_to(out.parent)), "size_bytes": 5}]
     monkeypatch.setattr(worker, "_extract_frames", extract)
+    monkeypatch.setattr(worker, "_extract_analysis_frames", lambda path, out, duration: {
+        "fps": 12, "frame_count": 144, "directory": "revision-0/frames_12fps"
+    })
+    monkeypatch.setattr(worker, "_extract_audio_tracks", lambda path, out, count, duration: [
+        {"index": 1, "type": "source_mix", "path": "revision-0/audio/audio-track-01.wav", "size_bytes": 100}
+    ])
     monkeypatch.setattr(worker, "_transcribe", lambda path, out: {"status": "skipped", "reason": "test"})
     result = worker.analyze_project(folder)
     assert result["status"] == "media_analysis_complete"
+    assert result["analysis_frames"]["fps"] == 12
+    assert result["analysis_frames"]["frame_count"] == 144
+    assert len(result["audio_tracks"]) == 1
+    assert result["original_video_retained"] is False
     assert (store.folder / "analysis/revision-0/analysis.json").is_file()
-    current = store.load().stages[0]
+    current_document = store.load()
+    current = current_document.stages[0]
     assert current.state == StageState.REVIEW
     assert current.output["keyframe_count"] == 1
+    assert current.output["analysis_fps"] == 12
+    assert current_document.source_video["sha256"] == "abc"
+    assert current_document.source_video["original_retained"] is False
+    assert "storage_key" not in current_document.source_video
+    assert not video.exists()
 
 def test_scene_fallback_is_bounded(monkeypatch, tmp_path):
     monkeypatch.setattr(worker.shutil, "which", lambda name: "/usr/bin/ffmpeg")
