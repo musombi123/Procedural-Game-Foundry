@@ -288,6 +288,8 @@ async def _attach_movie_input(pid: str, kind: str, upload: UploadFile):
         raise HTTPException(404, "Project or movie pipeline not found") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if kind == "video" and not document.rights.has_video_rights:
+        raise HTTPException(403, "Confirm video ownership or permission before uploading movie footage")
     attribute = "source_photo" if kind == "photo" else "source_video"
     if getattr(document, attribute):
         raise HTTPException(409, f"A {kind} input is already attached; remove it before replacing")
