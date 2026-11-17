@@ -35,6 +35,7 @@ from core.project_engine.manager import ProjectManager
 router = APIRouter(tags=["desktop-build-console"])
 _RUNS: dict[str, dict[str, Any]] = {}
 _RUNS_LOCK = threading.RLock()
+_HISTORY_LOCK = threading.RLock()
 PACKAGE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 VERSION_PATTERN = re.compile(r"^[0-9]{1,4}(?:\.[0-9]{1,4}){0,3}(?:[-+][A-Za-z0-9.-]+)?$")
 DEVICE_SERIAL_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
@@ -309,7 +310,7 @@ def _android_sdk_components(sdk: Path | None) -> dict[str, Any]:
         f"build-tools;{ANDROID_BUILD_TOOLS_VERSION} / aapt": sdk / "build-tools" / ANDROID_BUILD_TOOLS_VERSION / ("aapt.exe" if os.name == "nt" else "aapt"),
         f"ndk;{ANDROID_NDK_VERSION}": sdk / "ndk" / ANDROID_NDK_VERSION,
         f"cmake;{ANDROID_CMAKE_VERSION}": sdk / "cmake" / ANDROID_CMAKE_VERSION,
-        "cmdline-tools;latest": sdk / "cmdline-tools" / "latest",
+        "cmdline-tools;latest / sdkmanager": sdk / "cmdline-tools" / "latest" / "bin" / ("sdkmanager.bat" if os.name == "nt" else "sdkmanager"),
     }
     missing = [label for label, path in candidates.items() if not path.exists()]
     return {"available": not missing, "missing": missing}
@@ -457,10 +458,18 @@ keystore/release_password=""
     preset_file.write_text(prefix + preset, encoding="utf-8")
 
 
+def _java_tool(name: str, env: dict[str, str] | None = None) -> str | None:
+    environment = env or os.environ
+    java_home = Path(environment.get("JAVA_HOME", "")).expanduser()
+    executable_name = name + (".exe" if os.name == "nt" else "")
+    candidate = java_home / "bin" / executable_name
+    if candidate.is_file():
+        return str(candidate)
+    return shutil.which(name)
+
+
 def _debug_signing_environment(env: dict[str, str]) -> None:
-    java_home = Path(env.get("JAVA_HOME", "")).expanduser()
-    keytool_candidates = [java_home / "bin" / ("keytool.exe" if os.name == "nt" else "keytool")]
-    keytool = next((str(path) for path in keytool_candidates if path.is_file()), None) or shutil.which("keytool")
+    keytool = _java_tool("keytool", env)
     if not keytool:
         raise RuntimeError("Java keytool is required to prepare the desktop debug signing key.")
     key_path = Path.home() / ".android" / "debug.keystore"
@@ -525,7 +534,7 @@ def _validate_export(project: Path, output: Path, request: AndroidBuildRequest, 
         signature_metadata = [name for name in names if name.upper().startswith("META-INF/") and name.upper().endswith(".SF")]
         if not signature_files or not signature_metadata:
             raise RuntimeError("AAB validation failed: release signature files are missing.")
-    jarsigner = shutil.which("jarsigner")
+    jarsigner = _java_tool("jarsigner", env)
     if not jarsigner:
         raise RuntimeError("Java jarsigner is required to verify the Android App Bundle signature.")
     verification = _run(_command(jarsigner, "-verify", "-verbose", str(output)), timeout=180, env=env)
@@ -612,16 +621,20 @@ def _build_android(job_id: str, project_id: str, request: AndroidBuildRequest,
             "package_validation": validation.get("package_manifest"),
         }
         root = manager.path_for(project_id)
-        history = _read_history(root)
-        history.insert(0, record)
-        _write_history(root, history)
+        with _HISTORY_LOCK:
+            history = _read_history(root)
+            history.insert(0, record)
+            _write_history(root, history)
         (output.parent / f"{output.stem}.manifest.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
         jobs.update(job_id, state=JobState.COMPLETED, progress=100,
                     message=f"{request.output_format.upper()} exported and signature-verified",
                     result={"build": record, "validation": validation,
                             "godot_export": {"stdout": export["stdout"][-6000:], "stderr": export["stderr"][-6000:]}})
     except Exception as exc:
-        jobs.update(job_id, state=JobState.FAILED, progress=100, message="Android build failed", error=str(exc)[-12000:])
+        message = str(exc)
+        if request.signing and request.signing.key_password:
+            message = message.replace(request.signing.key_password, "[REDACTED]")
+        jobs.update(job_id, state=JobState.FAILED, progress=100, message="Android build failed", error=message[-12000:])
 
 
 def _runtime_test(job_id: str, project_id: str, manager: ProjectManager, jobs: JobRegistry) -> None:
