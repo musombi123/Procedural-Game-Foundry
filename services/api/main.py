@@ -475,4 +475,4 @@ def get_movie_pipeline_asset(pid: str, asset_path: str):
 
 # Creator-authored deterministic actor and prop generation routes.
 from core.movie_pipeline.actors_api import register_actor_props_routes
-register_actor_props_routes(app, manager)
+register_actor_props_routes(app, lambda: manager)
