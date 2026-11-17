@@ -81,6 +81,8 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
       - name: Install Android export SDK components
         run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmdline-tools;latest"
       - uses: chickensoft-games/setup-godot@v2
