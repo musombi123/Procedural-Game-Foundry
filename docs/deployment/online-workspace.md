@@ -70,7 +70,7 @@ Install:
 - For Android export: JDK 17, Android command-line tools, platform 35, build-tools 35.0.1, NDK 28.1.13356709, CMake 3.10.2.4988404 and matching Godot Android export templates.
 - A configured Android debug keystore for development builds. Production signing keys must be managed separately and never placed in the repository.
 
-Set the same `DATABASE_URL` and private `PGF_OBJECT_STORAGE_*` secrets as the API. Optional variables are `PGF_WORKER_ID`, `PGF_WORKER_POLL_SECONDS`, `BLENDER_BIN` and `GODOT_BIN`.
+Set the same `DATABASE_URL` and private `PGF_OBJECT_STORAGE_*` secrets as the API. Optional variables are `PGF_WORKER_ID`, `PGF_WORKER_POLL_SECONDS`, `BLENDER_BIN`, `GODOT_BIN` and `APKSIGNER_BIN`. Android worker exports are rejected if the APK cannot be verified with `apksigner`; exported artifacts include SHA-256 sidecars and a development release manifest.
 
 ```bash
 python -m pip install -e ".[cloud]"
