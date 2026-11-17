@@ -55,3 +55,11 @@ def test_creator_glb_asset_is_referenced_by_native_godot_scene():
         {asset_id: f"res://assets/{asset_id}.glb"},
     )
     assert world.objects[0].asset_path == f"res://assets/{asset_id}.glb"
+
+def test_worker_android_package_id_matches_release_smoke_test(tmp_path):
+    from services.worker.runner import _write_export_presets
+
+    _write_export_presets(tmp_path)
+    presets = (tmp_path / "export_presets.cfg").read_text(encoding="utf-8")
+    assert 'package/unique_name="com.nexora.foundry"' in presets
+    assert 'package/unique_name="org.nexora.foundry"' not in presets
