@@ -83,6 +83,7 @@ jobs:
           pytest -q
           tests/integration/test_blender_asset_normalization.py
           tests/integration/test_blender_to_godot.py
+          tests/integration/test_workspace_pipeline.py
       - uses: actions/upload-artifact@v4
         with:
           name: nexora-export-project
