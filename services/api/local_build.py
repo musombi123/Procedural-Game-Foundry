@@ -388,6 +388,30 @@ def _quote(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _set_project_ini_value(project_file: Path, section_name: str, key: str, value: str) -> None:
+    text = project_file.read_text(encoding="utf-8") if project_file.is_file() else ""
+    section_header = f"[{section_name}]"
+    section = re.search(rf"(?m)^\[{re.escape(section_name)}\]\s*$", text)
+    if not section:
+        text = text.rstrip() + f"\n\n{section_header}\n"
+        section = re.search(rf"(?m)^\[{re.escape(section_name)}\]\s*$", text)
+    assert section is not None
+    start = section.end()
+    next_section = re.search(r"(?m)^\[[^\]]+\]\s*$", text[start:])
+    end = start + next_section.start() if next_section else len(text)
+    block = text[start:end]
+    pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
+    line = f"{key}={value}"
+    if pattern.search(block):
+        block = pattern.sub(lambda _: line, block, count=1)
+    else:
+        block = block.rstrip() + "\n" + line + "\n"
+    updated = text[:start] + block + text[end:]
+    temporary = project_file.with_suffix(project_file.suffix + ".tmp")
+    temporary.write_text(updated, encoding="utf-8")
+    temporary.replace(project_file)
+
+
 def _write_android_preset(project: Path, request: AndroidBuildRequest, output: Path) -> None:
     preset_file = project / "export_presets.cfg"
     original = preset_file.read_text(encoding="utf-8") if preset_file.is_file() else ""
@@ -408,6 +432,11 @@ def _write_android_preset(project: Path, request: AndroidBuildRequest, output: P
         icon_ref = "res://android_assets/launcher-icon.png"
 
     orientation = {"landscape": 0, "portrait": 1, "sensor": 6}[request.orientation]
+    viewport_width, viewport_height = (720, 1280) if request.orientation == "portrait" else (1280, 720)
+    project_file = project / "project.godot"
+    _set_project_ini_value(project_file, "display", "window/handheld/orientation", str(orientation))
+    _set_project_ini_value(project_file, "display", "window/size/viewport_width", str(viewport_width))
+    _set_project_ini_value(project_file, "display", "window/size/viewport_height", str(viewport_height))
     use_gradle = request.output_format == "aab"
     options = request.permissions.model_dump()
     permission_lines = "\n".join(
