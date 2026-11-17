@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from core.movie_pipeline.models import StageId, StageState
 from core.movie_pipeline.service import PipelineStore
+from core.movie_pipeline.release import write_export_presets
 
 APPROVED_INPUTS = (
     StageId.ANALYSIS, StageId.PLAYER, StageId.ENVIRONMENT,
@@ -759,6 +760,8 @@ func _run_checks() -> void:
         'config_version=5\n[application]\nconfig/name="Nexora Foundry - Assembled Game"\nrun/main_scene="res://main.tscn"\n[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n[rendering]\nrenderer/rendering_method="gl_compatibility"\nrenderer/rendering_method.mobile="gl_compatibility"\n',
         encoding="utf-8",
     )
+    # Export target presets are part of each creator's assembled project.
+    write_export_presets(destination)
     manifest = {
         "schema_version": "1.0", "assembler": "Nexora Foundry Godot Assembler v1",
         "project": "game/project.godot", "main_scene": "game/main.tscn",
