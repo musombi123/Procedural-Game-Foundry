@@ -258,3 +258,64 @@ def run_movie_analysis_job(job_id: str, folder: Path):
                     message=f"Analysis ready for review ({len(result.get('keyframes', []))} keyframes)", error=None)
     except Exception as exc:
         jobs.update(job_id, state=JobState.FAILED, message="Movie analysis failed", error=str(exc))
+
+
+# Creator-authored story and deterministic procedural 3D world tools.
+from core.movie_pipeline.story import StoryBrief
+from core.movie_pipeline.procedural_world import build_world_spec
+
+@app.put("/api/projects/{pid}/movie-pipeline/story")
+def save_creator_story(pid: str, brief: StoryBrief):
+    """Save a creator-written story/instruction set; no model or inference service is called."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+        pipeline = PipelineStore(folder).load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project or movie pipeline not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if brief.mode in ("movie", "guided") and not pipeline.source_video:
+        raise HTTPException(409, "Upload a movie clip for movie or guided mode")
+    if not pipeline.source_photo:
+        raise HTTPException(409, "Upload the player's portrait before creating the player avatar")
+    story = brief.as_manifest()
+    path = PipelineStore(folder).folder / "story.json"
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(story, indent=2), encoding="utf-8")
+    temporary.replace(path)
+    return {"saved": True, "story": story}
+
+@app.get("/api/projects/{pid}/movie-pipeline/story")
+def get_creator_story(pid: str):
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    path = PipelineStore(folder).folder / "story.json"
+    if not path.is_file():
+        raise HTTPException(404, "No creator story has been saved")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+@app.post("/api/projects/{pid}/movie-pipeline/environment/build")
+def build_procedural_environment(pid: str):
+    """Create a deterministic 3D scene specification for Blender; no AI models involved."""
+    try:
+        folder = manager.path_for(pid)
+        manager.load(pid)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    story_path = PipelineStore(folder).folder / "story.json"
+    if not story_path.is_file():
+        raise HTTPException(409, "Save the creator story before generating the 3D environment")
+    story = json.loads(story_path.read_text(encoding="utf-8"))
+    spec = build_world_spec(story)
+    output = PipelineStore(folder).folder / "environment" / "world-spec.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+    temporary.replace(output)
+    return {"generated": True, "geometry_spec": str(output.relative_to(folder)),
+            "landmarks": len(spec["landmarks"]), "props": len(spec["props"]),
+            "dimensions": spec["dimensions"], "requires_creator_review": True}
