@@ -18,7 +18,7 @@ def test_story_first_unlocks_player_and_builds_procedural_glb(tmp_path,monkeypat
     document=store.load()
     portrait=store.folder/"uploads"/"player-portrait.jpg"
     portrait.parent.mkdir(parents=True,exist_ok=True)
-    portrait.write_bytes(bytes.fromhex("ffd8ff")+"portrait")
+    portrait.write_bytes(bytes.fromhex("ffd8ff")+b"portrait")
     document.source_photo={"filename":portrait.name,"storage_key":"movie_pipeline/uploads/player-portrait.jpg","sha256":"abc123"}
     store.save(document)
     saved=client.put(f"/api/projects/{pid}/movie-pipeline/story",json={"mode":"story","title":"My Story","premise":"A journey","mission_count":3})
