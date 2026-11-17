@@ -1,4 +1,4 @@
-"""Local, model-optional media analysis worker for the movie-to-game pipeline."""
+"""Local, tools-only media analysis worker for the movie-to-game pipeline."""
 from __future__ import annotations
 
 import json
@@ -129,8 +129,8 @@ def analyze_project(project_folder: Path) -> dict[str, Any]:
                                            for i, t in enumerate(times)]},
             "keyframes": frames,
             "transcription": transcription,
-            "vision_analysis": {"status": "not_configured", "reason": "No local vision model adapter is configured"},
-            "story_design": {"status": "pending_creator_review", "reason": "Local language/vision model synthesis is a subsequent adapter stage"},
+            "vision_analysis": {"status": "disabled_tools_only", "reason": "Visual interpretation is creator-guided; no machine-learning vision models are loaded"},
+            "story_design": {"status": "creator_authored", "reason": "Use the creator story editor to define plot, missions and instructions; no generated text is used"},
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         manifest = analysis_dir / "analysis.json"
