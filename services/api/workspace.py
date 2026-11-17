@@ -247,13 +247,25 @@ def delete_project(project_id: str, principal: dict[str, str] = Depends(current_
             "SELECT object_key, processed_object_key FROM nexora_assets WHERE project_id=%s AND owner_id=%s",
             (project["id"], principal["id"]),
         ).fetchall()
-        for asset in assets:
-            for key in (asset["object_key"], asset["processed_object_key"]):
-                if key:
-                    try:
-                        object_store.delete(key)
-                    except Exception as exc:
-                        raise HTTPException(status_code=503, detail="Private asset cleanup failed; project was not deleted.") from exc
+        artifacts = connection.execute(
+            "SELECT a.object_key FROM nexora_artifacts a "
+            "JOIN nexora_jobs j ON j.id = a.job_id "
+            "WHERE j.project_id=%s AND a.owner_id=%s AND j.owner_id=%s",
+            (project["id"], principal["id"], principal["id"]),
+        ).fetchall()
+        # Remove private binary objects before deleting database metadata. If
+        # object cleanup fails, keep the project and records visible for retry.
+        keys = [
+            key
+            for row in assets
+            for key in (row["object_key"], row["processed_object_key"])
+            if key
+        ] + [row["object_key"] for row in artifacts if row["object_key"]]
+        for key in keys:
+            try:
+                object_store.delete(key)
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="Private project asset/artifact cleanup failed; project was not deleted.") from exc
         connection.execute("DELETE FROM nexora_projects WHERE id=%s AND owner_id=%s", (project["id"], principal["id"]))
         return None
     finally:
