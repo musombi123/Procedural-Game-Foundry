@@ -25,7 +25,11 @@ export default function PlayerAvatarBuilder({projectId,api,portraitReady,playerR
    {range("Shoulder width",shoulders,.32,.7,.01,setShoulders)}
    {range("Hip width",hips,.24,.55,.01,setHips)}
    {range("Leg proportion",legs,.42,.62,.01,setLegs)}
-   {range("Body build",build,.75,1.3,.01,setBuild)}\n   {range("Face crop · horizontal center",faceX,.1,.9,.005,setFaceX)}\n   {range("Face crop · top position",faceTop,0,.6,.005,setFaceTop)}\n   {range("Face crop · width",faceWidth,.12,.4,.005,setFaceWidth)}\n   {range("Face crop · height",faceHeight,.08,.3,.005,setFaceHeight)}
+   {range("Body build",build,.75,1.3,.01,setBuild)}
+   {range("Face crop · horizontal center",faceX,.1,.9,.005,setFaceX)}
+   {range("Face crop · top position",faceTop,0,.6,.005,setFaceTop)}
+   {range("Face crop · width",faceWidth,.12,.4,.005,setFaceWidth)}
+   {range("Face crop · height",faceHeight,.08,.3,.005,setFaceHeight)}
   </div>
   <button disabled={busy||!portraitReady||!playerReady} onClick={()=>void generate()}>{busy?"Building avatar in Blender…":"Generate procedural player avatar"}</button>
   {asset&&<p style={{margin:0,color:"#8fd1a8",fontSize:12}}>GLB scene: <a href={api+"/api/projects/"+projectId+"/movie-pipeline/assets/"+asset} target="_blank" rel="noreferrer">Download player avatar</a></p>}
