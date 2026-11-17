@@ -14,7 +14,7 @@ export default function StoryBuilderPanel({projectId,api}:Props) {
   async function save():Promise<boolean>{
     setBusy(true);
     try { const r=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/story",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(brief)});
-      const data=await r.json(); if(!r.ok) throw new Error(data.detail??"Could not save story"); setBrief({...empty,...data.story}); setMessage("Creator story saved. The uploaded portrait remains the player's identity source.");
+      const data=await r.json(); if(!r.ok) throw new Error(data.detail??"Could not save story"); setBrief({mode:data.story.mode??empty.mode,title:data.story.title??empty.title,premise:data.story.premise??"",player_role:data.story.player_role??empty.player_role,setting:data.story.setting??"",tone:data.story.tone??"",instructions:data.story.instructions??"",ending:data.story.ending??"",mission_count:data.story.mission_count??5,world_scale:data.story.world_scale??"medium"}); setMessage("Creator story saved. Portrait remains the player identity source."); return true;
     } catch(e){setMessage(e instanceof Error?e.message:"Story save failed"); return false;} finally{setBusy(false);}
   }
   async function buildWorld(){
