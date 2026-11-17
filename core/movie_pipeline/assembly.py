@@ -75,6 +75,7 @@ func _configure_input() -> void:
     _bind_key("move_right", KEY_D)
     _bind_key("jump", KEY_SPACE)
     _bind_key("interact", KEY_E)
+    _bind_key("attack", KEY_F)
     _bind_key("save_game", KEY_F5)
 
 func _bind_key(action: String, key: Key) -> void:
@@ -157,8 +158,8 @@ func _create_player() -> void:
     camera.position = Vector3(0, 2.5, 6.5)
     camera.current = true
     player.add_child(camera)
-    camera.look_at(player.position + Vector3(0, 1.1, 0))
     add_child(player)
+    camera.look_at(player.global_position + Vector3(0, 1.1, 0))
     player.set("director", director)
 
 func _instance_actors_and_props() -> void:
@@ -168,6 +169,7 @@ func _instance_actors_and_props() -> void:
         visuals.name = "ActorsAndPropsAsset"
         add_child(visuals)
         _bind_actor_behaviours(visuals)
+        _create_actor_hitboxes(visuals)
     _create_interaction_areas()
 
 func _bind_actor_behaviours(visuals: Node) -> void:
@@ -181,6 +183,33 @@ func _bind_actor_behaviours(visuals: Node) -> void:
             continue
         rig.set_script(ACTOR_SCRIPT)
         rig.call("configure", config, player, director)
+
+func _create_actor_hitboxes(visuals: Node) -> void:
+    for config in gameplay.get("actor_behaviours", []):
+        var actor_id := str(config.get("actor_id", ""))
+        var descriptor: Dictionary = {}
+        for item in actor_spec.get("actors", []):
+            if str(item.get("id", "")) == actor_id:
+                descriptor = item
+                break
+        if descriptor.is_empty():
+            continue
+        var rig := visuals.find_child(actor_id + "_rig", true, false)
+        if rig == null:
+            continue
+        var area := Area3D.new()
+        area.name = "Hitbox_" + actor_id
+        area.position = Vector3(descriptor.position[0], descriptor.position[1] + 1.0, descriptor.position[2])
+        area.collision_layer = 4
+        area.collision_mask = 0
+        var collision := CollisionShape3D.new()
+        var shape := SphereShape3D.new()
+        shape.radius = 1.1 * float(descriptor.get("scale", 1.0))
+        collision.shape = shape
+        area.add_child(collision)
+        area.set_script(load("res://scripts/ActorHitbox.gd"))
+        area.call("configure", rig)
+        add_child(area)
 
 func _create_interaction_areas() -> void:
     for interaction in gameplay.get("interactions", []):
@@ -241,7 +270,7 @@ func _create_hud() -> void:
     label.position = Vector2(18, 18)
     label.add_theme_font_size_override("font_size", 18)
     label.add_theme_color_override("font_color", Color.WHITE)
-    label.text = "WASD move · SPACE jump · E interact · F5 save"
+    label.text = "WASD move · SPACE jump · E interact · F attack · F5 save"
     layer.add_child(label)
     add_child(layer)
     director.objective_updated.connect(func(_id: String, current: int, required: int):
@@ -275,8 +304,24 @@ func _physics_process(delta: float) -> void:
     move_and_slide()
     if Input.is_action_just_pressed("interact"):
         _try_interact()
+    if Input.is_action_just_pressed("attack"):
+        _try_attack()
     if Input.is_action_just_pressed("save_game") and is_instance_valid(director):
         director.save_progress()
+func _try_attack() -> void:
+    var camera := get_node_or_null("FollowCamera") as Camera3D
+    if camera == null:
+        return
+    var start := camera.global_position
+    var finish := start - camera.global_transform.basis.z * 3.0
+    var query := PhysicsRayQueryParameters3D.create(start, finish)
+    query.collision_mask = 4
+    query.collide_with_areas = true
+    var hit := get_world_3d().direct_space_state.intersect_ray(query)
+    if not hit.is_empty():
+        var target = hit.get("collider")
+        if target != null and target.has_method("take_damage"):
+            target.take_damage(25)
 func _try_interact() -> void:
     var camera := get_node_or_null("FollowCamera") as Camera3D
     if camera == null:
@@ -333,7 +378,8 @@ func _process(delta: float) -> void:
 func take_damage(amount: int) -> void:
     health = maxi(0, health - maxi(amount, 0))
     if health == 0:
-        for mission in director.definition.get("missions", []):
+        var current_definition: Dictionary = director.get("definition")
+        for mission in current_definition.get("missions", []):
             for objective in mission.get("objectives", []):
                 if objective.get("kind") == "defeat" and objective.get("target_id") == actor_id:
                     director.advance_objective(str(objective.id))
