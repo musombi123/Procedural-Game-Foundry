@@ -66,6 +66,27 @@ def build_actor(actor, palette):
 
 def build_prop(prop,palette):
     x,y,z=prop["position"]; s=prop["scale"]; kind=prop["kind"]; material=palette["metal"] if kind in ("weapon","tool","vehicle") else palette["prop"]
+    external_asset = str(prop.get("asset_path") or "").strip()
+    if external_asset:
+        asset_path = Path(external_asset).resolve()
+        if not asset_path.is_file() or asset_path.suffix.lower() != ".glb":
+            raise RuntimeError("Creator prop asset must be an existing local GLB file.")
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.ops.import_scene.gltf(filepath=str(asset_path))
+        imported = list(bpy.context.selected_objects)
+        if not imported:
+            raise RuntimeError("Blender could not import creator prop GLB: " + asset_path.name)
+        root = bpy.data.objects.new(prop["id"], None)
+        bpy.context.collection.objects.link(root)
+        root.location = (x, y, z)
+        root.scale = (s, s, s)
+        for item in imported:
+            item.parent = root
+        root["prop_kind"] = kind
+        root["interaction_spec"] = prop["interaction"]
+        root["collision_shape"] = "box"
+        root["collision_size"] = [s, s, s]
+        return root
     if kind=="weapon":
         obj=add_cylinder(prop["id"]+"_shaft",(x,y+s*.5,z),.07*s,s,material)
         head=add_uv(prop["id"]+"_head",(x,y+s,z),(.22*s,.13*s,.18*s),palette["metal"])

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import WorldEditor from "./WorldEditor";
 import MoviePipelinePanel from "./MoviePipelinePanel";
+import BuildConsole from "./BuildConsole";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
@@ -18,7 +19,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState("Lost Planet");
   const [selected, setSelected] = useState("");
-  const [view, setView] = useState<"workspace" | "world" | "scene">("workspace");
+  const [view, setView] = useState<"workspace" | "world" | "scene" | "build">("workspace");
   const [world, setWorld] = useState<WorldDocument>(initialWorld(784215));
   const [selectedObject, setSelectedObject] = useState("");
   const [placementType, setPlacementType] = useState<ObjectKind | null>(null);
@@ -149,7 +150,7 @@ export default function App() {
     if (activeObject) updateObject({ rotation: (activeObject.rotation + amount + 360) % 360 });
   }
 
-  const worldView = view !== "workspace";
+  const worldView = view === "world" || view === "scene";
   return <main className="app-shell">
     <aside className="sidebar">
       <a className="brand" href="#" onClick={(event) => { event.preventDefault(); setView("workspace"); }}>
@@ -159,19 +160,20 @@ export default function App() {
       <button className={view === "workspace" ? "side-link active" : "side-link"} onClick={() => setView("workspace")}><span>▦</span> Overview</button>
       <button className={view === "world" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("world"); }}><span>◈</span> World Foundry</button>
       <button className={view === "scene" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("scene"); }}><span>⬡</span> Scene Editor</button>
+      <button className={view === "build" ? "side-link active" : "side-link"} onClick={() => setView("build")}><span>⇧</span> Build Console</button>
       <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
     </aside>
 
     <section className="main-pane">
       <header className="topbar">
-        <div><small>PROCEDURAL GAME FOUNDRY / {worldView ? (view === "world" ? "WORLD FOUNDRY" : "SCENE EDITOR") : "PROJECT WORKSPACE"}</small>
-          <h1>{worldView ? (view === "world" ? "Shape a living world." : "Build the scene.") : "Build worlds. Make games."}</h1>
-          <p>{worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
+        <div><small>PROCEDURAL GAME FOUNDRY / {view === "world" ? "WORLD FOUNDRY" : view === "scene" ? "SCENE EDITOR" : view === "build" ? "BUILD CONSOLE" : "PROJECT WORKSPACE"}</small>
+          <h1>{view === "world" ? "Shape a living world." : view === "scene" ? "Build the scene." : view === "build" ? "Test. Build. Release." : "Build worlds. Make games."}</h1>
+          <p>{worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : view === "build" ? "A desktop production pipeline for real Android packages, device testing and release history." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
         </div>
         <div className="top-actions"><span className="connection">{status}</span>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
       </header>
 
-      {!worldView ? <>
+      {view === "workspace" ? <>
         <section className="welcome-card">
           <div><span className="eyebrow">FOUNDRY CORE · 0.2</span><h2>Your next universe<br/>starts here.</h2>
             <p>Build terrain from a seed, arrange the environment, then enter it through a first-person controller. No generative model or paid asset pipeline required.</p>
@@ -187,7 +189,11 @@ export default function App() {
         </div>
         <section className="launch-card"><div><small>SELECTED PROJECT</small><h3>{selectedProject?.project.name ?? "Choose a project"}</h3><p>Generate terrain, scene objects and a playable Godot project.</p></div><div className="launch-actions"><button className="button secondary" disabled={!selected} onClick={() => changeProject(selected)}>Open World Foundry</button><button className="button primary" disabled={busy || !selected} onClick={generateGame}>{busy ? "Working…" : "Build playable game →"}</button></div></section>
         {selected && <MoviePipelinePanel projectId={selected} api={API} />}
-      </> : <>
+      </> : view === "build" ? (
+        selectedProject
+          ? <BuildConsole api={API} projectId={selectedProject.id} projectName={selectedProject.project.name} />
+          : <div className="empty-state"><b>Select a project first</b><p>Open a project from Overview before configuring its Android package and release settings.</p><button className="button secondary" onClick={() => setView("workspace")}>Back to projects</button></div>
+      ) : <>
         <div className="editor-toolbar">
           <div className="view-switch"><button className={view === "world" ? "selected" : ""} onClick={() => { setMode("edit"); setView("world"); }}>World Foundry</button><button className={view === "scene" ? "selected" : ""} onClick={() => { setMode("edit"); setView("scene"); }}>Scene Editor</button></div>
           <div className="toolbar-right"><span className="seed-tag">SEED {world.seed}</span>

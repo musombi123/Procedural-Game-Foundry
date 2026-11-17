@@ -14,6 +14,8 @@ from core.game_assembler.godot import assemble_godot_project
 from core.validation.validator import validate_project
 from core.build_engine.godot_cli import headless_check
 from services.api.platform import router as platform_router
+from services.api.workspace import router as workspace_router
+from services.api.local_build import register_local_build_routes
 
 HOSTED_MODE = os.getenv("PGF_REQUIRE_CLOUD_DEPENDENCIES", "false").lower() == "true"
 DATA = Path(os.environ.get("PGF_DATA_DIR", ".pgf-data")).resolve()
@@ -40,30 +42,34 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Revela-License"],
 )
 
 
 @app.middleware("http")
 async def hosted_api_safety_gate(request: Request, call_next):
-    """Do not expose local-filesystem project routes before Stage 2 auth exists."""
-    if (
-        HOSTED_MODE
-        and request.url.path.startswith("/api/")
-        and os.getenv("PGF_AUTH_ENFORCEMENT_ENABLED", "false").lower() != "true"
-    ):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": "workspace_api_not_open",
-                "message": "Hosted project operations are locked until identity and ownership enforcement is deployed.",
-                "stage": "identity-and-projects",
-            },
-        )
+    """Only expose the owner-scoped cloud API on the hosted service.
+
+    Legacy /api routes are deliberately kept local-only: they read and write
+    process-local files and do not enforce per-user project ownership.
+    """
+    if HOSTED_MODE and request.url.path.startswith("/api/"):
+        if not request.url.path.startswith("/api/v1/workspace/"):
+            return JSONResponse(
+                status_code=404,
+                content={"error": "route_not_available", "message": "This legacy local API route is not exposed by the hosted NEXORA service."},
+            )
+        if os.getenv("PGF_AUTH_ENFORCEMENT_ENABLED", "false").lower() != "true":
+            return JSONResponse(
+                status_code=503,
+                content={"error": "workspace_auth_not_enabled", "message": "Hosted project operations remain locked until identity verification is configured."},
+            )
     return await call_next(request)
 
 
 app.include_router(platform_router)
+app.include_router(workspace_router)
+register_local_build_routes(app, manager, jobs)
 
 
 @app.get("/health")
@@ -284,9 +290,24 @@ async def _attach_movie_input(pid: str, kind: str, upload: UploadFile):
         raise HTTPException(404, "Project or movie pipeline not found") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if kind == "video" and not document.rights.has_video_rights:
+        raise HTTPException(403, "Confirm video ownership or permission before uploading movie footage")
     attribute = "source_photo" if kind == "photo" else "source_video"
-    if getattr(document, attribute):
-        raise HTTPException(409, f"A {kind} input is already attached; remove it before replacing")
+    existing = getattr(document, attribute)
+    if existing:
+        # A processed source movie has already been deleted. Keep its checksum
+        # in history and allow a replacement so the creator can regenerate analysis.
+        can_replace_processed_video = (
+            kind == "video"
+            and not existing.get("storage_key")
+            and existing.get("original_retained") is False
+        )
+        if not can_replace_processed_video:
+            raise HTTPException(409, f"A {kind} input is already attached; remove it before replacing")
+        document.source_video_history.append({
+            key: value for key, value in existing.items()
+            if key != "storage_key"
+        })
     try:
         metadata = await store_upload(upload, kind, store.folder / "uploads")
     except UploadRejected as exc:

@@ -45,6 +45,7 @@ class SceneObject(BaseModel):
     rotation: float = Field(default=0, ge=-360, le=360)
     scale: float = Field(default=1, ge=0.25, le=4)
     color: str = Field(default="#8ba7c7", pattern=r"^#[0-9A-Fa-f]{6}$")
+    asset_path: str | None = Field(default=None, pattern=r"^res://assets/[A-Za-z0-9_-]+\.glb$")
 
 class TerrainEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")

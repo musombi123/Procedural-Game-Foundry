@@ -1,49 +1,123 @@
-# Nexora online workspace — platform foundation
+# NEXORA online workspace deployment
 
-Public entry point: `https://revelacode.co.ke/dev_nexora`
+Public RevelaCode gateway: `https://revelacode.co.ke/dev_nexora`
 
-Product identity, source code, project ownership and customer data remain NEXORA-owned. The RevelaCode domain is only the public gateway.
+NEXORA is a separate product and service boundary. RevelaCode supplies the authenticated frontend session and public navigation; NEXORA owns its API, project records, asset bucket, production queue and build workers. No Elimu, Shamba, Biashara or RevelaCode hub database is reused.
 
-## Stage 1 deployment topology
+## Production topology
 
-- Static workspace: served from the portfolio/site host at `/dev_nexora`.
-- API: separate Render service, `nexora-foundry-api`, built from this repository's Dockerfile.
-- Relational metadata: managed PostgreSQL, supplied through `DATABASE_URL`.
-- Binary assets: Cloudflare R2 (S3-compatible), supplied through the `PGF_OBJECT_STORAGE_*` variables.
-- Heavy Blender/Godot work: local or dedicated build workers. The web API must not pretend that a web dyno has Blender, Godot, Android SDK or a GPU.
+| Component | Responsibility | Runtime |
+|---|---|---|
+| RevelaCode frontend | NEXORA editor, bearer session, project and asset controls | Existing frontend deployment |
+| NEXORA API | Identity introspection, project ownership, revisions, signed URLs, job queue | Dedicated Render Docker web service |
+| PostgreSQL | Project documents, revisions, asset metadata, jobs and artifact metadata | Managed PostgreSQL with TLS |
+| Cloudflare R2 | Private creator GLB/media inputs, normalized files and build artifacts | Private S3-compatible bucket |
+| NEXORA worker | Blender asset processing, Godot scene generation, desktop/Android exports | Local or dedicated machine with Blender/Godot/Android SDK |
 
-## Required secrets
+The API process does not run Blender, Godot or Android builds. The worker claims persistent jobs from PostgreSQL using `FOR UPDATE SKIP LOCKED` and leases.
 
-Set these in the API host's secret/environment settings. Never commit actual credentials.
+## API environment
 
-| Variable | Purpose |
+The Render blueprint is `render.yaml`. Configure these variables in the service environment. Never commit actual credentials.
+
+| Variable | Value/purpose |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string (TLS-enabled provider URL) |
-| `PGF_OBJECT_STORAGE_ENDPOINT` | R2 S3 endpoint |
-| `PGF_OBJECT_STORAGE_BUCKET` | Private bucket name |
-| `PGF_OBJECT_STORAGE_ACCESS_KEY` | R2 access key ID |
-| `PGF_OBJECT_STORAGE_SECRET_KEY` | R2 secret access key |
-| `PGF_OBJECT_STORAGE_REGION` | Usually `auto` for R2 |
-| `PGF_CORS_ORIGINS` | Comma-separated exact browser origins |
-| `PGF_REQUIRE_CLOUD_DEPENDENCIES` | Must be `true` on hosted API |
+| `DATABASE_URL` | TLS-enabled PostgreSQL connection string |
+| `PGF_OBJECT_STORAGE_ENDPOINT` | Account-specific R2 S3 endpoint |
+| `PGF_OBJECT_STORAGE_BUCKET` | Private NEXORA bucket |
+| `PGF_OBJECT_STORAGE_REGION` | `auto` for R2 |
+| `PGF_OBJECT_STORAGE_ACCESS_KEY` | Bucket-scoped R2 access key |
+| `PGF_OBJECT_STORAGE_SECRET_KEY` | Matching R2 secret |
+| `PGF_IDENTITY_INTROSPECTION_URL` | `https://revelacode-backend.onrender.com/api/auth/me` |
+| `PGF_AUTH_ENFORCEMENT_ENABLED` | `true` only when the configured identity service is reachable |
+| `PGF_REQUIRE_CLOUD_DEPENDENCIES` | `true` |
+| `PGF_CORS_ORIGINS` | Exact comma-separated origins: apex, www and frontend Render origin |
 
-The Render blueprint intentionally uses a paid Starter service. A free sleeping service is unsuitable for a responsive creator workspace. It does not provision a Render disk: the API's existing file-backed project manager is development-only and must not be treated as durable hosted storage.
+The API authenticates every workspace request by forwarding the supplied RevelaCode bearer token to the existing `/api/auth/me` endpoint. It then uses only that endpoint's canonical user ID for ownership checks. A user ID supplied in project JSON is never used as the owner.
 
-## Readiness and release gates
+Hosted mode exposes only `/api/v1/workspace/*`. Legacy filesystem-backed `/api/*` routes are blocked on the hosted service. `/health/live` is liveness; `/health/ready` verifies PostgreSQL and the private bucket. Do not connect the frontend until readiness returns HTTP 200.
 
-- `GET /health/live` reports process liveness only.
-- `GET /health/ready` checks PostgreSQL with `SELECT 1` and verifies the configured object-store bucket with `HeadBucket`. It returns HTTP 503 if a required dependency is missing or unreachable.
-- Hosted project and asset routes remain unavailable until Stage 2 adds verified identity, project ownership and authorization enforcement. Do not set `PGF_AUTH_ENFORCEMENT_ENABLED=true` before that work is implemented and tested.
-- The current project manager writes to the local filesystem. Do not expose its unauthenticated project, upload, revision or build routes publicly, and do not use `/tmp` as persistent project storage.
-- Object-store writes, signed download URLs, PostgreSQL project/revision migrations, tenant isolation and retention policies are Stage 2/asset-pipeline integration work. Readiness checks prove connectivity, not those capabilities.
+## Private R2 configuration
+
+1. Create a dedicated bucket, for example `nexora-foundry-assets`.
+2. Keep public bucket access disabled.
+3. Create credentials restricted to this bucket with object read/write/delete permissions.
+4. Apply `docs/deployment/r2-cors.json` in the bucket's CORS configuration.
+5. Set the API's four `PGF_OBJECT_STORAGE_*` secrets.
+6. Verify the browser's signed `PUT` upload and signed `GET` download from the deployed frontend.
+
+CORS is required because the browser uploads directly to R2 using a short-lived pre-signed URL. These signed URLs are bearer capabilities: do not log them, persist them, or expose them to another user. The API gives the browser a ten-minute upload URL and a ten-minute download URL.
+
+## Database and migrations
+
+The first hosted schema is created idempotently by the API for:
+- `nexora_projects`: owner-scoped JSONB project documents and optimistic version number.
+- `nexora_project_revisions`: immutable project snapshots.
+- `nexora_assets`: object keys, checksums, size and processing state.
+- `nexora_jobs`: persistent scene/asset/build jobs and worker leases.
+- `nexora_artifacts`: private build and processing report references.
+
+Backups and point-in-time recovery must be enabled at the database provider. The application does not treat Render's ephemeral filesystem as durable project storage.
+
+## Worker installation
+
+Run the worker on a machine with enough disk and memory to process creator assets. Start with local or dedicated hardware to avoid paying for idle GPU capacity.
+
+Install:
+- Python 3.11 and this repository's cloud dependencies.
+- Blender (the worker requires a Blender executable; set `BLENDER_BIN` if it is not on `PATH`).
+- Godot 4.6.1 and matching export templates (set `GODOT_BIN` if it is not on `PATH`).
+- For Android export: JDK 17, Android command-line tools, platform 35, build-tools 35.0.1, NDK 28.1.13356709, CMake 3.10.2.4988404 and matching Godot Android export templates.
+- A configured Android debug keystore for development builds. Production signing keys must be managed separately and never placed in the repository.
+
+Set the same `DATABASE_URL` and private `PGF_OBJECT_STORAGE_*` secrets as the API. Optional variables are `PGF_WORKER_ID`, `PGF_WORKER_POLL_SECONDS`, `BLENDER_BIN`, `GODOT_BIN` and `APKSIGNER_BIN`. Android worker exports are rejected if the APK cannot be verified with `apksigner`; exported artifacts include SHA-256 sidecars and a development release manifest.
+
+```bash
+python -m pip install -e ".[cloud]"
+python -m services.worker.runner
+```
+
+The worker:
+- downloads only owner-authorized GLB assets from private R2,
+- runs Blender normalization for explicitly queued asset-processing jobs,
+- generates a default player mesh when the creator has not assigned a player/avatar GLB,
+- builds a procedural environment and actor/prop scene with Blender; assigned creator GLBs are imported into the scene,
+- compiles creator objectives, patrol/chase actors, interactions, inventory, health, save/load and audio bindings into the Godot runtime,
+- assembles the playable Godot project and runs editor-import, gameplay end-to-end and headless runtime checks,
+- generates shared keyboard and seven-button mobile touch controls,
+- exports Linux/Windows desktop or Android debug builds, and
+- uploads private project/build artifacts to R2 for owner-authorized signed downloads.
+
+New workspace games include a clearly recorded starter loop (collect a supply key and defeat a guard) so the generated project has a testable gameplay path before the creator adds objectives. Creator-authored objectives are preserved and appended. All generated content remains subject to creator review; this is not a claim of finished art direction or a human playtest.
+
+A queued job remains queued until a worker is actually online. A successful API response means the job was accepted, not that a build completed.
+
+## Frontend configuration
+
+The production frontend must be rebuilt with:
+
+```text
+VITE_NEXORA_API_URL=https://nexora-foundry-api.onrender.com
+```
+
+This public API origin is not a secret. Access tokens are read from the existing AuthContext at request time and are not stored by the NEXORA component.
 
 ## Deployment sequence
 
-1. Create a private R2 bucket and scoped credentials. Disable public bucket access.
-2. Provision managed PostgreSQL and require TLS.
-3. Create the Render web service from this repository using `render.yaml`; add the secrets above.
-4. Verify `/health/live` and `/health/ready` before connecting the browser.
-5. Keep public API routes blocked until Stage 2 authentication and ownership controls pass security tests.
-6. Configure the website host's reverse proxy/path routing for `/dev_nexora` only after the workspace build is merged and deployed.
+1. Provision managed PostgreSQL and private R2 bucket, credentials and CORS.
+2. Create the dedicated Render API service from `render.yaml`; set the provider secrets and verify `/health/ready`.
+3. Configure the dedicated worker machine and run `python -m services.worker.runner`.
+4. Confirm the worker is polling and can claim a test job.
+5. Rebuild and deploy RevelaCode frontend with `VITE_NEXORA_API_URL`.
+6. Sign in through RevelaCode, create a NEXORA project, upload a GLB, complete the upload, run Blender processing, generate a Godot scene and retrieve a private artifact.
+7. Run CI gates, then the creator acceptance playtest in `docs/testing/creator-playtest.md`.
 
-No service is deployed merely by adding these files. Host credentials, DNS/path routing and provider-side resource creation require owner action.
+## Test gates and release truth
+
+The Foundry CI covers PostgreSQL-backed API ownership/revision tests, Blender creator-asset normalization, workspace-specific Blender-to-Godot assembly, objective/interaction/combat/save-load gameplay smoke tests, desktop export and launch, Android APK signature/package verification, and Android emulator install/launch. The native export job consumes the exact workspace-generated game artifact. Passing CI is not equivalent to a human gameplay playthrough or a physical-device acceptance test.
+
+Use `docs/testing/creator-playtest.md` for desktop and physical Android acceptance. A debug APK is not a Play Store release. Production signing, store metadata, privacy review, license/provenance review and release promotion require protected credentials and human approval.
+
+## Cost and deployment boundary
+
+The Render blueprint uses a paid Starter web service; managed PostgreSQL and R2 may incur separate costs. No provider resource is created by committing this repository. In the current code change, the API, database schema, R2 client, worker and frontend wiring are implemented, but no live Render service, PostgreSQL database, R2 bucket, secrets or worker machine have been provisioned. Those resources must be created and configured before hosted cloud operations can succeed.

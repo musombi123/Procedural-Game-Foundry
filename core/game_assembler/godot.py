@@ -5,6 +5,88 @@ from core.project_engine.models import ProjectDefinition, WorldDocument
 from generators.terrain.heightfield import generate_heightfield, apply_terrain_edits
 from generators.biomes.biome_map import generate_biome_map
 
+EXPORT_PRESETS = """[preset.0]
+name="Linux/X11"
+platform="Linux/X11"
+runnable=true
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="build/linux/NexoraFoundry.x86_64"
+encryption_include_filters=""
+encryption_exclude_filters=""
+encrypt_pck=false
+encrypt_directory=false
+
+[preset.0.options]
+custom_template/debug=""
+custom_template/release=""
+debug/export_console_wrapper=0
+binary_format/64_bits=true
+binary_format/embed_pck=false
+texture_format/bptc=false
+texture_format/s3tc=true
+texture_format/etc2=true
+
+[preset.1]
+name="Windows Desktop"
+platform="Windows Desktop"
+runnable=true
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="build/windows/NexoraFoundry.exe"
+encryption_include_filters=""
+encryption_exclude_filters=""
+encrypt_pck=false
+encrypt_directory=false
+
+[preset.1.options]
+custom_template/debug=""
+custom_template/release=""
+debug/export_console_wrapper=0
+binary_format/64_bits=true
+binary_format/embed_pck=false
+texture_format/bptc=false
+texture_format/s3tc=true
+texture_format/etc2=true
+
+[preset.2]
+name="Android"
+platform="Android"
+runnable=true
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="build/android/NexoraFoundry-debug.apk"
+encryption_include_filters=""
+encryption_exclude_filters=""
+encrypt_pck=false
+encrypt_directory=false
+
+[preset.2.options]
+custom_template/debug=""
+custom_template/release=""
+gradle_build/use_gradle_build=false
+gradle_build/export_format=0
+architectures/armeabi-v7a=false
+architectures/arm64-v8a=true
+package/unique_name="com.nexora.foundry"
+package/name="Nexora Foundry"
+package/signed=true
+version/code=1
+version/name="1.0.0"
+screen/immersive_mode=true
+permissions/internet=true
+"""
+
+
 PROJECT = """config_version=5
 [application]
 config/name="PGF Generated World"
@@ -15,6 +97,7 @@ window/size/viewport_height=720
 [rendering]
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
 """
 
 SCENE = """[gd_scene load_steps=2 format=3]
@@ -91,7 +174,19 @@ func _spawn_prop(item: Dictionary) -> void:
     var visual = Node3D.new()
     visual.name = "Visual"
     root.add_child(visual)
-    if kind == "outpost":
+    var imported_asset_path = str(item.get("asset_path", ""))
+    var imported_asset_loaded = false
+    if imported_asset_path.begins_with("res://assets/") and imported_asset_path.ends_with(".glb"):
+        var imported_scene = load(imported_asset_path)
+        if imported_scene is PackedScene:
+            visual.add_child(imported_scene.instantiate())
+            imported_asset_loaded = true
+        else:
+            push_warning("NEXORA could not load creator GLB: " + imported_asset_path)
+
+    if imported_asset_loaded:
+        pass
+    elif kind == "outpost":
         _add_part(visual, BoxMesh.new(), Vector3(0, 2.0, 0), material, Vector3(8, 4, 8))
         _add_part(visual, BoxMesh.new(), Vector3(0, 4.25, 0), material, Vector3(8.6, 0.5, 8.6))
     elif kind == "beacon":
@@ -281,6 +376,7 @@ def assemble_godot_project(definition: ProjectDefinition, destination: Path, wor
     (destination / "pgf_world.json").write_text(json.dumps(terrain_data), encoding="utf-8")
     (destination / "pgf_scene.json").write_text(json.dumps({"objects": scene_objects}, indent=2), encoding="utf-8")
     (destination / "project.godot").write_text(PROJECT, encoding="utf-8")
+    (destination / "export_presets.cfg").write_text(EXPORT_PRESETS, encoding="utf-8")
     (destination / "main.tscn").write_text(SCENE, encoding="utf-8")
     for filename, source in [("main.gd", MAIN), ("player.gd", PLAYER), ("terrain.gd", TERRAIN)]:
         (destination / "scripts" / filename).write_text(source, encoding="utf-8")
