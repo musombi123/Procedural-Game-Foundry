@@ -247,8 +247,9 @@ func _create_audio() -> void:
         add_child(player_node)
         audio_players[cue_id] = player_node
     director.audio_event.connect(_play_audio_cue)
-    var music: Dictionary = audio_manifest.get("music", {})
-    if not music.is_empty():
+    var music_value = audio_manifest.get("music")
+    if typeof(music_value) == TYPE_DICTIONARY:
+        var music: Dictionary = music_value
         var music_path := "res://assets/audio/" + str(music.get("file", ""))
         if ResourceLoader.exists(music_path):
             var music_player := AudioStreamPlayer.new()
@@ -329,6 +330,7 @@ func _try_interact() -> void:
     var start := camera.global_position
     var finish := start - camera.global_transform.basis.z * 5.0
     var query := PhysicsRayQueryParameters3D.create(start, finish)
+    query.collision_mask = 2
     query.collide_with_areas = true
     var hit := get_world_3d().direct_space_state.intersect_ray(query)
     if not hit.is_empty():
