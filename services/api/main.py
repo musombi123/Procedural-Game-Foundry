@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -316,6 +317,23 @@ def build_procedural_environment(pid: str):
     temporary = output.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(spec, indent=2), encoding="utf-8")
     temporary.replace(output)
+    blender = shutil.which("blender")
+    if not blender:
+        raise HTTPException(503, "Blender is required to turn the saved 3D geometry specification into a GLB scene")
+    script = Path(__file__).resolve().parents[2] / "blender" / "scripts" / "build_movie_world.py"
+    glb = output.parent / "environment.glb"
+    try:
+        result = subprocess.run([blender, "--background", "--python", str(script), "--",
+                                 "--spec", str(output), "--output", str(glb)],
+                                capture_output=True, text=True, timeout=900, check=True)
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(504, "Blender environment generation exceeded 15 minutes") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "Blender failed")[-2500:]
+        raise HTTPException(500, "3D environment generation failed: " + detail) from exc
+    if not glb.is_file() or glb.stat().st_size < 1024:
+        raise HTTPException(500, "Blender did not produce a valid GLB scene")
     return {"generated": True, "geometry_spec": str(output.relative_to(folder)),
+            "glb_scene": str(glb.relative_to(folder)), "glb_bytes": glb.stat().st_size,
             "landmarks": len(spec["landmarks"]), "props": len(spec["props"]),
             "dimensions": spec["dimensions"], "requires_creator_review": True}
