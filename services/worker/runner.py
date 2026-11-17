@@ -347,28 +347,46 @@ def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
     project = _project_from_job(job, workdir)
     check = _run([godot, "--headless", "--path", str(project), "--editor", "--quit"], timeout=600)
     runtime = _verify_runtime(project, godot)
-    target = (job.get("payload") or {}).get("target", "desktop")
+    payload = job.get("payload") or {}
+    target = payload.get("target", "desktop")
+    android = payload.get("android") or {}
     requested = {"desktop": ["Linux/X11", "Windows Desktop"], "android": ["Android"], "desktop_android": ["Linux/X11", "Windows Desktop", "Android"]}.get(target)
     if not requested:
         raise RuntimeError("Unsupported export target.")
+    artifact_format = android.get("artifact_format", "apk")
+    build_type = android.get("build_type", "debug")
+    if artifact_format not in {"apk", "aab"} or build_type not in {"debug", "release"}:
+        raise RuntimeError("Invalid Android build format or build type.")
+    if "Android" in requested and build_type == "release":
+        keystore = os.getenv("GODOT_ANDROID_KEYSTORE_RELEASE_PATH", "").strip()
+        alias = os.getenv("GODOT_ANDROID_KEYSTORE_RELEASE_USER", "").strip()
+        password = os.getenv("GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD", "")
+        if not (keystore and alias and password and Path(keystore).is_file()):
+            raise RuntimeError("Release export requires protected GODOT_ANDROID_KEYSTORE_RELEASE_PATH, USER and PASSWORD worker secrets.")
+    if "Android" in requested and artifact_format == "aab":
+        preset_file = project / "export_presets.cfg"
+        preset_text = preset_file.read_text(encoding="utf-8").replace("gradle_build/use_gradle_build=false", "gradle_build/use_gradle_build=true").replace("gradle_build/export_format=0", "gradle_build/export_format=1")
+        preset_file.write_text(preset_text, encoding="utf-8")
     outputs = {
         "Linux/X11": project / "build" / "linux" / "NexoraFoundry.x86_64",
         "Windows Desktop": project / "build" / "windows" / "NexoraFoundry.exe",
-        "Android": project / "build" / "android" / "NexoraFoundry-debug.apk",
+        "Android": project / "build" / "android" / ("NexoraFoundry-release." if build_type == "release" else "NexoraFoundry-debug.") + artifact_format,
     }
     export_results = []
     for preset in requested:
         output = outputs[preset]
         output.parent.mkdir(parents=True, exist_ok=True)
-        mode = "--export-debug" if preset == "Android" else "--export-release"
+        mode = ("--export-release" if build_type == "release" else "--export-debug") if preset == "Android" else "--export-release"
         export_results.append({"preset": preset, **_run([godot, "--headless", "--path", str(project), mode, preset, str(output)], timeout=2400)})
         if not output.is_file() or output.stat().st_size < 1024:
             raise RuntimeError(f"{preset} export did not produce a valid artifact.")
-        if preset == "Android":
+        if preset == "Android" and artifact_format == "apk":
             apksigner = _find_apksigner()
             if not apksigner:
-                raise RuntimeError("Android export verification requires apksigner (set APKSIGNER_BIN or Android SDK build-tools).")
+                raise RuntimeError("Android APK verification requires apksigner (set APKSIGNER_BIN or Android SDK build-tools).")
             _run([apksigner, "verify", "--verbose", str(output)], timeout=180)
+        elif preset == "Android" and artifact_format == "aab":
+            _run(["jarsigner", "-verify", "-verbose", "-certs", str(output)], timeout=180)
         checksum = hashlib.sha256(output.read_bytes()).hexdigest()
         checksum_path = output.with_name(output.name + ".sha256")
         checksum_path.write_text(f"{checksum}  {output.name}\n", encoding="utf-8")
@@ -382,15 +400,16 @@ def _run_build_export(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
         "target": target,
         "exports": export_results,
         "release_channel": "development",
-        "android_signing": "debug-only",
-        "production_signing": False,
+        "android_signing": build_type,
+        "android_format": artifact_format,
+        "production_signing": build_type == "release",
         "creator_review_required": True,
     }
     (project / "build" / "release-manifest.json").write_text(json.dumps(release_manifest, indent=2), encoding="utf-8")
     archive = workdir / "nexora-builds.zip"
     _zip_folder(project / "build", archive)
     artifact = _artifact(job, archive, "nexora-builds.zip", "application/zip")
-    return {"engine": "Godot 4", "headless_editor_check": check, "headless_runtime_smoke": runtime, "exports": export_results, "release_manifest": release_manifest, "artifacts": [artifact], "release_type": "development/debug; production signing and approval remain separate"}
+    return {"engine": "Godot 4", "headless_editor_check": check, "headless_runtime_smoke": runtime, "exports": export_results, "release_manifest": release_manifest, "artifacts": [artifact], "release_type": "signed release candidate; human release approval required" if build_type == "release" else "development/debug"}
 
 
 def process(job: dict[str, Any]) -> dict[str, Any]:
