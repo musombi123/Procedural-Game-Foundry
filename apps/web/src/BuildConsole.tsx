@@ -77,7 +77,8 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
   const [keyAlias, setKeyAlias] = useState("");
   const [keyPassword, setKeyPassword] = useState("");
   const [wirelessHost, setWirelessHost] = useState("");
-  const [wirelessPort, setWirelessPort] = useState(5555);
+  const [wirelessPairPort, setWirelessPairPort] = useState(37123);
+  const [wirelessConnectPort, setWirelessConnectPort] = useState(5555);
   const [pairingCode, setPairingCode] = useState("");
 
   const selectedBuild = useMemo(() => builds.find((item) => item.id === buildId) ?? builds[0] ?? null, [builds, buildId]);
@@ -276,7 +277,7 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
   async function wireless(pair: boolean) {
     setError("");
     try {
-      const payload = { host: wirelessHost.trim(), port: wirelessPort, ...(pair ? { pairing_code: pairingCode } : {}) };
+      const payload = { host: wirelessHost.trim(), port: pair ? wirelessPairPort : wirelessConnectPort, ...(pair ? { pairing_code: pairingCode } : {}) };
       await callApi(api, pair ? "/api/local/android/pair" : "/api/local/android/connect", {
         method: "POST", body: JSON.stringify(payload),
       });
@@ -414,9 +415,10 @@ export default function BuildConsole({ api, projectId, projectName }: Props) {
         </select></label>
       </div>
       <div className="wireless-row">
-        <label>Wireless IP<input value={wirelessHost} onChange={(event) => setWirelessHost(event.target.value)} placeholder="192.168.1.25" /></label>
-        <label>Pair / connect port<input type="number" value={wirelessPort} onChange={(event) => setWirelessPort(Number(event.target.value))} /></label>
-        <label>Pairing code<input value={pairingCode} onChange={(event) => setPairingCode(event.target.value)} maxLength={6} /></label>
+        <label>Phone IP address<input value={wirelessHost} onChange={(event) => setWirelessHost(event.target.value)} placeholder="192.168.1.25" /></label>
+        <label>Pairing port<input type="number" min={1} max={65535} value={wirelessPairPort} onChange={(event) => setWirelessPairPort(Number(event.target.value))} /></label>
+        <label>6-digit pairing code<input value={pairingCode} onChange={(event) => setPairingCode(event.target.value)} maxLength={6} /></label>
+        <label>Connection port<input type="number" min={1} max={65535} value={wirelessConnectPort} onChange={(event) => setWirelessConnectPort(Number(event.target.value))} /></label>
         <div className="wireless-actions">
           <button className="button secondary" disabled={!wirelessHost.trim() || pairingCode.length !== 6} onClick={() => void wireless(true)}>Pair</button>
           <button className="button secondary" disabled={!wirelessHost.trim()} onClick={() => void wireless(false)}>Connect</button>
