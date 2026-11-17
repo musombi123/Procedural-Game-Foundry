@@ -9,6 +9,7 @@ Run the worker on a dedicated build host, not inside the lightweight API service
 - `BLENDER_BIN` (optional): absolute path to Blender; otherwise `blender` must be on PATH.
 - `GODOT_BIN` (optional): absolute path to Godot 4; otherwise `godot` must be on PATH.
 - Android builds additionally require Godot Android export templates, Android SDK, Java, and a working Godot Android export setup on the worker host.
+- Configure a development keystore with `GODOT_ANDROID_KEYSTORE_DEBUG_PATH`, `GODOT_ANDROID_KEYSTORE_DEBUG_USER`, and `GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD`. Never use a production Play signing key for development jobs.
 - `PGF_WORKER_ID` and `PGF_WORKER_POLL_SECONDS` are optional worker identity/poll tuning.
 
 Install Python dependencies with `pip install -e ".[cloud]"`, then run:
