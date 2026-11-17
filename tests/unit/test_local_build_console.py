@@ -156,3 +156,48 @@ def test_debug_apk_export_does_not_install_gradle_template(tmp_path: Path):
 
     assert "--install-android-build-template" not in command
     assert command[-3:] == ["--export-debug", "Android", str(output)]
+
+
+
+def test_android_preset_writes_orientation_to_project_settings(tmp_path: Path):
+    project = tmp_path / "game"
+    project.mkdir()
+    _write_project_preset(project)
+    project_file = project / "project.godot"
+    project_file.write_text(
+        '[application]\nconfig/name="NEXORA"\n\n[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n',
+        encoding="utf-8",
+    )
+    output = project / "builds" / "android" / "portrait.apk"
+    output.parent.mkdir(parents=True)
+
+    _write_android_preset(project, _request(output_format="apk", orientation="portrait"), output)
+
+    settings = project_file.read_text(encoding="utf-8")
+    preset = (project / "export_presets.cfg").read_text(encoding="utf-8")
+    assert "window/handheld/orientation=1" in settings
+    assert "window/size/viewport_width=720" in settings
+    assert "window/size/viewport_height=1280" in settings
+    assert 'renderer/rendering_method="gl_compatibility"' in settings
+    assert "screen/orientation=" not in preset
+
+
+def test_uploaded_launcher_icon_can_be_used_without_copying_file_onto_itself(tmp_path: Path):
+    project = tmp_path / "game"
+    project.mkdir()
+    _write_project_preset(project)
+    source = project / "android_assets" / "launcher-icon.png"
+    source.parent.mkdir()
+    source.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 4 + b"IHDR" + struct.pack(">II", 512, 512))
+    output = project / "builds" / "android" / "sample.apk"
+    output.parent.mkdir(parents=True)
+
+    _write_android_preset(project, _request(output_format="apk", icon_path=str(source)), output)
+
+    assert source.is_file()
+    assert 'launcher_icons/adaptive_foreground_432x432="res://android_assets/launcher-icon.png"' in (project / "export_presets.cfg").read_text(encoding="utf-8")
+
+
+def test_android_internet_permission_is_mandatory_for_godot_export():
+    with pytest.raises(ValidationError):
+        _request(permissions={"internet": False})
