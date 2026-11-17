@@ -54,7 +54,7 @@ jobs:
             "cmdline-tools;latest" \
             "cmake;3.10.2.4988404" \
             "ndk;28.1.13356709"
-          echo "ANDROID_SDK_ROOT=\${ANDROID_HOME}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> "$GITHUB_ENV"
 
       - name: Set up Godot editor and export templates
         uses: chickensoft-games/setup-godot@v2
@@ -83,13 +83,13 @@ jobs:
 
       - name: Generate actual Blender assets and assemble a Godot game
         env:
-          NEXORA_EXPORT_FIXTURE_DIR: \${{ runner.temp }}/nexora-game-project
+          NEXORA_EXPORT_FIXTURE_DIR: ${{ runner.temp }}/nexora-game-project
         run: pytest -q tests/integration/test_blender_to_godot.py
 
       - name: Export Linux desktop build
         run: |
           python scripts/release/export_game.py \
-            --project "\${{ runner.temp }}/nexora-game-project" \
+            --project "${{ runner.temp }}/nexora-game-project" \
             --target linux \
             --mode debug \
             --output dist/release/linux
@@ -97,7 +97,7 @@ jobs:
       - name: Export Windows desktop build
         run: |
           python scripts/release/export_game.py \
-            --project "\${{ runner.temp }}/nexora-game-project" \
+            --project "${{ runner.temp }}/nexora-game-project" \
             --target windows \
             --mode debug \
             --output dist/release/windows
@@ -105,7 +105,7 @@ jobs:
       - name: Export Android debug APK
         run: |
           python scripts/release/export_game.py \
-            --project "\${{ runner.temp }}/nexora-game-project" \
+            --project "${{ runner.temp }}/nexora-game-project" \
             --target android \
             --mode debug \
             --output dist/release/android
