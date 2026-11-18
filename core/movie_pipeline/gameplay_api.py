@@ -56,7 +56,7 @@ class GameplayBuildRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     player: PlayerRules
     missions: list[MissionSpec] = Field(min_length=1, max_length=20)
-    actor_behaviours: list[ActorBehaviourSpec] = Field(default_factory=list, max_length=12)
+    actor_behaviours: list[ActorBehaviourSpec] = Field(default_factory=list, max_length=24)
     interactions: list[InteractionSpec] = Field(default_factory=list, max_length=40)
     audio_bindings: list[AudioBindingSpec] = Field(default_factory=list, max_length=24)
     win_condition: Literal["all_objectives_complete"] = "all_objectives_complete"
