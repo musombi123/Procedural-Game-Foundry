@@ -53,7 +53,7 @@ The verification request must include:
 - A valid NEXORA bearer session.
 - `X-Nexora-Payment-Secret: <NEXORA_PAYMENT_VERIFICATION_SECRET>`.
 
-Keep the verification secret out of the frontend and do not send it to a customer. Only reconcile a receipt after confirming the actual incoming payment, amount, payer and merchant reference in the Pochi account. The current flow deliberately does not claim to have a customer-to-Pochi automatic callback or STK push integration.
+Keep the verification secret out of the frontend and do not send it to a customer. Only reconcile a receipt after confirming the actual incoming payment, amount, payer and merchant reference in the Pochi account. The current flow deliberately does not claim to have a customer-to-Pochi automatic callback or STK push integration. Safaricom's Pochi customer guidance lists M-PESA App, USSD `*334#`, and the Safaricom SIM Toolkit as ways for customers to pay a Pochi merchant; the merchant uses the same M-PESA mobile number for the Pochi wallet. See the [Safaricom Pochi la Biashara product guidance](https://www.business.safaricom.co.ke/products/pochi-la-biashara) and the [Safaricom Daraja Business To Pochi API catalogue](https://developer.safaricom.co.ke/apis/BusinessToPochi). Do not assume a Business-To-Pochi disbursement API is an inbound collection callback.
 
 ## Existing projects
 
