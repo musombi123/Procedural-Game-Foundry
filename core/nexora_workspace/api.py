@@ -651,11 +651,25 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         except FileNotFoundError: raise HTTPException(404,"Project not found")
         owner=_assert_owner(folder,request)
         if not has_video_rights:
-            raise HTTPException(400,"Confirm that you own or have permission to use this video before ingesting it.")
+            raise HTTPException(400,"Confirm that you own or have permission to use this video.")
         if not accepts_original_assets_only:
-            raise HTTPException(400,"Confirm that NEXORA should create original assets rather than copy protected source media.")
+            raise HTTPException(400,"NEXORA creates original game assets; it does not copy protected movie frames, dialogue, soundtrack or character designs.")
+        from core.nexora_workspace.creator_workflow import (
+            _load_workflow, _assert_entitled, _validate_plan,
+        )
+        workflow=_load_workflow(folder)
+        _assert_entitled(manager,owner,workflow.plan)
+        _validate_plan(workflow)
+        if workflow.mode!="movie":
+            raise HTTPException(409,"Switch the Creator Flow mode to Movie before uploading a source clip.")
+        if not workflow.has_adaptation_rights:
+            raise HTTPException(403,"Movie adaptation rights have not been declared. Obtain the required permission or use an original/public-domain source.")
+        if workflow.player_source=="consented_portrait" and not workflow.has_performer_consents:
+            raise HTTPException(403,"The selected player identity requires performer/likeness consent.")
+        if not shutil.which("ffprobe"):
+            raise HTTPException(503,"FFprobe is required to inspect movie duration before accepting the upload.")
         from core.movie_pipeline.ingestion import UploadRejected, store_upload
-        from core.movie_pipeline.models import RightsDeclaration, StageId, new_pipeline
+        from core.movie_pipeline.models import RightsDeclaration, new_pipeline
         from core.movie_pipeline.service import PipelineStore
         store=PipelineStore(folder)
         try:
@@ -663,19 +677,43 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         except FileNotFoundError:
             rights=RightsDeclaration(
                 has_video_rights=True,
-                has_photo_rights=False,
-                likeness_consent=False,
+                has_photo_rights=bool(workflow.has_performer_consents),
+                likeness_consent=bool(workflow.has_performer_consents),
                 accepts_original_assets_only=True,
             )
             document=store.save(new_pipeline(pid,rights))
         if document.source_video:
             raise HTTPException(409,"A source video is already attached. Remove or replace the current source before uploading another.")
-        if not document.rights.has_video_rights or not document.rights.accepts_original_assets_only:
-            raise HTTPException(409,"The existing pipeline rights declaration does not allow this video workflow.")
+        rights=RightsDeclaration(
+            has_video_rights=True,
+            has_photo_rights=bool(workflow.has_performer_consents),
+            likeness_consent=bool(workflow.has_performer_consents),
+            accepts_original_assets_only=True,
+        )
+        document.rights=rights
         try:
             metadata=await store_upload(file,"video",store.folder/"uploads")
         except UploadRejected as exc:
             raise HTTPException(400,str(exc)) from exc
+        video_path=(store.folder/metadata["storage_key"]).resolve()
+        try:
+            probe=subprocess.run(
+                ["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(video_path)],
+                capture_output=True,text=True,timeout=60,check=True,
+            )
+            duration=float(probe.stdout.strip())
+        except Exception as exc:
+            video_path.unlink(missing_ok=True)
+            raise HTTPException(422,"NEXORA could not verify the movie duration; the source was not accepted.") from exc
+        from core.nexora_workspace.creator_workflow import PLANS
+        limits=PLANS[workflow.plan]
+        if duration>limits["video_limit_seconds"]:
+            video_path.unlink(missing_ok=True)
+            raise HTTPException(413,f'{limits["name"]} supports movie clips up to {limits["video_limit_seconds"]} seconds; this clip is {duration:.1f} seconds.')
+        if metadata["size_bytes"]>limits["max_video_bytes"]:
+            video_path.unlink(missing_ok=True)
+            raise HTTPException(413,f'{limits["name"]} upload size limit exceeded.')
+        metadata["duration_seconds"]=round(duration,3)
         document.source_video=metadata
         store.save(document)
         job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid))
@@ -687,6 +725,12 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
             "state":job.state.value.lower(),
             "source_video":metadata,
             "pipeline":document.model_dump(mode="json"),
+            "rights_review":{
+                "adaptation_rights_declared":workflow.has_adaptation_rights,
+                "performer_consent_declared":workflow.has_performer_consents,
+                "original_assets_only":True,
+                "source_music_reused":False,
+            },
         }
 
     @router.post("/api/v1/workspace/projects/{pid}/movie-pipeline/stages/{stage_id}/approve")
