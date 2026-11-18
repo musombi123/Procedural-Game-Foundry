@@ -1,0 +1,35 @@
+name: NEXORA identity security checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "core/nexora_workspace/identity.py"
+      - "services/api/main.py"
+      - "tests/test_nexora_identity.py"
+      - "pyproject.toml"
+      - ".github/workflows/nexora-identity-security.yml"
+  pull_request:
+    paths:
+      - "core/nexora_workspace/identity.py"
+      - "services/api/main.py"
+      - "tests/test_nexora_identity.py"
+      - "pyproject.toml"
+      - ".github/workflows/nexora-identity-security.yml"
+  workflow_dispatch:
+
+jobs:
+  identity-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install backend and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Compile NEXORA account and API modules
+        run: python -m compileall -q core/nexora_workspace services/api
+      - name: Test independent NEXORA identity
+        run: pytest -q tests/test_nexora_identity.py
