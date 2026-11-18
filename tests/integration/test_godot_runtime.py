@@ -80,3 +80,78 @@ def test_compiled_gameplay_scripts_parse_in_godot(tmp_path):
     assert parsed.returncode == 0, output
     assert "SCRIPT ERROR:" not in output, output
     assert "Parse Error" not in output, output
+
+
+def _write_minimal_glb(path, node_names):
+    import json
+    import struct
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    nodes = [{"name": name} for name in node_names]
+    document = {
+        "asset": {"version": "2.0", "generator": "PGF integration fixture"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": "FixtureRoot", "children": list(range(1, len(nodes) + 1))}] + nodes,
+    }
+    payload = json.dumps(document, separators=(",", ":")).encode("utf-8")
+    payload += b" " * ((4 - len(payload) % 4) % 4)
+    total = 12 + 8 + len(payload)
+    path.write_bytes(struct.pack("<III", 0x46546C67, 2, total) +
+                     struct.pack("<II", len(payload), 0x4E4F534A) + payload)
+
+
+def test_movie_pipeline_assembles_and_runs_gameplay_end_to_end(tmp_path):
+    """Import real GLB/WAV resources and execute a playable mission in Godot."""
+    import json
+    import wave
+    from types import SimpleNamespace
+    from core.movie_pipeline.assembly import assemble_movie_game
+    from core.movie_pipeline.models import StageId, StageState
+    from core.gameplay_compiler.compiler import compile_gameplay
+
+    godot = shutil.which("godot") or shutil.which("godot4")
+    if not godot:
+        pytest.skip("Godot 4 editor binary is not installed")
+
+    project = tmp_path / "assembly-project"
+    root = project / "movie_pipeline"
+    _write_minimal_glb(root / "player/revision-0/player-avatar.glb", ["AvatarRig"])
+    _write_minimal_glb(root / "environment/environment.glb", ["Terrain"])
+    (root / "environment/world-spec.json").write_text(json.dumps({"dimensions":[48,48,48],"terrain":{"segments":8,"amplitude":1,"frequency":0.03},"landmarks":[],"props":[]}))
+    _write_minimal_glb(root / "actors-props/revision-0/actors-props.glb", ["guard-1_rig", "key-1"])
+    actors_manifest = {"actors":[{"id":"guard-1","rig":"guard-1_rig"}],"props":[{"id":"key-1"}]}
+    actors_spec = {"actors":[{"id":"guard-1","position":[2,0,0],"scale":1}],
+                   "props":[{"id":"key-1","position":[1,0,0],"scale":1}]}
+    (root / "actors-props/revision-0/actors-props.manifest.json").write_text(json.dumps(actors_manifest))
+    (root / "actors-props/revision-0/actors-props.json").write_text(json.dumps(actors_spec))
+    audio_dir = root / "audio/revision-0"
+    audio_dir.mkdir(parents=True)
+    with wave.open(str(audio_dir / "pickup.wav"), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(22050)
+        wav.writeframes(b"\x00\x00" * 256)
+    audio_manifest = {"effects":[{"id":"pickup-sfx","file":"pickup.wav"}],"music":None}
+    (audio_dir / "audio-manifest.json").write_text(json.dumps(audio_manifest))
+    spec = {
+        "player":{"move_speed":5,"jump_velocity":4.5,"gravity":9.8,"health":100,"inventory_capacity":10},
+        "missions":[{"id":"mission-1","title":"Find the key","description":"Collect the key","objectives":[
+            {"id":"collect-key","title":"Collect key","description":"Pick up the key","kind":"collect","target_id":"key-1","required_count":1},
+            {"id":"defeat-guard","title":"Defeat guard","description":"Defeat the guard","kind":"defeat","target_id":"guard-1","required_count":1}]}],
+        "actor_behaviours":[{"actor_id":"guard-1","behaviour":"patrol","move_speed":2.5,"detection_range":10,"attack_range":1.8,"damage":10}],
+        "interactions":[{"prop_id":"key-1","action":"collect","objective_id":"collect-key","item_id":"key"}],
+        "audio_bindings":[{"event":"objective_complete","cue_id":"pickup-sfx"}],
+        "win_condition":"all_objectives_complete","lose_condition":"health_depleted",
+    }
+    gameplay_dir = root / "gameplay/revision-0"
+    compile_gameplay(gameplay_dir, spec, audio_manifest)
+    stages = [SimpleNamespace(stage=stage, state=StageState.APPROVED, revision=0) for stage in StageId]
+    pipeline = SimpleNamespace(stages=stages)
+    manifest = assemble_movie_game(project, pipeline, godot)
+    assert manifest["validation"] == {
+        "editor_import":"passed", "headless_runtime":"passed", "gameplay_e2e":"passed"
+    }
+    assert (project / "game/project.godot").is_file()
+    assert (project / "game/assets/player-avatar.glb").is_file()
+    assert (project / "game/assets/audio/pickup.wav").is_file()

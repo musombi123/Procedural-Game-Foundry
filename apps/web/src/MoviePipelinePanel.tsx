@@ -5,6 +5,7 @@ import EnvironmentBuilder from "./EnvironmentBuilder";
 import ActorsPropsBuilder from "./ActorsPropsBuilder";
 import AudioFoundry from "./AudioFoundry";
 import GameplayFoundry from "./GameplayFoundry";
+import AssemblyFoundry from "./AssemblyFoundry";
 
 type StageState = "LOCKED" | "READY" | "RUNNING" | "REVIEW" | "APPROVED" | "FAILED";
 type Stage = { stage: string; state: StageState; revision: number; progress: number; summary: string; output: Record<string, unknown>; error?: string | null };
@@ -117,6 +118,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       <ActorsPropsBuilder projectId={projectId} api={api} ready={pipeline.stages.some(stage => stage.stage === "actors_props" && stage.state === "READY")} onBuilt={() => void refresh()} />
       <AudioFoundry projectId={projectId} api={api} ready={pipeline.stages.some(stage => stage.stage === "audio" && stage.state === "READY")} onBuilt={() => void refresh()} />
       <GameplayFoundry projectId={projectId} api={api} ready={pipeline.stages.some(stage => stage.stage === "gameplay" && stage.state === "READY")} busy={busy} onBuilt={() => void refresh()} />
+      <AssemblyFoundry projectId={projectId} api={api} ready={pipeline.stages.some(stage => stage.stage === "assembly" && stage.state === "READY")} busy={busy} onBuilt={() => void refresh()} />
       {pipeline.stages.map((stage) => <article key={stage.stage} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: 13, border: "1px solid #2b3a4e", borderRadius: 10, background: "#142235" }}>
         <div style={{ minWidth: 180, flex: 1 }}><b>{stageNames[stage.stage] ?? stage.stage}</b><div style={{ fontSize: 12, color: "#9fb0c4", marginTop: 5 }}>{stage.summary} · revision {stage.revision + 1}</div>{stage.error && <div style={{ color: "#ef9696", fontSize: 12 }}>{stage.error}</div>}</div>
         <span style={{ color: statusColor[stage.state], fontSize: 11, fontWeight: 800, letterSpacing: .8 }}>{stage.state}</span>
