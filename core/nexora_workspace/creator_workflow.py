@@ -916,14 +916,12 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         store.folder.joinpath("story.json").write_text(json.dumps(story,indent=2),encoding="utf-8")
         return {"created":True,"pipeline":store.load().model_dump(mode="json"),"story":story,"copyright_notice":_copyright_notice(workflow)}
 
-    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/player/build")
-    def build_player(pid: str, request: Request):
+    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/player/build",status_code=202)
+    def build_player(pid: str, request: Request, background: BackgroundTasks):
         try: folder=manager.path_for(pid); manager.load(pid)
         except FileNotFoundError: raise HTTPException(404,"Project not found.")
         user,_=_assert_project(folder,request,manager)
-        workflow=_load_workflow(folder); _assert_entitled(manager,user,workflow.plan)
-        store=_pipeline(folder)
-        return _run_player_build(folder,store,workflow,workflow.player_source=="consented_portrait")
+        return _queue_creator_step(pid,folder,user,"player",background,manager,jobs)
 
     @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/player/portrait",status_code=201)
     async def upload_player_portrait(pid: str, request: Request, file: UploadFile=File(...), has_photo_rights: bool=Form(...), likeness_consent: bool=Form(...)):
@@ -943,66 +941,40 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         store.save(pipeline)
         return {"attached":True,"source_photo":metadata,"identity_source":"creator_consented_portrait"}
 
-    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/environment/build")
-    def build_environment(pid: str, request: Request):
+    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/environment/build",status_code=202)
+    def build_environment(pid: str, request: Request, background: BackgroundTasks):
         try: folder=manager.path_for(pid); manager.load(pid)
         except FileNotFoundError: raise HTTPException(404,"Project not found.")
         user,_=_assert_project(folder,request,manager)
-        workflow=_load_workflow(folder); _assert_entitled(manager,user,workflow.plan)
-        if workflow.mode=="movie":
-            pipeline=_pipeline(folder).load()
-            analysis=next(item for item in pipeline.stages if item.stage==StageId.ANALYSIS)
-            if analysis.state!=StageState.APPROVED: raise HTTPException(409,"Review and approve extracted movie scenes before environment generation.")
-        store=_pipeline(folder)
-        return _run_environment_build(folder,store,workflow,manager)
+        return _queue_creator_step(pid,folder,user,"environment",background,manager,jobs)
 
-    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/actors-props/build")
-    def build_actors_props(pid: str, request: Request):
+    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/actors-props/build",status_code=202)
+    def build_actors_props(pid: str, request: Request, background: BackgroundTasks):
         try: folder=manager.path_for(pid); manager.load(pid)
         except FileNotFoundError: raise HTTPException(404,"Project not found.")
         user,_=_assert_project(folder,request,manager)
-        workflow=_load_workflow(folder); _assert_entitled(manager,user,workflow.plan)
-        return _run_actor_prop_build(folder,_pipeline(folder),workflow)
+        return _queue_creator_step(pid,folder,user,"actors_props",background,manager,jobs)
 
-    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/audio/build")
-    def build_audio(pid: str, request: Request):
+    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/audio/build",status_code=202)
+    def build_audio(pid: str, request: Request, background: BackgroundTasks):
         try: folder=manager.path_for(pid); manager.load(pid)
         except FileNotFoundError: raise HTTPException(404,"Project not found.")
         user,_=_assert_project(folder,request,manager)
-        workflow=_load_workflow(folder); _assert_entitled(manager,user,workflow.plan)
-        return _run_audio_build(folder,_pipeline(folder))
+        return _queue_creator_step(pid,folder,user,"audio",background,manager,jobs)
 
-    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/gameplay/compile")
-    def compile_episodes(pid: str, request: Request):
+    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/gameplay/compile",status_code=202)
+    def compile_episodes(pid: str, request: Request, background: BackgroundTasks):
         try: folder=manager.path_for(pid); manager.load(pid)
         except FileNotFoundError: raise HTTPException(404,"Project not found.")
         user,_=_assert_project(folder,request,manager)
-        workflow=_load_workflow(folder); _assert_entitled(manager,user,workflow.plan)
-        return _build_gameplay(folder,_pipeline(folder),workflow)
+        return _queue_creator_step(pid,folder,user,"gameplay",background,manager,jobs)
 
-    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/assembly/build")
-    def assemble_creator_game(pid: str, request: Request):
+    @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/assembly/build",status_code=202)
+    def assemble_creator_game(pid: str, request: Request, background: BackgroundTasks):
         try: folder=manager.path_for(pid); manager.load(pid)
         except FileNotFoundError: raise HTTPException(404,"Project not found.")
         user,_=_assert_project(folder,request,manager)
-        workflow=_load_workflow(folder); _assert_entitled(manager,user,workflow.plan)
-        store=_pipeline(folder); pipeline=store.load()
-        records={item.stage:item for item in pipeline.stages}
-        required=[StageId.ANALYSIS,StageId.PLAYER,StageId.ENVIRONMENT,StageId.ACTORS_PROPS,StageId.AUDIO,StageId.GAMEPLAY]
-        if any(records[stage].state!=StageState.APPROVED for stage in required):
-            raise HTTPException(409,"Approve each generated stage before assembling the final game.")
-        exe=godot_executable()
-        if not exe: raise HTTPException(503,"Godot 4 is not installed on the NEXORA production worker.")
-        stage=records[StageId.ASSEMBLY]
-        if stage.state!=StageState.READY: raise HTTPException(409,"Assembly stage is not READY.")
-        from core.movie_pipeline.assembly import assemble_movie_game
-        stage.state=StageState.RUNNING; stage.summary="Importing, assembling and validating the episode-driven game in Godot"; store.save(pipeline)
-        try:
-            report=assemble_movie_game(folder,pipeline,exe)
-            reviewed=store.mark_review(StageId.ASSEMBLY,{"project":"game/project.godot","manifest":"game/assembly-manifest.json","validation":report.get("validation"),"requires_creator_review":True},"Godot assembled the episode-driven game. Creator playtesting and platform export are still required.")
-        except Exception as exc:
-            current=store.load(); rec=next(item for item in current.stages if item.stage==StageId.ASSEMBLY); rec.state=StageState.FAILED; rec.error=str(exc)[-3000:]; rec.summary="Godot assembly failed"; store.save(current); raise HTTPException(500,"Godot assembly failed: "+str(exc)[-2000:]) from exc
-        return {"assembled":True,"stage":next(item.model_dump(mode="json") for item in reviewed.stages if item.stage==StageId.ASSEMBLY),"validation":report.get("validation")}
+        return _queue_creator_step(pid,folder,user,"assembly",background,manager,jobs)
 
     @router.post("/api/v1/workspace/projects/{pid}/creator-workflow/video-check")
     def check_movie_plan(pid: str, request: Request):
