@@ -626,7 +626,6 @@ def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_rol
                     "validation":report,"conversion_job_id":job_id}
         registered=registry.register(derived_id,destination.name,"character" if target_role=="character" else "environment" if target_role=="environment" else "prop",licence,source="NEXORA Creator Asset Converter",metadata=provenance)
         jobs.update(job_id,state=JobState.COMPLETED,progress=100,message="A validated GLB game asset is ready for preview and scene placement",error=None)
-        job.result={"asset_id":registered["asset_id"],"filename":destination.name,"mesh_stats":report.get("stats",{}),"target_role":target_role,"rigged":False}
     except Exception as exc:
         jobs.update(job_id,state=JobState.FAILED,progress=100,message="Asset conversion failed",error=str(exc))
 \ndef register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
@@ -647,8 +646,11 @@ def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_rol
         owner,_=_assert_project(folder,request,manager)
         if not payload.confirm_rights: raise HTTPException(403,"Confirm that you own or have permission to make a derivative of this asset.")
         workflow_path=_workflow_path(folder)
-        if workflow_path.is_file():
-            workflow=_load_workflow(folder); _assert_entitled(manager,owner,workflow.plan)
+        suffix=Path(next((item.get("path","") for item in AssetRegistry(folder/"assets").list() if item.get("asset_id")==asset_id),"")).suffix.lower()
+        if suffix in IMAGE_EXTENSIONS:
+            workflow=_load_workflow(folder)
+            _assert_entitled(manager,owner,workflow.plan)
+            _validate_plan(workflow)
         registry=AssetRegistry(folder/"assets")
         source=next((item for item in registry.list() if item.get("asset_id")==asset_id),None)
         if not source: raise HTTPException(404,"Source asset not found.")
