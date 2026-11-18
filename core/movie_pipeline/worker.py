@@ -98,7 +98,7 @@ def analyze_project(project_folder: Path) -> dict[str, Any]:
         raise PipelineError("Analysis stage must be READY before the worker can run")
     if not document.source_video:
         raise MediaAnalysisError("Attach a movie video before starting analysis")
-    video = (project_folder / document.source_video["storage_key"]).resolve()
+    video = (store.folder / document.source_video["storage_key"]).resolve()
     uploads = (store.folder / "uploads").resolve()
     if uploads not in video.parents or not video.is_file():
         raise MediaAnalysisError("Movie source is missing or outside the project upload directory")
