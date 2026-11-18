@@ -24,9 +24,11 @@ def _signature_ok(kind: str, content_type: str, head: bytes) -> bool:
         return head.startswith(b"RIFF") and head[8:12] == b"AVI "
     return False
 
-async def store_upload(upload: UploadFile, kind: str, destination: Path) -> dict:
+async def store_upload(upload: UploadFile, kind: str, destination: Path, max_bytes: int | None = None) -> dict:
     allowed = PHOTO_TYPES if kind == "photo" else VIDEO_TYPES
     limit = PHOTO_LIMIT if kind == "photo" else VIDEO_LIMIT
+    if max_bytes is not None:
+        limit = min(limit, max_bytes)
     content_type = (upload.content_type or "").lower()
     if content_type not in allowed:
         raise UploadRejected(f"Unsupported {kind} content type")
