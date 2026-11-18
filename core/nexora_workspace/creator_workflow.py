@@ -7,6 +7,7 @@ The rest of the pipeline uses Blender, FFmpeg and Godot already present in PGF.
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import os
 import re
