@@ -614,3 +614,8 @@ register_asset_routes(app, lambda: manager)
 # a second project database.
 from core.nexora_workspace.api import register_nexora_workspace_routes
 register_nexora_workspace_routes(app, manager, jobs)
+
+
+# Episode-driven Creator Flow, asset conversion workers and Pochi plan reconciliation.
+from core.nexora_workspace.creator_workflow import register_creator_workflow_routes
+register_creator_workflow_routes(app, manager, jobs)
