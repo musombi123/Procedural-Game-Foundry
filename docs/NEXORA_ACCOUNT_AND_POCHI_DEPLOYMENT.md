@@ -1,0 +1,65 @@
+# NEXORA account, subscription and Pochi deployment
+
+NEXORA is an independent product. It does not use RevelaCode login sessions, RevelaCode subscription entitlements, or RevelaCode collection credentials.
+
+## Required backend environment
+
+Configure these on the NEXORA API service (not on the RevelaCode backend):
+
+| Variable | Purpose |
+| --- | --- |
+| `NEXORA_DATABASE_URL` | Private Neon PostgreSQL connection string. This is required for account sessions, payments and entitlements. |
+| `NEXORA_AUTH_REQUIRED` | Set to `true` in production. |
+| `NEXORA_POCHI_MERCHANT_NUMBER` | Personal Safaricom line enrolled for Pochi la Biashara and receiving NEXORA customer payments. |
+| `NEXORA_PLAN_PRICES_KES` | JSON object with the owner-approved KES prices for each plan. |
+| `NEXORA_PAYMENT_VERIFICATION_SECRET` | High-entropy secret held only by the NEXORA server/operator. |
+| `NEXORA_CORS_ORIGINS` | Comma-separated allowed frontend origins, including the production RevelaCode origin used to open the NEXORA workspace. |
+| `NEXORA_SESSION_DAYS` | Optional session lifetime (default 30 days, capped at 90). |
+
+Use the Neon connection string in a private Render environment variable. Never put credentials, merchant secrets or the connection string in Vite's `.env.production`, frontend source, a public repository, or the browser.
+
+Example price-variable structure (replace every value with approved prices before enabling checkout):
+
+```json
+{"basic": 0, "standard": 0, "pro": 0, "studio": 0}
+```
+
+All four prices must be positive integers in KES. Leaving prices unset or zero keeps checkout unavailable.
+
+## Independent NEXORA identity
+
+- `POST /api/v1/auth/register` creates an NEXORA account.
+- `POST /api/v1/auth/login` issues an independent NEXORA bearer session.
+- `GET /api/v1/auth/me` validates the current NEXORA session.
+- `POST /api/v1/auth/logout` revokes that session.
+
+Passwords are stored as PBKDF2-HMAC-SHA256 hashes. Session tokens are stored as SHA-256 digests. The identity layer intentionally reads only `NEXORA_DATABASE_URL`; it does not fall back to a generic `DATABASE_URL` that could belong to RevelaCode.
+
+## Pochi la Biashara collection and reconciliation
+
+The customer checkout flow displays the NEXORA Pochi merchant number, payment reference and exact amount. The customer pays using the M-PESA app or `*334#`, then submits the M-PESA receipt reference to NEXORA.
+
+Submitting a receipt does **not** activate the subscription. The receipt claim remains pending until an authorised operator reconciles the received payment against the Pochi merchant transaction/statement and verifies it through:
+
+`POST /api/v1/creator-flow/payments/{payment_id}/verify`
+
+The verification request must include:
+- A valid NEXORA bearer session.
+- `X-Nexora-Payment-Secret: <NEXORA_PAYMENT_VERIFICATION_SECRET>`.
+
+Keep the verification secret out of the frontend and do not send it to a customer. Only reconcile a receipt after confirming the actual incoming payment, amount, payer and merchant reference in the Pochi account. The current flow deliberately does not claim to have a customer-to-Pochi automatic callback or STK push integration.
+
+## Existing projects
+
+Cloud projects created before the NEXORA account boundary may contain legacy RevelaCode owner IDs. They are not automatically assigned to the first NEXORA user who registers. Migrate each legacy project only after confirming its rightful owner; new projects are recorded against the NEXORA account ID.
+
+## Go-live checklist
+
+- [ ] Provision the private Neon database for NEXORA and set `NEXORA_DATABASE_URL`.
+- [ ] Set `NEXORA_AUTH_REQUIRED=true` on the production API.
+- [ ] Confirm the Pochi line is enrolled and set `NEXORA_POCHI_MERCHANT_NUMBER`.
+- [ ] Set the final four plan prices in `NEXORA_PLAN_PRICES_KES`.
+- [ ] Generate and privately store `NEXORA_PAYMENT_VERIFICATION_SECRET`.
+- [ ] Confirm CORS includes the exact production NEXORA entry origin.
+- [ ] Register a test NEXORA account, sign in/out, and verify that a second account cannot see the first account's projects.
+- [ ] Test a low-value incoming Pochi payment, reconcile the real statement entry, and verify the entitlement only after matching the receipt.
