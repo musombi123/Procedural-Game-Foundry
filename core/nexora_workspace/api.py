@@ -407,6 +407,19 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
     except Exception as exc:
         jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.FAILED, progress=100, message="NEXORA production job failed", error=str(exc))
 
+def _run_workspace_video_analysis(job_id: str, folder: Path, jobs: Any) -> None:
+    try:
+        from core.movie_pipeline.worker import analyze_project
+        from core.orchestration.jobs import JobState
+        jobs.update(job_id,state=JobState.RUNNING,progress=5,message="Checking source clip and extracting scene keyframes")
+        result=analyze_project(folder)
+        keyframes=len(result.get("keyframes",[]))
+        scenes=len(result.get("scene_detection",{}).get("scenes",[]))
+        jobs.update(job_id,state=JobState.COMPLETED,progress=100,message=f"Video analysis complete · {scenes} scene segments · {keyframes} keyframes · creator review required",error=None)
+    except Exception as exc:
+        from core.orchestration.jobs import JobState
+        jobs.update(job_id,state=JobState.FAILED,progress=100,message="Video intake / analysis failed",error=str(exc))
+
 def _save_artifacts(folder: Path, job_id: str, items: list[dict]) -> None:
     root = folder / "workspace_jobs"
     root.mkdir(exist_ok=True)
@@ -502,6 +515,96 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         shutil.rmtree(folder)
         return {"deleted":True,"id":pid}
 
+    @router.get("/api/v1/workspace/projects/{pid}/movie-pipeline")
+    def get_workspace_movie_pipeline(pid: str, request: Request):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        _assert_owner(folder,request)
+        from core.movie_pipeline.service import PipelineStore
+        try:
+            document=PipelineStore(folder).load()
+            return document.model_dump(mode="json")
+        except FileNotFoundError:
+            return {"project_id":pid,"stages":[],"source_video":None,"analysis":None}
+
+    @router.post("/api/v1/workspace/projects/{pid}/video-intake", status_code=202)
+    async def upload_workspace_video(
+        pid: str,
+        request: Request,
+        background: BackgroundTasks,
+        file: UploadFile = File(...),
+        has_video_rights: bool = Form(...),
+        accepts_original_assets_only: bool = Form(...),
+    ):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        owner=_assert_owner(folder,request)
+        if not has_video_rights:
+            raise HTTPException(400,"Confirm that you own or have permission to use this video before ingesting it.")
+        if not accepts_original_assets_only:
+            raise HTTPException(400,"Confirm that NEXORA should create original assets rather than copy protected source media.")
+        from core.movie_pipeline.ingestion import UploadRejected, store_upload
+        from core.movie_pipeline.models import RightsDeclaration, StageId, new_pipeline
+        from core.movie_pipeline.service import PipelineStore
+        store=PipelineStore(folder)
+        try:
+            document=store.load()
+        except FileNotFoundError:
+            rights=RightsDeclaration(
+                has_video_rights=True,
+                has_photo_rights=False,
+                likeness_consent=False,
+                accepts_original_assets_only=True,
+            )
+            document=store.save(new_pipeline(pid,rights))
+        if document.source_video:
+            raise HTTPException(409,"A source video is already attached. Remove or replace the current source before uploading another.")
+        if not document.rights.has_video_rights or not document.rights.accepts_original_assets_only:
+            raise HTTPException(409,"The existing pipeline rights declaration does not allow this video workflow.")
+        try:
+            metadata=await store_upload(file,"video",store.folder/"uploads")
+        except UploadRejected as exc:
+            raise HTTPException(400,str(exc)) from exc
+        document.source_video=metadata
+        store.save(document)
+        job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid))
+        job_root=folder/"workspace_jobs"; job_root.mkdir(exist_ok=True)
+        (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
+        background.add_task(_run_workspace_video_analysis,job.id,folder,jobs)
+        return {
+            **job.as_dict(),
+            "state":job.state.value.lower(),
+            "source_video":metadata,
+            "pipeline":document.model_dump(mode="json"),
+        }
+
+    @router.post("/api/v1/workspace/projects/{pid}/movie-pipeline/stages/{stage_id}/approve")
+    def approve_workspace_movie_stage(pid: str, stage_id: str, payload: dict, request: Request):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        _assert_owner(folder,request)
+        from core.movie_pipeline.models import StageId
+        from core.movie_pipeline.service import PipelineError, PipelineStore
+        try:
+            stage=StageId(stage_id)
+            document=PipelineStore(folder).approve(stage,str(payload.get("note") or ""))
+            return document.model_dump(mode="json")
+        except (ValueError,PipelineError) as exc:
+            raise HTTPException(409,str(exc)) from exc
+
+    @router.get("/api/v1/workspace/projects/{pid}/video-analysis")
+    def get_workspace_video_analysis(pid: str, request: Request):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        _assert_owner(folder,request)
+        analysis_files=sorted((folder/"movie_pipeline"/"analysis").glob("revision-*/analysis.json")) if (folder/"movie_pipeline"/"analysis").exists() else []
+        if not analysis_files:
+            raise HTTPException(404,"No video analysis is available yet.")
+        try:
+            return json.loads(analysis_files[-1].read_text(encoding="utf-8"))
+        except (OSError,ValueError) as exc:
+            raise HTTPException(500,"Video analysis report is unreadable.") from exc
+
     @router.get("/api/v1/workspace/projects/{pid}/assets")
     def list_workspace_assets(pid: str, request: Request):
         try: folder=manager.path_for(pid); manager.load(pid)
@@ -541,7 +644,8 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
             else:
                 report={"valid":True,"errors":[],"warnings":[],"stats":{}}
             asset_id=f"{destination.stem[:40]}-{uuid4().hex[:8]}"
-            asset_kind=kind if kind in {"model","character","environment","prop","animation","dependency"} else ("dependency" if suffix in {".bin",".png",".jpg",".jpeg",".webp"} else "model")
+            default_kind = "dependency" if suffix in {".bin",".png",".jpg",".jpeg",".webp"} else "source_media" if suffix in {".mp4",".mov",".mkv",".webm",".avi"} else "animation" if suffix in {".wav",".ogg",".mp3"} else "model"
+            asset_kind=kind if kind in {"model","character","environment","prop","animation","dependency","source_media"} else default_kind
             record=AssetRegistry(asset_root).register(asset_id,destination.name,asset_kind,license_name or "Creator-uploaded asset",source=source,metadata={"format":suffix[1:],"size_bytes":size,"validation":report})
             return {"asset":{"id":record["asset_id"],"filename":destination.name,"content_type":mimetypes.guess_type(destination.name)[0] or "application/octet-stream","size":size,"created_at":_utc(),"status":"ready","kind":asset_kind,"sha256":record["checksum"],"metadata":record["metadata"]}}
         except HTTPException:
