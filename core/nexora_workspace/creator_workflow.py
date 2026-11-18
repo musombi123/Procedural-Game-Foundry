@@ -196,7 +196,7 @@ def _validate_plan(document: CreatorWorkflowDocument) -> dict[str, Any]:
     return {"plan":plan["id"],"target_class":document.target_class,"max_video_seconds":plan["video_limit_seconds"],"workload":workload,"capacity":plan["max_workload_units"]}
 
 def _database_url() -> str:
-    return os.environ.get("NEXORA_DATABASE_URL") or os.environ.get("DATABASE_URL") or ""
+    return os.environ.get("NEXORA_DATABASE_URL", "").strip()
 
 def _connect():
     url=_database_url()
@@ -782,7 +782,7 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
 
     @router.get("/api/v1/workspace/assets/conversion-capabilities")
     def conversion_capabilities(request: Request):
-        if not getattr(request.state,"nexora_user_id",None): raise HTTPException(401,"A verified RevelaCode session is required.")
+        if not getattr(request.state,"nexora_user_id",None): raise HTTPException(401,"Sign in to your NEXORA account.")
         triposr_root=Path(os.environ.get("NEXORA_TRIPOSR_ROOT","")).expanduser()
         return {"image_to_3d":{"available":(triposr_root/"run.py").is_file(),"engine":"TripoSR","minimum_vram_gb":6,"licence":"MIT; retain upstream licence notice"},
                 "model_conversion":{"available":bool(shutil.which("blender")),"engine":"Blender","formats":["GLB","glTF","OBJ","FBX","PLY"]},
@@ -817,19 +817,19 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
     @router.get("/api/v1/creator-flow/plans")
     def get_creator_plans(request: Request):
         user=getattr(request.state,"nexora_user_id",None)
-        if not user: raise HTTPException(401,"A verified RevelaCode session is required.")
+        if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
         prices=_price_map()
         return {"plans":[{**plan,"price_kes":prices.get(plan_id),"price_configured":plan_id in prices} for plan_id,plan in PLANS.items()],"payment":{"method":"Pochi la Biashara","merchant_number_configured":bool(os.environ.get("NEXORA_POCHI_MERCHANT_NUMBER")),"automatic_confirmation":False,"reason":"Pochi incoming merchant payments are reconciled against merchant records. This deployment uses a receipt claim and verified reconciliation, not a fake STK confirmation."},"active_entitlement":_get_entitlement(manager,user)}
 
     @router.get("/api/v1/creator-flow/packs")
     def get_creator_packs(request: Request):
-        if not getattr(request.state,"nexora_user_id",None): raise HTTPException(401,"A verified RevelaCode session is required.")
+        if not getattr(request.state,"nexora_user_id",None): raise HTTPException(401,"Sign in to your NEXORA account.")
         return {"packs":list(PACKS.values()),"templates_source":"NEXORA original procedural templates"}
 
     @router.post("/api/v1/creator-flow/checkout",status_code=201)
     def create_checkout(payload: CheckoutRequest, request: Request):
         user=getattr(request.state,"nexora_user_id",None)
-        if not user: raise HTTPException(401,"A verified RevelaCode session is required.")
+        if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
         merchant=os.environ.get("NEXORA_POCHI_MERCHANT_NUMBER","").strip()
         prices=_price_map()
         if not merchant: raise HTTPException(503,"Configure NEXORA_POCHI_MERCHANT_NUMBER with the enrolled Pochi merchant mobile number.")
