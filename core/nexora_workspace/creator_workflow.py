@@ -67,25 +67,25 @@ PACKS: dict[str, dict[str, Any]] = {
         "id":"sci_fi_survival","name":"Sci-Fi Survival","genre":"science-fiction","world_scale":"medium",
         "environment":["sci_fi_outpost","heavy_door","signal_beacon","rock_formation"],
         "enemies":["robot","npc"],"vehicles":["scout_buggy"],
-        "description":"Outpost, perimeter, beacons, hostile patrols and utility transport",
+        "description":"Outpost, perimeter, beacons, hostile patrols and utility transport","palette":{"terrain":[0.10,0.16,0.19],"stone":[0.20,0.27,0.31],"wood":[0.24,0.31,0.37],"foliage":[0.16,0.30,0.22],"road":[0.13,0.18,0.22],"accent":[0.14,0.67,0.78]},"architecture":"sci_fi",
     },
     "urban_action": {
         "id":"urban_action","name":"Urban Action","genre":"modern","world_scale":"medium",
         "environment":["sci_fi_outpost","heavy_door","sci_fi_crate"],
         "enemies":["npc"],"vehicles":["street_car","armored_car"],
-        "description":"Street blocks, service buildings, hostile units and road vehicles",
+        "description":"Street blocks, service buildings, hostile units and road vehicles","palette":{"terrain":[0.13,0.14,0.16],"stone":[0.37,0.39,0.42],"wood":[0.24,0.27,0.31],"foliage":[0.10,0.25,0.13],"road":[0.06,0.07,0.08],"accent":[0.88,0.55,0.18]},"architecture":"urban",
     },
     "fantasy_frontier": {
         "id":"fantasy_frontier","name":"Fantasy Frontier","genre":"fantasy","world_scale":"large",
         "environment":["alien_tree","rock_formation","signal_beacon"],
         "enemies":["animal","npc"],"vehicles":[],
-        "description":"Woodland paths, rock formations, creature encounters and landmarks",
+        "description":"Woodland paths, rock formations, creature encounters and landmarks","palette":{"terrain":[0.12,0.24,0.12],"stone":[0.34,0.35,0.30],"wood":[0.30,0.18,0.09],"foliage":[0.07,0.32,0.12],"road":[0.23,0.18,0.12],"accent":[0.71,0.69,0.38]},"architecture":"fantasy",
     },
     "wilderness_expedition": {
         "id":"wilderness_expedition","name":"Wilderness Expedition","genre":"adventure","world_scale":"large",
         "environment":["alien_tree","rock_formation","sci_fi_crate"],
         "enemies":["animal"],"vehicles":["scout_buggy"],
-        "description":"Terrain, forests, cliffs, field equipment and expedition vehicles",
+        "description":"Terrain, forests, cliffs, field equipment and expedition vehicles","palette":{"terrain":[0.18,0.27,0.16],"stone":[0.37,0.38,0.34],"wood":[0.30,0.20,0.11],"foliage":[0.09,0.28,0.11],"road":[0.26,0.24,0.18],"accent":[0.76,0.48,0.17]},"architecture":"wilderness",
     },
 }
 IMAGE_EXTENSIONS = {".png",".jpg",".jpeg",".webp"}
@@ -425,7 +425,7 @@ def _run_environment_build(folder: Path, store: PipelineStore, document: Creator
     spec=build_world_spec(story)
     pack=PACKS[document.world_pack]
     # Enrich the base world with creator-selected pack-specific landmarks/prop categories.
-    spec["source_pack"]=pack["id"]; spec["visual_style"]=document.visual_style
+    spec["source_pack"]=pack["id"]; spec["visual_style"]=document.visual_style; spec["palette"]=pack["palette"]; spec["architecture"]=pack["architecture"]
     spec["episodes"]=[episode.model_dump(mode="json") for episode in document.episodes]
     for episode_index,episode in enumerate(document.episodes):
         landmark=spec["landmarks"][episode_index%len(spec["landmarks"])]
