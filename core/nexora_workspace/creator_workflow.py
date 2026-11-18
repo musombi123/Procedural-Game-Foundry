@@ -13,6 +13,8 @@ import re
 import shutil
 import subprocess
 import sys
+import struct
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -283,14 +285,19 @@ def _activate_entitlement(manager: Any, user_id: str, plan_id: str, reference: s
     conn=_connect()
     if conn:
         _ensure_billing_schema(conn)
+        days=max(1,min(365,int(os.environ.get("NEXORA_PLAN_PERIOD_DAYS","30"))))
         with conn.cursor() as cur:
-            cur.execute("""INSERT INTO nexora_creator_entitlements(user_id,plan,status,target_class,payment_reference,updated_at)
-            VALUES(%s,%s,'active',%s,%s,NOW()) ON CONFLICT(user_id) DO UPDATE SET plan=EXCLUDED.plan,status='active',target_class=EXCLUDED.target_class,payment_reference=EXCLUDED.payment_reference,updated_at=NOW()""",(user_id,plan_id,plan["target_class"],reference))
+            cur.execute("""INSERT INTO nexora_creator_entitlements(user_id,plan,status,target_class,expires_at,payment_reference,updated_at)
+            VALUES(%s,%s,'active',%s,NOW()+(%s * INTERVAL '1 day'),%s,NOW())
+            ON CONFLICT(user_id) DO UPDATE SET plan=EXCLUDED.plan,status='active',target_class=EXCLUDED.target_class,
+            expires_at=EXCLUDED.expires_at,payment_reference=EXCLUDED.payment_reference,updated_at=NOW()""",
+            (user_id,plan_id,plan["target_class"],days,reference))
         conn.close()
         return
     path=_payments_dir(manager)/"entitlements.json"
     data=json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"entitlements":{}}
-    data["entitlements"][user_id]={"plan":plan_id,"status":"active","target_class":plan["target_class"],"payment_reference":reference,"updated_at":_utc()}
+    days=max(1,min(365,int(os.environ.get("NEXORA_PLAN_PERIOD_DAYS","30"))))
+    data["entitlements"][user_id]={"plan":plan_id,"status":"active","target_class":plan["target_class"],"payment_reference":reference,"updated_at":_utc(),"expires_at":(datetime.now(timezone.utc)+timedelta(days=days)).isoformat()}
     tmp=path.with_suffix(".json.tmp"); tmp.write_text(json.dumps(data,indent=2),encoding="utf-8"); tmp.replace(path)
 
 def _get_entitlement(manager: Any, user_id: str) -> dict | None:
@@ -349,26 +356,26 @@ def _ensure_pipeline(folder: Path, project_id: str, mode: str):
     return store,document
 
 def _write_default_portrait(path: Path) -> None:
-    """Create a neutral synthetic reference portrait. It contains no real person's likeness."""
+    """Create a neutral synthetic PNG reference portrait without a real likeness."""
     width=256; height=256
-    pixels=bytearray()
+    rows=[]
     for y in range(height):
+        row=bytearray([0])
         for x in range(width):
             r,g,b=(34,44,58)
-            # generic flat portrait head, hair, neck and shirt, for geometry proportions only
             dx=(x-128)/56; dy=(y-92)/68
-            if dx*dx+dy*dy<1:
-                r,g,b=(152,112,88)
-            if 66<x<190 and 31<y<79:
-                r,g,b=(32,31,34)
-            if 108<x<148 and 110<y<119:
-                r,g,b=(245,242,234)
-            if 84<x<172 and 120<y<128:
-                r,g,b=(74,45,35)
-            if 72<x<184 and 159<y<255:
-                r,g,b=(38,78,112)
-            pixels.extend((r,g,b))
-    path.write_bytes(b"P6\n256 256\n255\n"+bytes(pixels))
+            if dx*dx+dy*dy<1: r,g,b=(152,112,88)
+            if 66<x<190 and 31<y<79: r,g,b=(32,31,34)
+            if 108<x<148 and 110<y<119: r,g,b=(245,242,234)
+            if 84<x<172 and 120<y<128: r,g,b=(74,45,35)
+            if 72<x<184 and 159<y<255: r,g,b=(38,78,112)
+            row.extend((r,g,b))
+        rows.append(bytes(row))
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I",len(data))+kind+data+struct.pack(">I",zlib.crc32(kind+data)&0xffffffff)
+    raw=zlib.compress(b"".join(rows),level=9)
+    payload=b"\\x89PNG\\r\\n\\x1a\\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",width,height,8,2,0,0,0))+chunk(b"IDAT",raw)+chunk(b"IEND",b"")
+    path.write_bytes(payload)
 
 def _run_player_build(folder: Path, store: PipelineStore, document: CreatorWorkflowDocument, use_portrait: bool) -> dict:
     pipeline=store.load()
@@ -387,7 +394,7 @@ def _run_player_build(folder: Path, store: PipelineStore, document: CreatorWorkf
             raise HTTPException(403,"Player portrait rights and likeness consent are required.")
         portrait=(folder/pipeline.source_photo["storage_key"]).resolve()
     else:
-        portrait=out_dir/"default-player-reference.ppm"
+        portrait=out_dir/"default-player-reference.png"
         _write_default_portrait(portrait)
     spec={"proportions":{"height":1.78,"shoulder_width":0.46,"hip_width":0.34,"leg_ratio":0.52,"build":1.0,"face_center_x":0.5,"face_top":0.035,"face_width":0.22,"face_height":0.16},
           "face_crop":{"center_x":0.5,"top":0.035,"width":0.22,"height":0.16},
@@ -528,11 +535,15 @@ def _build_gameplay(folder: Path, store: PipelineStore, document: CreatorWorkflo
     missions=[]
     for index,episode in enumerate(document.episodes):
         target=f"episode-{index+1}-location"
-        missions.append({"id":f"episode-{index+1}","title":episode.title,"description":episode.synopsis or episode.player_goal or f"Complete {episode.title}.","objectives":[{"id":f"reach-episode-{index+1}","title":episode.player_goal or f"Reach {episode.location or episode.title}","description":episode.synopsis or f"Explore and complete the objectives in {episode.title}.","kind":"reach","target_id":target,"required_count":1}]})
+        objectives=[{"id":f"reach-episode-{index+1}","title":episode.player_goal or f"Reach {episode.location or episode.title}","description":episode.synopsis or f"Explore and complete the objectives in {episode.title}.","kind":"reach","target_id":target,"required_count":1}]
+        if actor_ids:
+            enemy_index=index%len(actor_ids)
+            objectives.append({"id":f"defeat-episode-{index+1}","title":f"Clear the hostile threat in {episode.title}","description":"Defeat the assigned enemy unit before advancing.","kind":"defeat","target_id":actor_ids[enemy_index],"required_count":1})
+        missions.append({"id":f"episode-{index+1}","title":episode.title,"description":episode.synopsis or episode.player_goal or f"Complete {episode.title}.","objectives":objectives})
     behaviours=[{"actor_id":actor_id,"behaviour":"patrol","move_speed":2.5,"detection_range":18,"attack_range":1.8,"damage":10} for actor_id in actor_ids]
     interactions=[]
     for prop_id in prop_ids:
-        action="open" if "container" in prop_id else "activate" if "tool" in prop_id else "talk"
+        action="open" if "container" in prop_id else "activate"
         interactions.append({"prop_id":prop_id,"action":action})
     audio_bindings=[]
     event_map={"player_jump":"player-jump","objective_progress":"objective-progress","objective_complete":"objective-complete","item_collected":"item-collected"}
@@ -574,7 +585,7 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         if not merchant: raise HTTPException(503,"Configure NEXORA_POCHI_MERCHANT_NUMBER with the enrolled Pochi merchant mobile number.")
         if payload.plan not in prices: raise HTTPException(503,f"Configure the approved KES price for the {PLANS[payload.plan]['name']} plan in NEXORA_PLAN_PRICES_KES.")
         if _database_url():
-            conn=_connect(); _ensure_billing_schema(conn)
+            conn=_connect(); _ensure_billing_schema(conn); conn.close()
         else:
             if os.environ.get("RENDER") or os.environ.get("NEXORA_ENV","").lower()=="production":
                 raise HTTPException(503,"Configure NEXORA_DATABASE_URL for secure, durable payment and entitlement records.")
