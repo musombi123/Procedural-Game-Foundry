@@ -4,8 +4,6 @@ import os
 import re
 import shutil
 import subprocess
-import urllib.error
-import urllib.request
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Request
 from fastapi.responses import JSONResponse
@@ -18,6 +16,11 @@ from core.orchestration.jobs import Job, JobRegistry, JobState
 from core.game_assembler.godot import assemble_godot_project
 from core.validation.validator import validate_project
 from core.build_engine.godot_cli import headless_check
+from core.nexora_workspace.identity import (
+    NexoraIdentityUnavailable,
+    register_nexora_auth_routes,
+    verify_access_token,
+)
 
 DATA = Path(os.environ.get("PGF_DATA_DIR", ".pgf-data")).resolve()
 manager = ProjectManager(DATA / "projects")
@@ -26,74 +29,59 @@ app = FastAPI(title="Procedural Game Foundry API", version="0.2.0", description=
 _default_auth_required = bool(os.environ.get("RENDER")) or os.environ.get("NEXORA_ENV", "").lower() == "production"
 AUTH_REQUIRED = os.environ.get("NEXORA_AUTH_REQUIRED", "true" if _default_auth_required else "false").lower() in {"1", "true", "yes"}
 os.environ["NEXORA_AUTH_REQUIRED"] = "true" if AUTH_REQUIRED else "false"
-REVELACODE_AUTH_URL = os.environ.get("NEXORA_REVELACODE_AUTH_URL") or os.environ.get("REVELACODE_AUTH_URL") or "https://revelacode-backend.onrender.com/api/auth/me"
-_origins = [item.strip() for item in os.environ.get("NEXORA_CORS_ORIGINS", "https://revelacode.co.ke,https://www.revelacode.co.ke,http://localhost:5173,http://127.0.0.1:5173,tauri://localhost").split(",") if item.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","Accept","X-Revela-License"])
 
-def _verify_revelacode_token(authorization: str) -> dict:
-    request = urllib.request.Request(REVELACODE_AUTH_URL, headers={"Authorization": authorization, "Accept": "application/json"}, method="GET")
-    try:
-        with urllib.request.urlopen(request, timeout=12) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        if exc.code in {401,403}:
-            raise PermissionError("RevelaCode rejected this session.") from exc
-        raise RuntimeError(f"RevelaCode session verification failed (HTTP {exc.code}).") from exc
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Could not verify the RevelaCode session. Check the identity service connection.") from exc
-    candidates = [payload]
-    for key in ("data","user","account"):
-        value = payload.get(key) if isinstance(payload,dict) else None
-        if isinstance(value,dict):
-            candidates.append(value)
-            for nested in ("user","account","data"):
-                child=value.get(nested)
-                if isinstance(child,dict): candidates.append(child)
-    profile = next((item for item in candidates if any(item.get(key) for key in ("id","_id","user_id","userId"))),None)
-    if not profile:
-        raise PermissionError("RevelaCode did not return a verified account identity.")
-    user_id = str(profile.get("id") or profile.get("_id") or profile.get("user_id") or profile.get("userId"))
-    return {"id":user_id,"profile":profile}
+_origins = [item.strip() for item in os.environ.get("NEXORA_CORS_ORIGINS", "https://revelacode.co.ke,https://www.revelacode.co.ke,http://localhost:5173,http://127.0.0.1:5173,tauri://localhost").split(",") if item.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","Accept","X-Revela-License","X-Nexora-Payment-Secret"])
+
+_PUBLIC_AUTH_PATHS = {"/api/v1/auth/register", "/api/v1/auth/login"}
 
 @app.middleware("http")
 async def nexora_identity_and_project_scope(request: Request, call_next):
     path = request.url.path
     if request.method.upper() == "OPTIONS" or not path.startswith("/api/") or path in {"/api/capabilities"}:
         return await call_next(request)
-    identity = {"id":"local","profile":{"id":"local"}}
-    if AUTH_REQUIRED:
-        authorization = request.headers.get("authorization","")
-        if not authorization.lower().startswith("bearer "):
-            return JSONResponse({"detail":"A valid RevelaCode login session is required."},status_code=401)
+    if path in _PUBLIC_AUTH_PATHS:
+        return await call_next(request)
+
+    identity = {"id": "local", "profile": {"id": "local"}}
+    authorization = request.headers.get("authorization", "").strip()
+    supplied_token = authorization.partition(" ")[2].strip() if authorization.lower().startswith("bearer ") else ""
+    if supplied_token:
         try:
-            identity = await asyncio.to_thread(_verify_revelacode_token, authorization)
-        except PermissionError as exc:
-            return JSONResponse({"detail":str(exc)},status_code=401)
-        except RuntimeError as exc:
-            return JSONResponse({"detail":str(exc)},status_code=503)
+            profile = await asyncio.to_thread(verify_access_token, supplied_token)
+        except NexoraIdentityUnavailable as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=503)
+        except Exception:
+            return JSONResponse({"detail": "Could not verify the NEXORA account session."}, status_code=503)
+        if not profile:
+            return JSONResponse({"detail": "Your NEXORA session is invalid or has expired. Sign in again."}, status_code=401)
+        identity = {"id": str(profile["id"]), "profile": profile}
+    elif AUTH_REQUIRED:
+        return JSONResponse({"detail": "Sign in to your NEXORA account."}, status_code=401)
+
     request.state.nexora_user_id = identity["id"]
     request.state.nexora_user = identity["profile"]
 
-    match = re.match(r"^/api/(?:projects|v1/workspace/projects)/([A-Za-z0-9_-]+)(?:/|$)",path)
+    match = re.match(r"^/api/(?:projects|v1/workspace/projects)/([A-Za-z0-9_-]+)(?:/|$)", path)
     is_project_collection_create = path in {"/api/projects", "/api/v1/workspace/projects"} and request.method.upper() == "POST"
     if match and not is_project_collection_create:
         project_id = match.group(1)
         try:
             project_folder = manager.path_for(project_id)
         except ValueError:
-            return JSONResponse({"detail":"Project not found."},status_code=404)
+            return JSONResponse({"detail": "Project not found."}, status_code=404)
         owner_file = project_folder / "nexora_owner.json"
         if owner_file.is_file():
             try:
                 recorded = json.loads(owner_file.read_text(encoding="utf-8")).get("user_id")
-            except (OSError,ValueError):
-                return JSONResponse({"detail":"Project ownership record is unreadable."},status_code=500)
+            except (OSError, ValueError):
+                return JSONResponse({"detail": "Project ownership record is unreadable."}, status_code=500)
             if str(recorded) != identity["id"]:
-                return JSONResponse({"detail":"Project not found."},status_code=404)
+                return JSONResponse({"detail": "Project not found."}, status_code=404)
         elif AUTH_REQUIRED:
-            return JSONResponse({"detail":"This project predates account ownership records. Ask the NEXORA administrator to migrate it."},status_code=403)
+            return JSONResponse({"detail": "This legacy project has no NEXORA account owner record. Contact NEXORA support for a verified ownership migration."}, status_code=403)
         else:
-            owner_file.write_text(json.dumps({"user_id":identity["id"]},indent=2),encoding="utf-8")
+            owner_file.write_text(json.dumps({"user_id": identity["id"]}, indent=2), encoding="utf-8")
 
     return await call_next(request)
 
@@ -619,3 +607,6 @@ register_nexora_workspace_routes(app, manager, jobs)
 # Episode-driven Creator Flow, asset conversion workers and Pochi plan reconciliation.
 from core.nexora_workspace.creator_workflow import register_creator_workflow_routes
 register_creator_workflow_routes(app, manager, jobs)
+
+# NEXORA has its own registration, login and revocable account sessions.
+register_nexora_auth_routes(app)
