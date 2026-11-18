@@ -374,7 +374,7 @@ def _write_default_portrait(path: Path) -> None:
     def chunk(kind: bytes, data: bytes) -> bytes:
         return struct.pack(">I",len(data))+kind+data+struct.pack(">I",zlib.crc32(kind+data)&0xffffffff)
     raw=zlib.compress(b"".join(rows),level=9)
-    payload=b"\\x89PNG\\r\\n\\x1a\\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",width,height,8,2,0,0,0))+chunk(b"IDAT",raw)+chunk(b"IEND",b"")
+    payload=b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",width,height,8,2,0,0,0))+chunk(b"IDAT",raw)+chunk(b"IEND",b"")
     path.write_bytes(payload)
 
 def _run_player_build(folder: Path, store: PipelineStore, document: CreatorWorkflowDocument, use_portrait: bool) -> dict:
@@ -561,8 +561,107 @@ def _build_gameplay(folder: Path, store: PipelineStore, document: CreatorWorkflo
         current=store.load(); rec=next(item for item in current.stages if item.stage==StageId.GAMEPLAY); rec.state=StageState.FAILED; rec.error=str(exc)[:2000]; rec.summary="Episode gameplay compilation failed"; store.save(current); raise HTTPException(500,"Gameplay compilation failed: "+str(exc)) from exc
     return {"compiled":True,"stage":next(item.model_dump(mode="json") for item in reviewed.stages if item.stage==StageId.GAMEPLAY),"mission_count":manifest["mission_count"],"objective_count":manifest["objective_count"]}
 
-def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
+
+class ConversionRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    target_role: Literal["prop","character","environment"] = "prop"
+    confirm_rights: bool
+    max_faces: int = Field(default=50000,ge=1000,le=500000)
+
+def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_role: str, max_faces: int, job_id: str, jobs: Any) -> None:
+    job=jobs.get(job_id)
+    try:
+        registry=AssetRegistry(folder/"assets")
+        source_record=next((item for item in registry.list() if item.get("asset_id")==asset_id),None)
+        if not source_record: raise RuntimeError("Source asset disappeared before conversion.")
+        source=(folder/"assets"/Path(source_record["path"]).name).resolve()
+        if folder.resolve() not in source.parents or not source.is_file(): raise RuntimeError("Source asset is missing or outside the project asset directory.")
+        suffix=source.suffix.lower()
+        work=folder/"asset-conversions"/job_id
+        work.mkdir(parents=True,exist_ok=True)
+        glb=work/"converted.glb"
+        jobs.update(job_id,state=JobState.RUNNING,progress=5,message="Preparing source asset and checking conversion tools")
+        if suffix in IMAGE_EXTENSIONS:
+            root=Path(os.environ.get("NEXORA_TRIPOSR_ROOT","")).expanduser()
+            runner=root/"run.py"
+            if not runner.is_file():
+                raise RuntimeError("TripoSR is not installed on the dedicated GPU worker. Set NEXORA_TRIPOSR_ROOT to the licensed VAST-AI-Research/TripoSR checkout; image-to-3D is not silently replaced with a fake mesh.")
+            jobs.update(job_id,progress=12,message="Reconstructing a 3D mesh from the creator-owned image with TripoSR")
+            output_dir=work/"triposr"
+            output_dir.mkdir(parents=True,exist_ok=True)
+            command=[sys.executable,str(runner),str(source),"--output-dir",str(output_dir),"--bake-texture"]
+            try:
+                result=subprocess.run(command,cwd=str(root),capture_output=True,text=True,timeout=1800,check=True)
+            except (subprocess.TimeoutExpired,subprocess.CalledProcessError) as exc:
+                raise RuntimeError("TripoSR image-to-3D reconstruction failed: "+(getattr(exc,"stderr",None) or str(exc))[-2500:]) from exc
+            generated=[item for item in output_dir.rglob("*") if item.is_file() and item.suffix.lower() in {".glb",".gltf",".obj",".fbx",".ply"}]
+            if not generated: raise RuntimeError("TripoSR finished without producing a supported mesh file.")
+            source_model=next((item for item in generated if item.suffix.lower()==".glb"),generated[0])
+        elif suffix in MODEL_EXTENSIONS:
+            source_model=source
+        else:
+            raise RuntimeError("This source file cannot be converted to a game mesh.")
+        jobs.update(job_id,progress=65,message="Normalizing the mesh, transforms, materials and polygon budget with Blender")
+        if source_model.suffix.lower()==".glb":
+            shutil.copy2(source_model,glb)
+        else:
+            blender=shutil.which("blender")
+            if not blender: raise RuntimeError("Blender is required to convert this mesh format into GLB.")
+            script=Path(__file__).resolve().parents[2]/"blender"/"scripts"/"convert_asset_to_glb.py"
+            result=subprocess.run([blender,"--background","--python",str(script),"--","--input",str(source_model),"--output",str(glb),"--max-faces",str(max_faces)],capture_output=True,text=True,timeout=1200)
+            if result.returncode!=0 or not glb.is_file():
+                raise RuntimeError("Blender GLB conversion failed: "+(result.stderr or result.stdout or "No GLB was generated")[-2500:])
+        jobs.update(job_id,progress=86,message="Validating the converted GLB and registering the derived asset")
+        report=validate_gltf(glb)
+        if not report.get("valid"): raise RuntimeError("Converted GLB failed structural validation: "+"; ".join(report.get("errors",[])))
+        output_name=f"{source.stem[:50]}-nexora-{uuid4().hex[:8]}.glb"
+        destination=(folder/"assets"/output_name).resolve()
+        if folder.joinpath("assets").resolve() not in destination.parents: raise RuntimeError("Derived asset path escaped the project.")
+        shutil.copy2(glb,destination)
+        derived_id=f"{destination.stem[:40]}-{uuid4().hex[:8]}"
+        licence=source_record.get("license") or "Creator confirms rights to the source image/model and derivative"
+        provenance={"source_asset_id":asset_id,"source_filename":source.name,"source_checksum":source_record.get("checksum"),
+                    "conversion_engine":"TripoSR + Blender" if suffix in IMAGE_EXTENSIONS else "Blender",
+                    "target_role":target_role,"is_rigged":False,"requires_rigging_for_character_animation":target_role=="character",
+                    "validation":report,"conversion_job_id":job_id}
+        registered=registry.register(derived_id,destination.name,"character" if target_role=="character" else "environment" if target_role=="environment" else "prop",licence,source="NEXORA Creator Asset Converter",metadata=provenance)
+        jobs.update(job_id,state=JobState.COMPLETED,progress=100,message="A validated GLB game asset is ready for preview and scene placement",error=None)
+        job.result={"asset_id":registered["asset_id"],"filename":destination.name,"mesh_stats":report.get("stats",{}),"target_role":target_role,"rigged":False}
+    except Exception as exc:
+        jobs.update(job_id,state=JobState.FAILED,progress=100,message="Asset conversion failed",error=str(exc))
+\ndef register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
     router=APIRouter()
+
+    @router.get("/api/v1/workspace/assets/conversion-capabilities")
+    def conversion_capabilities(request: Request):
+        if not getattr(request.state,"nexora_user_id",None): raise HTTPException(401,"A verified RevelaCode session is required.")
+        triposr_root=Path(os.environ.get("NEXORA_TRIPOSR_ROOT","")).expanduser()
+        return {"image_to_3d":{"available":(triposr_root/"run.py").is_file(),"engine":"TripoSR","minimum_vram_gb":6,"licence":"MIT; retain upstream licence notice"},
+                "model_conversion":{"available":bool(shutil.which("blender")),"engine":"Blender","formats":["GLB","glTF","OBJ","FBX","PLY"]},
+                "note":"A generated character mesh is static unless a rigging stage is completed. NEXORA does not label a static mesh as animation-ready."}
+
+    @router.post("/api/v1/workspace/projects/{pid}/assets/{asset_id}/convert",status_code=202)
+    def queue_asset_conversion(pid: str,asset_id: str,payload: ConversionRequest,request: Request,background: BackgroundTasks):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found.")
+        owner,_=_assert_project(folder,request,manager)
+        if not payload.confirm_rights: raise HTTPException(403,"Confirm that you own or have permission to make a derivative of this asset.")
+        workflow_path=_workflow_path(folder)
+        if workflow_path.is_file():
+            workflow=_load_workflow(folder); _assert_entitled(manager,owner,workflow.plan)
+        registry=AssetRegistry(folder/"assets")
+        source=next((item for item in registry.list() if item.get("asset_id")==asset_id),None)
+        if not source: raise HTTPException(404,"Source asset not found.")
+        suffix=Path(source["path"]).suffix.lower()
+        if suffix in IMAGE_EXTENSIONS and not (Path(os.environ.get("NEXORA_TRIPOSR_ROOT","")).expanduser()/"run.py").is_file():
+            raise HTTPException(503,"Image-to-3D GPU worker is not configured. Install the MIT-licensed TripoSR worker and set NEXORA_TRIPOSR_ROOT; image files are never passed off as generated meshes.")
+        if suffix not in IMAGE_EXTENSIONS|MODEL_EXTENSIONS: raise HTTPException(415,"Only image or 3D model assets can be converted.")
+        if suffix in MODEL_EXTENSIONS and not shutil.which("blender"): raise HTTPException(503,"Blender is required for model normalization.")
+        job=jobs.add(Job.create(pid))
+        job_root=folder/"workspace_jobs"; job_root.mkdir(exist_ok=True)
+        (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
+        background.add_task(_run_asset_conversion,folder,asset_id,owner,payload.target_role,payload.max_faces,job.id,jobs)
+        return {**job.as_dict(),"state":job.state.value.lower(),"kind":"asset.convert","target_role":payload.target_role}
 
     @router.get("/api/v1/creator-flow/plans")
     def get_creator_plans(request: Request):
