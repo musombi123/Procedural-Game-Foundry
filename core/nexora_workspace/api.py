@@ -211,7 +211,7 @@ def _owner_path(folder: Path) -> Path:
 def _owner_id(request: Request) -> str:
     value = getattr(request.state, "nexora_user_id", None)
     if not value:
-        raise HTTPException(401, "A verified RevelaCode session is required.")
+        raise HTTPException(401, "Sign in to your NEXORA account.")
     return str(value)
 
 def _assert_owner(folder: Path, request: Request) -> str:
