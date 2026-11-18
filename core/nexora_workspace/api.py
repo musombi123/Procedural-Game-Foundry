@@ -9,7 +9,9 @@ import json
 import mimetypes
 import os
 import re
+import math
 import shutil
+import struct
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,7 +21,7 @@ from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from core.asset_registry.gltf_validator import MAX_ASSET_BYTES, validate_gltf
 from core.asset_registry.registry import AssetRegistry
@@ -37,6 +39,127 @@ TEMPLATES = [
     {"id":"sci_fi_outpost","name":"Sci-Fi Outpost","category":"Environments","kind":"outpost","description":"Modular player shelter / mission site","default_scale":1.0},
 ]
 TEMPLATE_BY_ID = {item["id"]: item for item in TEMPLATES}
+
+def _build_template_glb(template_id: str) -> bytes:
+    """Return a small, original, procedural GLB preview for a built-in studio template."""
+    if template_id not in TEMPLATE_BY_ID:
+        raise HTTPException(404, "3D template not found.")
+    parts: list[dict] = []
+
+    def box(center, size, color):
+        cx,cy,cz=center; sx,sy,sz=(value/2 for value in size)
+        faces=[
+            ((0,0,1),[(-sx,-sy,sz),(sx,-sy,sz),(sx,sy,sz),(-sx,sy,sz)]),
+            ((0,0,-1),[(sx,-sy,-sz),(-sx,-sy,-sz),(-sx,sy,-sz),(sx,sy,-sz)]),
+            ((1,0,0),[(sx,-sy,sz),(sx,-sy,-sz),(sx,sy,-sz),(sx,sy,sz)]),
+            ((-1,0,0),[(-sx,-sy,-sz),(-sx,-sy,sz),(-sx,sy,sz),(-sx,sy,-sz)]),
+            ((0,1,0),[(-sx,sy,sz),(sx,sy,sz),(sx,sy,-sz),(-sx,sy,-sz)]),
+            ((0,-1,0),[(-sx,-sy,-sz),(sx,-sy,-sz),(sx,-sy,sz),(-sx,-sy,sz)]),
+        ]
+        vertices=[]; normals=[]; indices=[]
+        for normal,face in faces:
+            base=len(vertices)//3
+            for x,y,z in face:
+                vertices.extend([x+cx,y+cy,z+cz]); normals.extend(normal)
+            indices.extend([base,base+1,base+2,base,base+2,base+3])
+        parts.append({"positions":vertices,"normals":normals,"indices":indices,"color":color})
+
+    def cylinder(center, radius, height, color, segments=24):
+        cx,cy,cz=center; vertices=[]; normals=[]; indices=[]
+        for y,ny in [(-height/2,0),(height/2,0)]:
+            for i in range(segments):
+                angle=2*math.pi*i/segments
+                nx,nz=math.cos(angle),math.sin(angle)
+                vertices.extend([cx+radius*nx,cy+y,cz+radius*nz]); normals.extend([nx,ny,nz])
+        for i in range(segments):
+            n=(i+1)%segments
+            indices.extend([i,n,segments+n,i,segments+n,segments+i])
+        for cap_y, normal_y in [(-height/2,-1),(height/2,1)]:
+            center_index=len(vertices)//3
+            vertices.extend([cx,cy+cap_y,cz]); normals.extend([0,normal_y,0])
+            ring_start=len(vertices)//3
+            for i in range(segments):
+                angle=2*math.pi*i/segments
+                vertices.extend([cx+radius*math.cos(angle),cy+cap_y,cz+radius*math.sin(angle)])
+                normals.extend([0,normal_y,0])
+            for i in range(segments):
+                n=(i+1)%segments
+                if normal_y>0: indices.extend([center_index,ring_start+i,ring_start+n])
+                else: indices.extend([center_index,ring_start+n,ring_start+i])
+        parts.append({"positions":vertices,"normals":normals,"indices":indices,"color":color})
+
+    def sphere(center, radius, color, rings=12, segments=20):
+        cx,cy,cz=center; vertices=[]; normals=[]; indices=[]
+        for r in range(rings+1):
+            phi=math.pi*r/rings
+            for i in range(segments+1):
+                theta=2*math.pi*i/segments
+                nx=math.sin(phi)*math.cos(theta); ny=math.cos(phi); nz=math.sin(phi)*math.sin(theta)
+                vertices.extend([cx+radius*nx,cy+radius*ny,cz+radius*nz]); normals.extend([nx,ny,nz])
+        for r in range(rings):
+            for i in range(segments):
+                a=r*(segments+1)+i; b=a+segments+1
+                indices.extend([a,b,a+1,a+1,b,b+1])
+        parts.append({"positions":vertices,"normals":normals,"indices":indices,"color":color})
+
+    if template_id=="sci_fi_crate":
+        box((0,0,0),(2.2,1.8,2.2),"#667d8e")
+        box((0,0.93,0),(2.28,0.12,2.28),"#d19a4d")
+        for x in (-0.84,0.84):
+            box((x,0,-1.12),(0.16,1.65,0.12),"#e1bc78")
+            box((x,0,1.12),(0.16,1.65,0.12),"#e1bc78")
+    elif template_id=="signal_beacon":
+        cylinder((0,0.9,0),0.5,1.8,"#637d8d")
+        cylinder((0,1.9,0),0.27,0.32,"#c4a45a")
+        sphere((0,2.28,0),0.38,"#49d9ef")
+    elif template_id=="alien_tree":
+        cylinder((0,1.1,0),0.22,2.2,"#795b42")
+        sphere((0,2.65,0),0.9,"#4d967a")
+        sphere((0.55,2.35,0.15),0.55,"#6bad83")
+    elif template_id=="rock_formation":
+        sphere((0,0.65,0),0.92,"#7e858b")
+        sphere((0.65,0.48,0.25),0.55,"#999b98")
+        sphere((-0.48,0.4,-0.2),0.48,"#656f79")
+    else:
+        box((0,1.0,0),(5.4,2.0,4.4),"#596f7c")
+        box((0,2.12,0),(5.8,0.24,4.8),"#c39a5f")
+        box((0,0.5,2.25),(1.8,1.0,0.15),"#2f4858")
+        for x in (-2.1,2.1):
+            box((x,1.6,-1.8),(0.28,3.2,0.28),"#8fb6bc")
+
+    binary=bytearray(); buffer_views=[]; accessors=[]; meshes=[]; nodes=[]; materials=[]
+    for index,part in enumerate(parts):
+        while len(binary)%4: binary.append(0)
+        pos_offset=len(binary); pos_data=struct.pack("<"+"f"*len(part["positions"]),*part["positions"]); binary.extend(pos_data)
+        pos_view=len(buffer_views); buffer_views.append({"buffer":0,"byteOffset":pos_offset,"byteLength":len(pos_data),"target":34962})
+        positions=list(zip(*(iter(part["positions"]),)*3))
+        min_pos=[min(vertex[axis] for vertex in positions) for axis in range(3)]
+        max_pos=[max(vertex[axis] for vertex in positions) for axis in range(3)]
+        pos_accessor=len(accessors); accessors.append({"bufferView":pos_view,"componentType":5126,"count":len(positions),"type":"VEC3","min":min_pos,"max":max_pos})
+        while len(binary)%4: binary.append(0)
+        normal_offset=len(binary); normal_data=struct.pack("<"+"f"*len(part["normals"]),*part["normals"]); binary.extend(normal_data)
+        normal_view=len(buffer_views); buffer_views.append({"buffer":0,"byteOffset":normal_offset,"byteLength":len(normal_data),"target":34962})
+        normal_accessor=len(accessors); accessors.append({"bufferView":normal_view,"componentType":5126,"count":len(part["normals"])//3,"type":"VEC3"})
+        while len(binary)%4: binary.append(0)
+        index_offset=len(binary); index_data=struct.pack("<"+"I"*len(part["indices"]),*part["indices"]); binary.extend(index_data)
+        index_view=len(buffer_views); buffer_views.append({"buffer":0,"byteOffset":index_offset,"byteLength":len(index_data),"target":34963})
+        index_accessor=len(accessors); accessors.append({"bufferView":index_view,"componentType":5125,"count":len(part["indices"]),"type":"SCALAR"})
+        color=part["color"]
+        rgb=[int(color[i:i+2],16)/255 for i in (1,3,5)]
+        materials.append({"name":f"TemplateMaterial{index}","pbrMetallicRoughness":{"baseColorFactor":[*rgb,1],"metallicFactor":0.28,"roughnessFactor":0.58}})
+        meshes.append({"name":f"TemplateMesh{index}","primitives":[{"attributes":{"POSITION":pos_accessor,"NORMAL":normal_accessor},"indices":index_accessor,"material":index}]})
+        nodes.append({"name":f"TemplatePart{index}","mesh":index})
+    document={
+        "asset":{"version":"2.0","generator":"NEXORA Procedural Template Foundry"},
+        "scene":0,"scenes":[{"nodes":list(range(len(nodes)))}],"nodes":nodes,
+        "meshes":meshes,"materials":materials,"accessors":accessors,
+        "bufferViews":buffer_views,"buffers":[{"byteLength":len(binary)}],
+    }
+    json_chunk=json.dumps(document,separators=(",",":")).encode("utf-8")
+    json_chunk+=b" " *((4-len(json_chunk)%4)%4)
+    while len(binary)%4: binary.append(0)
+    total=12+8+len(json_chunk)+8+len(binary)
+    return struct.pack("<III",0x46546C67,2,total)+struct.pack("<II",len(json_chunk),0x4E4F534A)+json_chunk+struct.pack("<II",len(binary),0x004E4942)+bytes(binary)
 EXPORT_TARGETS = {
     "desktop": [("Windows Desktop", "windows", ".exe")],
     "windows": [("Windows Desktop", "windows", ".exe")],
@@ -297,6 +420,12 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
     def list_studio_templates(request: Request):
         _owner_id(request)
         return {"templates": TEMPLATES, "source": "procedural-game-foundry"}
+
+    @router.get("/api/v1/studio/templates/{template_id}/model")
+    def get_studio_template_model(template_id: str, request: Request):
+        _owner_id(request)
+        model = _build_template_glb(template_id)
+        return Response(content=model, media_type="model/gltf-binary", headers={"Content-Disposition": f'inline; filename="{template_id}.glb"'})
 
     @router.get("/api/v1/workspace/projects")
     def list_workspace_projects(request: Request):
