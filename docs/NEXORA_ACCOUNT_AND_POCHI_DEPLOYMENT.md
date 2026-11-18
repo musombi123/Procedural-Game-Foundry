@@ -10,13 +10,19 @@ Configure these on the NEXORA API service (not on the RevelaCode backend):
 | --- | --- |
 | `NEXORA_DATABASE_URL` | Private Neon PostgreSQL connection string. This is required for account sessions, payments and entitlements. |
 | `NEXORA_AUTH_REQUIRED` | Set to `true` in production. |
-| `NEXORA_POCHI_MERCHANT_NUMBER` | Personal Safaricom line enrolled for Pochi la Biashara and receiving NEXORA customer payments. |
+| `NEXORA_POCHI_MERCHANT_NUMBER` | `0742466828` — the NEXORA Pochi la Biashara receiving number supplied by the owner. |
 | `NEXORA_PLAN_PRICES_KES` | JSON object with the owner-approved KES prices for each plan. |
 | `NEXORA_PAYMENT_VERIFICATION_SECRET` | High-entropy secret held only by the NEXORA server/operator. |
 | `NEXORA_CORS_ORIGINS` | Comma-separated allowed frontend origins, including the production RevelaCode origin used to open the NEXORA workspace. |
 | `NEXORA_SESSION_DAYS` | Optional session lifetime (default 30 days, capped at 90). |
 
 Use the Neon connection string in a private Render environment variable. Never put credentials, merchant secrets or the connection string in Vite's `.env.production`, frontend source, a public repository, or the browser.
+
+Set the NEXORA Render environment variable to this exact string value (preserve the leading zero):
+
+`NEXORA_POCHI_MERCHANT_NUMBER=0742466828`
+
+The number is a customer-facing payment destination. Do not put it in Vite frontend source or use it as a secret.
 
 Example price-variable structure (replace every value with approved prices before enabling checkout):
 
