@@ -1,0 +1,522 @@
+"""Authenticated NEXORA workspace API adapters over the Foundry project engine.
+
+The workspace document remains the editor-facing representation; the project engine's
+validated WorldDocument is synchronised before scene generation and export.
+"""
+from __future__ import annotations
+
+import json
+import mimetypes
+import os
+import re
+import shutil
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from threading import RLock
+from typing import Any
+from uuid import uuid4
+from zipfile import ZIP_DEFLATED, ZipFile
+
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
+
+from core.asset_registry.gltf_validator import MAX_ASSET_BYTES, validate_gltf
+from core.asset_registry.registry import AssetRegistry
+from core.build_engine.godot_cli import executable as godot_executable
+from core.game_assembler.godot import assemble_godot_project
+from core.project_engine.models import ProjectCreate, SceneObject, WorldDocument
+from core.validation.validator import validate_project
+
+_WRITE_LOCK = RLock()
+TEMPLATES = [
+    {"id":"sci_fi_crate","name":"Neon Cargo Crate","category":"Props","kind":"crate","description":"Modular industrial cargo container","default_scale":1.0},
+    {"id":"signal_beacon","name":"Signal Beacon","category":"Props","kind":"beacon","description":"Glowing navigation and objective marker","default_scale":1.0},
+    {"id":"alien_tree","name":"Alien Tree","category":"Environments","kind":"tree","description":"Procedural alien vegetation","default_scale":1.0},
+    {"id":"rock_formation","name":"Rock Formation","category":"Environments","kind":"rock","description":"Natural terrain landmark","default_scale":1.0},
+    {"id":"sci_fi_outpost","name":"Sci-Fi Outpost","category":"Environments","kind":"outpost","description":"Modular player shelter / mission site","default_scale":1.0},
+]
+TEMPLATE_BY_ID = {item["id"]: item for item in TEMPLATES}
+EXPORT_TARGETS = {
+    "desktop": [("Windows Desktop", "windows", ".exe")],
+    "windows": [("Windows Desktop", "windows", ".exe")],
+    "linux": [("Linux/X11", "linux", ".x86_64")],
+    "web": [("Web", "web", ".zip")],
+    "android": [("Android", "android", ".apk")],
+    "desktop_android": [("Windows Desktop", "windows", ".exe"), ("Android", "android", ".apk")],
+}
+
+def _utc() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _safe_id(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", str(value))[:64] or uuid4().hex[:12]
+
+def _state_path(folder: Path) -> Path:
+    return folder / "nexora_workspace.json"
+
+def _owner_path(folder: Path) -> Path:
+    return folder / "nexora_owner.json"
+
+def _owner_id(request: Request) -> str:
+    value = getattr(request.state, "nexora_user_id", None)
+    if not value:
+        raise HTTPException(401, "A verified RevelaCode session is required.")
+    return str(value)
+
+def _assert_owner(folder: Path, request: Request) -> str:
+    owner = _owner_id(request)
+    marker = _owner_path(folder)
+    if marker.is_file():
+        try:
+            recorded = json.loads(marker.read_text(encoding="utf-8")).get("user_id")
+        except (OSError, ValueError):
+            raise HTTPException(500, "NEXORA project ownership record is unreadable.")
+        if str(recorded) != owner:
+            raise HTTPException(404, "Project not found.")
+    elif os.environ.get("NEXORA_AUTH_REQUIRED", "").lower() in {"1", "true", "yes"}:
+        raise HTTPException(403, "This legacy project has no verified owner record. Ask the NEXORA administrator to migrate it.")
+    else:
+        marker.write_text(json.dumps({"user_id": owner, "created_at": _utc()}, indent=2), encoding="utf-8")
+    return owner
+
+def _load_state(folder: Path, definition: Any) -> dict:
+    path = _state_path(folder)
+    if path.is_file():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise HTTPException(500, "NEXORA project workspace document is unreadable.")
+    project = definition.project
+    return {
+        "id": definition.id, "name": project.name, "description": project.description,
+        "schemaVersion": 1, "engine": "Godot 4",
+        "settings": {"target":"Desktop","orientation":"Landscape","renderPipeline":"Forward+"},
+        "scene": {"id": uuid4().hex, "name":"Main Scene", "objects":[
+            {"id":"world_root","name":"World","type":"Node3D","position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1],"visible":True},
+            {"id":"player_start","name":"Player Start","type":"Marker3D","position":[0,1,4],"rotation":[0,0,0],"scale":[1,1,1],"visible":True},
+        ]},
+        "assets": [], "gameplay":{"enemies":[],"mechanics":[],"objectives":[]},
+        "timeline":{"duration_seconds":330,"playhead_seconds":0,"tracks":[]},
+        "createdAt": definition.created_at, "updatedAt": definition.created_at,
+        "version": 1,
+    }
+
+def _write_state(folder: Path, state: dict) -> dict:
+    with _WRITE_LOCK:
+        previous = {}
+        path = _state_path(folder)
+        if path.is_file():
+            try: previous = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError): previous = {}
+        state = dict(state)
+        state["id"] = str(state.get("id") or folder.name)
+        state["createdAt"] = previous.get("createdAt") or state.get("createdAt") or _utc()
+        state["updatedAt"] = _utc()
+        state["version"] = int(previous.get("version", state.get("version", 0))) + 1
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        temporary.replace(path)
+        return state
+
+def _row(folder: Path, definition: Any) -> dict:
+    state = _load_state(folder, definition)
+    return {
+        "id": definition.id, "name": state.get("name") or definition.project.name,
+        "description": state.get("description") or "",
+        "document": {key:value for key,value in state.items() if key not in {"version"}},
+        "version": int(state.get("version", 1)),
+        "created_at": state.get("createdAt"), "updated_at": state.get("updatedAt"),
+    }
+
+def _sync_editor_scene_to_world(folder: Path, definition: Any, state: dict) -> WorldDocument:
+    existing = folder / "world.json"
+    if existing.is_file():
+        try: current = WorldDocument.model_validate_json(existing.read_text(encoding="utf-8"))
+        except Exception: current = WorldDocument(seed=definition.project.seed, world=definition.world)
+    else:
+        current = WorldDocument(seed=definition.project.seed, world=definition.world)
+    objects = []
+    for item in (state.get("scene") or {}).get("objects", []):
+        if not isinstance(item, dict) or item.get("visible") is False:
+            continue
+        node_type = str(item.get("type") or "")
+        if node_type in {"Node3D","Marker3D","DirectionalLight3D","Camera3D","WorldEnvironment"}:
+            continue
+        position = item.get("position") if isinstance(item.get("position"), list) else [0,0,0]
+        rotation = item.get("rotation") if isinstance(item.get("rotation"), list) else [0,0,0]
+        scale = item.get("scale") if isinstance(item.get("scale"), list) else [1,1,1]
+        asset_id = item.get("asset_id")
+        template_id = item.get("template_id")
+        template = TEMPLATE_BY_ID.get(str(template_id))
+        kind = "custom" if asset_id else (template or {}).get("kind","crate")
+        try:
+            objects.append(SceneObject(
+                id=_safe_id(item.get("id") or uuid4().hex),
+                name=str(item.get("name") or "Scene Object")[:80],
+                kind=kind,
+                x=max(-512,min(512,float(position[0]))),
+                y=max(-100,min(100,float(position[1]))),
+                z=max(-512,min(512,float(position[2]))),
+                rotation=max(-360,min(360,float(rotation[1] if len(rotation)>1 else rotation[0]))),
+                scale=max(0.25,min(4,float(sum(float(v) for v in scale)/3))),
+                color="#8ba7c7",
+                model_asset_id=str(asset_id) if asset_id else None,
+            ))
+        except (ValueError, TypeError, IndexError):
+            raise HTTPException(422, f"Invalid transform for scene object {item.get('name') or item.get('id')}.")
+    result = WorldDocument(
+        seed=current.seed, world=current.world, objects=objects,
+        terrain_edits=current.terrain_edits, sun_angle=current.sun_angle,
+        fog=current.fog, water_level=current.water_level,
+    )
+    folder.joinpath("world.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    return result
+
+def _asset_rows(folder: Path) -> list[dict]:
+    records = AssetRegistry(folder / "assets").list()
+    output = []
+    for item in records:
+        path = Path(item["path"]).name
+        file_path = (folder / "assets" / path).resolve()
+        if not file_path.is_file():
+            continue
+        output.append({
+            "id": item["asset_id"], "filename": path,
+            "content_type": mimetypes.guess_type(path)[0] or "application/octet-stream",
+            "size": file_path.stat().st_size, "created_at": datetime.fromtimestamp(file_path.stat().st_mtime, timezone.utc).isoformat(),
+            "status": "ready" if item.get("metadata",{}).get("validation",{}).get("valid", True) else "failed",
+            "kind": item.get("kind"), "license": item.get("license"),
+            "sha256": item.get("checksum"), "metadata": item.get("metadata",{}),
+        })
+    return output
+
+def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android: dict | None = None) -> None:
+    sections = []
+    for index, (preset, platform, suffix) in enumerate(targets):
+        out_dir = game.parent / "artifacts" / platform
+        out_dir.mkdir(parents=True, exist_ok=True)
+        extension = "index.html" if platform == "web" else (f"{game.parent.name}{suffix}")
+        export_path = out_dir / extension
+        lines = [
+            f"[preset.{index}]", f'name="{preset}"', f'platform="{platform_label(platform)}"',
+            "runnable=true", "dedicated_server=false", 'custom_features=""',
+            'export_filter="all_resources"', 'include_filter=""', 'exclude_filter=""',
+            f'export_path="{export_path.as_posix()}"', 'encryption_include_filters=""',
+            'encryption_exclude_filters=""', "encrypt_pck=false", "encrypt_directory=false",
+        ]
+        options = {}
+        if platform == "windows":
+            options = {"custom_template/debug":"","custom_template/release":"","debug/export_console_wrapper":"1","binary_format/embed_pck":"true"}
+        elif platform == "linux":
+            options = {"custom_template/debug":"","custom_template/release":"","binary_format/embed_pck":"true"}
+        elif platform == "web":
+            options = {"variant/extensions_support":"false","vram_texture_compression/for_desktop":"true"}
+        elif platform == "android":
+            android = android or {}
+            options = {
+                "custom_template/debug":"", "custom_template/release":"",
+                "package/unique_name":str(android.get("package_id") or "com.nexora.game"),
+                "package/name":str(android.get("app_name") or "NEXORA Game"),
+                "version/code":str(max(1,int(android.get("version_code") or 1))),
+                "version/name":str(android.get("version_name") or "1.0.0"),
+                "architectures/arm64-v8a":"true", "architectures/armeabi-v7a":"false",
+            }
+        sections.extend(lines)
+        if options:
+            sections.append("")
+            sections.append(f"[preset.{index}.options]")
+            sections.extend(f'{key}="{value}"' if not value else f'{key}={value}' for key,value in options.items())
+        sections.append("")
+    (game / "export_presets.cfg").write_text("\n".join(sections), encoding="utf-8")
+
+def platform_label(platform: str) -> str:
+    return {"windows":"Windows Desktop","linux":"Linux/X11","web":"Web","android":"Android"}[platform]
+
+def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, android: dict | None, manager: Any, jobs: Any) -> None:
+    try:
+        jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.RUNNING, progress=5, message="Preparing NEXORA production project")
+        definition = manager.load(project_id)
+        folder = manager.path_for(project_id)
+        state = _load_state(folder, definition)
+        world = _sync_editor_scene_to_world(folder, definition, state)
+        jobs.update(job_id, progress=20, message="Synchronised scene, 3D assets and world data")
+        game = assemble_godot_project(definition, folder / "game", world.model_dump(mode="json"))
+        report = validate_project(folder)
+        if not report.get("valid"):
+            raise RuntimeError("Generated Godot project validation failed: " + "; ".join(report.get("errors",[])))
+        if kind == "scene.generate":
+            jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message="Godot scene generated and structurally validated", error=None)
+            return
+        exe = godot_executable()
+        if not exe:
+            raise RuntimeError("Godot 4 is not installed on this worker. Install Godot 4 and export templates to execute game builds.")
+        if kind == "playtest":
+            jobs.update(job_id, progress=65, message="Running headless Godot gameplay smoke test")
+            result = subprocess.run([exe,"--headless","--path",str(game),"--quit-after","120"],capture_output=True,text=True,timeout=180)
+            if result.returncode != 0:
+                raise RuntimeError("Godot playtest failed: " + (result.stderr or result.stdout)[-3000:])
+            artifact_root = folder / "artifacts" / job_id
+            artifact_root.mkdir(parents=True,exist_ok=True)
+            log_file = artifact_root / "playtest.log"
+            log_file.write_text((result.stdout or "") + "\n" + (result.stderr or ""),encoding="utf-8")
+            _save_artifacts(folder, job_id, [{"id":"playtest-log","filename":log_file.name,"path":str(log_file.relative_to(folder)),"content_type":"text/plain"}])
+            jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message="Headless Godot playtest passed (120 frames). Use the desktop Godot runtime for interactive play.", error=None)
+            return
+        selected = EXPORT_TARGETS.get(target)
+        if not selected:
+            raise RuntimeError(f"Unsupported export target: {target}")
+        _write_export_presets(game, selected, android)
+        output_records = []
+        for index,(preset,platform,suffix) in enumerate(selected):
+            jobs.update(job_id, progress=65 + int(25*index/len(selected)), message=f"Exporting {platform} game with Godot")
+            output = game.parent / "artifacts" / platform
+            output.mkdir(parents=True,exist_ok=True)
+            filename = "index.html" if platform == "web" else f"{definition.project.name.replace(' ','_')}{suffix}"
+            target_file = output / filename
+            result = subprocess.run([exe,"--headless","--path",str(game),"--export-release",preset,str(target_file)],capture_output=True,text=True,timeout=1800)
+            if result.returncode != 0 or not target_file.exists():
+                detail = (result.stderr or result.stdout or "Godot did not produce an export file")[-3500:]
+                raise RuntimeError(f"{platform} export failed. Check that the Godot {platform} export template and platform SDK are installed. {detail}")
+            output_records.append({"id":platform,"filename":filename,"path":str(target_file.relative_to(folder)),"content_type":mimetypes.guess_type(filename)[0] or "application/octet-stream"})
+        _save_artifacts(folder, job_id, output_records)
+        jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message="Platform export completed: " + ", ".join(item["filename"] for item in output_records), error=None)
+    except Exception as exc:
+        jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.FAILED, progress=100, message="NEXORA production job failed", error=str(exc))
+
+def _save_artifacts(folder: Path, job_id: str, items: list[dict]) -> None:
+    root = folder / "workspace_jobs"
+    root.mkdir(exist_ok=True)
+    path = root / f"{job_id}.json"
+    path.write_text(json.dumps({"artifacts":items},indent=2),encoding="utf-8")
+
+def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
+    router = APIRouter()
+
+    @router.get("/api/v1/studio/templates")
+    def list_studio_templates(request: Request):
+        _owner_id(request)
+        return {"templates": TEMPLATES, "source": "procedural-game-foundry"}
+
+    @router.get("/api/v1/workspace/projects")
+    def list_workspace_projects(request: Request):
+        owner = _owner_id(request)
+        rows = []
+        for definition in manager.list():
+            folder = manager.path_for(definition.id)
+            marker = _owner_path(folder)
+            if marker.is_file():
+                try:
+                    if json.loads(marker.read_text(encoding="utf-8")).get("user_id") != owner:
+                        continue
+                except (OSError,ValueError):
+                    continue
+            elif os.environ.get("NEXORA_AUTH_REQUIRED","").lower() in {"1","true","yes"}:
+                continue
+            rows.append(_row(folder,definition))
+        return {"projects":rows}
+
+    @router.post("/api/v1/workspace/projects", status_code=201)
+    def create_workspace_project(payload: dict, request: Request):
+        owner = _owner_id(request)
+        name = str(payload.get("name") or "Untitled Game").strip()[:80]
+        if not name:
+            raise HTTPException(422,"Project name is required.")
+        description = str(payload.get("description") or "")[:2000]
+        document = payload.get("document") if isinstance(payload.get("document"),dict) else {}
+        definition = manager.create(ProjectCreate(name=name,description=description,genre="science-fiction",dimension="3d"))
+        folder = manager.path_for(definition.id)
+        _owner_path(folder).write_text(json.dumps({"user_id":owner,"created_at":_utc()},indent=2),encoding="utf-8")
+        state = {**document,"id":definition.id,"name":name,"description":description,"assets":[],"revisions":[],"version":1,"createdAt":_utc(),"updatedAt":_utc()}
+        _state_path(folder).write_text(json.dumps(state,indent=2),encoding="utf-8")
+        return _row(folder,definition)
+
+    @router.get("/api/v1/workspace/projects/{pid}")
+    def get_workspace_project(pid: str, request: Request):
+        try: folder = manager.path_for(pid); definition = manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        except ValueError as exc: raise HTTPException(400,str(exc))
+        _assert_owner(folder,request)
+        return _row(folder,definition)
+
+    @router.put("/api/v1/workspace/projects/{pid}")
+    def update_workspace_project(pid: str, payload: dict, request: Request):
+        try: folder = manager.path_for(pid); definition = manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        except ValueError as exc: raise HTTPException(400,str(exc))
+        _assert_owner(folder,request)
+        state = _load_state(folder,definition)
+        expected = payload.get("expected_version")
+        if expected is not None and int(expected) != int(state.get("version",1)):
+            raise HTTPException(409,"Project version changed on the server. Reload before saving to avoid overwriting newer edits.")
+        document = payload.get("document")
+        if not isinstance(document,dict): raise HTTPException(422,"A project document is required.")
+        state.update(document)
+        state["name"] = str(payload.get("name") or document.get("name") or state.get("name"))[:80]
+        state["description"] = str(payload.get("description") or document.get("description") or "")[:2000]
+        saved = _write_state(folder,state)
+        _sync_editor_scene_to_world(folder,definition,saved)
+        # Keep the PGF project definition name/description in sync with the workspace document.
+        definition_file = folder / "pgf.json"
+        raw = json.loads(definition_file.read_text(encoding="utf-8"))
+        raw["project"]["name"] = saved["name"]
+        raw["project"]["description"] = saved["description"]
+        definition_file.write_text(json.dumps(raw,indent=2),encoding="utf-8")
+        return _row(folder,manager.load(pid))
+
+    @router.delete("/api/v1/workspace/projects/{pid}")
+    def delete_workspace_project(pid: str, request: Request):
+        try: folder = manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        except ValueError as exc: raise HTTPException(400,str(exc))
+        _assert_owner(folder,request)
+        shutil.rmtree(folder)
+        return {"deleted":True,"id":pid}
+
+    @router.get("/api/v1/workspace/projects/{pid}/assets")
+    def list_workspace_assets(pid: str, request: Request):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        _assert_owner(folder,request)
+        return {"assets":_asset_rows(folder)}
+
+    @router.post("/api/v1/workspace/projects/{pid}/assets", status_code=201)
+    async def upload_workspace_asset(pid: str, request: Request, file: UploadFile=File(...), kind: str=Form("model"), license_name: str=Form("Creator confirms usage rights"), source: str=Form("creator-upload")):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        _assert_owner(folder,request)
+        name = (file.filename or "").replace("\\","/").split("/")[-1]
+        suffix = Path(name).suffix.lower()
+        if not name or suffix not in {".glb",".gltf",".bin",".png",".jpg",".jpeg",".webp",".wav",".ogg",".mp3"}:
+            raise HTTPException(400,"Supported creator assets: GLB, glTF, BIN, PNG, JPG, WebP, WAV, OGG and MP3.")
+        if suffix in {".glb",".gltf"} and not license_name.strip():
+            raise HTTPException(400,"Provide an asset rights declaration before uploading a 3D model.")
+        if len(name)>160: raise HTTPException(400,"Asset filename is too long.")
+        asset_root=folder/"assets"; asset_root.mkdir(parents=True,exist_ok=True)
+        destination=asset_root/name
+        if destination.exists(): raise HTTPException(409,"An asset with this filename already exists. Rename it first.")
+        temporary=destination.with_name(destination.name+".uploading")
+        size=0
+        try:
+            with temporary.open("xb") as out:
+                while chunk:=await file.read(1024*1024):
+                    size+=len(chunk)
+                    if size>MAX_ASSET_BYTES: raise HTTPException(413,"Asset exceeds the 512 MiB limit.")
+                    out.write(chunk)
+            temporary.replace(destination)
+            if suffix in {".glb",".gltf"}:
+                report=validate_gltf(destination)
+                if not report["valid"]:
+                    destination.unlink(missing_ok=True)
+                    raise HTTPException(422,{"message":"3D model validation failed","errors":report["errors"]})
+            else:
+                report={"valid":True,"errors":[],"warnings":[],"stats":{}}
+            asset_id=f"{destination.stem[:40]}-{uuid4().hex[:8]}"
+            asset_kind=kind if kind in {"model","character","environment","prop","animation","dependency"} else ("dependency" if suffix in {".bin",".png",".jpg",".jpeg",".webp"} else "model")
+            record=AssetRegistry(asset_root).register(asset_id,destination.name,asset_kind,license_name or "Creator-uploaded asset",source=source,metadata={"format":suffix[1:],"size_bytes":size,"validation":report})
+            return {"asset":{"id":record["asset_id"],"filename":destination.name,"content_type":mimetypes.guess_type(destination.name)[0] or "application/octet-stream","size":size,"created_at":_utc(),"status":"ready","kind":asset_kind,"sha256":record["checksum"],"metadata":record["metadata"]}}
+        except HTTPException:
+            temporary.unlink(missing_ok=True); raise
+        except Exception as exc:
+            temporary.unlink(missing_ok=True); destination.unlink(missing_ok=True)
+            raise HTTPException(400,f"Asset upload failed: {exc}") from exc
+        finally:
+            await file.close()
+
+    @router.get("/api/v1/workspace/projects/{pid}/assets/{asset_id}/file")
+    def get_workspace_asset_file(pid: str, asset_id: str, request: Request):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        _assert_owner(folder,request)
+        item=next((row for row in AssetRegistry(folder/"assets").list() if row.get("asset_id")==asset_id),None)
+        if not item: raise HTTPException(404,"Asset not found")
+        path=(folder/"assets"/Path(item["path"]).name).resolve()
+        if folder.resolve() not in path.parents or not path.is_file(): raise HTTPException(404,"Asset file not found")
+        return FileResponse(path,media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",filename=path.name)
+
+    @router.delete("/api/v1/workspace/projects/{pid}/assets/{asset_id}")
+    def delete_workspace_asset(pid: str, asset_id: str, request: Request):
+        try: folder=manager.path_for(pid); definition=manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        _assert_owner(folder,request)
+        manifest=AssetRegistry(folder/"assets").list()
+        item=next((row for row in manifest if row.get("asset_id")==asset_id),None)
+        if not item: raise HTTPException(404,"Asset not found")
+        world_path=folder/"world.json"
+        if world_path.is_file() and asset_id in world_path.read_text(encoding="utf-8"):
+            raise HTTPException(409,"This 3D asset is used by the current scene. Remove its scene instance before deleting the asset.")
+        asset_path=(folder/"assets"/Path(item["path"]).name).resolve()
+        asset_path.unlink(missing_ok=True)
+        index=folder/"assets"/"assets.json"
+        index.write_text(json.dumps({"assets":[row for row in manifest if row.get("asset_id")!=asset_id]},indent=2),encoding="utf-8")
+        return {"deleted":True,"asset_id":asset_id}
+
+    @router.post("/api/v1/workspace/projects/{pid}/jobs", status_code=202)
+    def create_workspace_job(pid: str, payload: dict, request: Request, background: BackgroundTasks):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        owner=_assert_owner(folder,request)
+        kind=str(payload.get("kind") or "")
+        target=str(payload.get("target") or "desktop")
+        if kind not in {"scene.generate","build.export","playtest"}: raise HTTPException(400,"Unsupported production job.")
+        if kind=="build.export" and target not in EXPORT_TARGETS: raise HTTPException(400,f"Unsupported export target: {target}")
+        job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid))
+        job_root=folder/"workspace_jobs"; job_root.mkdir(exist_ok=True)
+        (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
+        background.add_task(_run_workspace_job,job.id,pid,kind,target,payload.get("android"),manager,jobs)
+        return {**job.as_dict(),"state":job.state.value.lower(),"artifacts":[]}
+
+    @router.get("/api/v1/workspace/projects/{pid}/jobs")
+    def list_workspace_jobs(pid: str, request: Request):
+        try: folder=manager.path_for(pid); manager.load(pid)
+        except FileNotFoundError: raise HTTPException(404,"Project not found")
+        _assert_owner(folder,request)
+        records=[]
+        with jobs._lock:
+            matching=[job for job in jobs._jobs.values() if job.project_id==pid]
+        for job in sorted(matching,key=lambda item:item.created_at,reverse=True):
+            data=job.as_dict(); data["state"]=job.state.value.lower()
+            artifact_file=folder/"workspace_jobs"/f"{job.id}.json"
+            data["artifacts"]=json.loads(artifact_file.read_text(encoding="utf-8")).get("artifacts",[]) if artifact_file.is_file() else []
+            records.append(data)
+        return {"jobs":records}
+
+    @router.get("/api/v1/workspace/jobs/{job_id}/artifacts")
+    def get_workspace_job_artifacts(job_id: str, request: Request):
+        _owner=_owner_id(request)
+        for definition in manager.list():
+            folder=manager.path_for(definition.id)
+            metadata=folder/"workspace_jobs"/f"{job_id}.owner.json"
+            if not metadata.is_file(): continue
+            try: record=json.loads(metadata.read_text(encoding="utf-8"))
+            except (OSError,ValueError): continue
+            if record.get("user_id")!=_owner: continue
+            artifact_file=folder/"workspace_jobs"/f"{job_id}.json"
+            data=json.loads(artifact_file.read_text(encoding="utf-8")) if artifact_file.is_file() else {"artifacts":[]}
+            artifacts=[]
+            for item in data.get("artifacts",[]):
+                artifacts.append({**item,"download_url":f"/api/v1/workspace/jobs/{job_id}/artifacts/{item['id']}/download"})
+            return {"artifacts":artifacts}
+        raise HTTPException(404,"Production job not found.")
+
+    @router.get("/api/v1/workspace/jobs/{job_id}/artifacts/{artifact_id}/download")
+    def download_workspace_job_artifact(job_id: str, artifact_id: str, request: Request):
+        owner=_owner_id(request)
+        for definition in manager.list():
+            folder=manager.path_for(definition.id)
+            metadata=folder/"workspace_jobs"/f"{job_id}.owner.json"
+            if not metadata.is_file(): continue
+            try: record=json.loads(metadata.read_text(encoding="utf-8"))
+            except (OSError,ValueError): continue
+            if record.get("user_id")!=owner: continue
+            artifact_file=folder/"workspace_jobs"/f"{job_id}.json"
+            if not artifact_file.is_file(): continue
+            data=json.loads(artifact_file.read_text(encoding="utf-8"))
+            item=next((value for value in data.get("artifacts",[]) if value.get("id")==artifact_id),None)
+            if not item: raise HTTPException(404,"Artifact not found.")
+            path=(folder/Path(item["path"])).resolve()
+            if folder.resolve() not in path.parents or not path.is_file(): raise HTTPException(404,"Artifact file not found.")
+            return FileResponse(path,media_type=item.get("content_type") or "application/octet-stream",filename=item["filename"])
+        raise HTTPException(404,"Production job not found.")
+
+    app.include_router(router)
