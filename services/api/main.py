@@ -1,9 +1,14 @@
+import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Request
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,7 +23,77 @@ DATA = Path(os.environ.get("PGF_DATA_DIR", ".pgf-data")).resolve()
 manager = ProjectManager(DATA / "projects")
 jobs = JobRegistry()
 app = FastAPI(title="Procedural Game Foundry API", version="0.2.0", description="Model-free local-first game creation service")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "tauri://localhost"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+_default_auth_required = bool(os.environ.get("RENDER")) or os.environ.get("NEXORA_ENV", "").lower() == "production"
+AUTH_REQUIRED = os.environ.get("NEXORA_AUTH_REQUIRED", "true" if _default_auth_required else "false").lower() in {"1", "true", "yes"}
+REVELACODE_AUTH_URL = os.environ.get("NEXORA_REVELACODE_AUTH_URL") or os.environ.get("REVELACODE_AUTH_URL") or "https://revelacode-backend.onrender.com/api/auth/me"
+_origins = [item.strip() for item in os.environ.get("NEXORA_CORS_ORIGINS", "https://revelacode.co.ke,https://www.revelacode.co.ke,http://localhost:5173,http://127.0.0.1:5173,tauri://localhost").split(",") if item.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","Accept","X-Revela-License"])
+
+def _verify_revelacode_token(authorization: str) -> dict:
+    request = urllib.request.Request(REVELACODE_AUTH_URL, headers={"Authorization": authorization, "Accept": "application/json"}, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401,403}:
+            raise PermissionError("RevelaCode rejected this session.") from exc
+        raise RuntimeError(f"RevelaCode session verification failed (HTTP {exc.code}).") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Could not verify the RevelaCode session. Check the identity service connection.") from exc
+    candidates = [payload]
+    for key in ("data","user","account"):
+        value = payload.get(key) if isinstance(payload,dict) else None
+        if isinstance(value,dict):
+            candidates.append(value)
+            for nested in ("user","account","data"):
+                child=value.get(nested)
+                if isinstance(child,dict): candidates.append(child)
+    profile = next((item for item in candidates if any(item.get(key) for key in ("id","_id","user_id","userId"))),None)
+    if not profile:
+        raise PermissionError("RevelaCode did not return a verified account identity.")
+    user_id = str(profile.get("id") or profile.get("_id") or profile.get("user_id") or profile.get("userId"))
+    return {"id":user_id,"profile":profile}
+
+@app.middleware("http")
+async def nexora_identity_and_project_scope(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith("/api/") or path in {"/api/capabilities"}:
+        return await call_next(request)
+    identity = {"id":"local","profile":{"id":"local"}}
+    if AUTH_REQUIRED:
+        authorization = request.headers.get("authorization","")
+        if not authorization.lower().startswith("bearer "):
+            return JSONResponse({"detail":"A valid RevelaCode login session is required."},status_code=401)
+        try:
+            identity = await asyncio.to_thread(_verify_revelacode_token, authorization)
+        except PermissionError as exc:
+            return JSONResponse({"detail":str(exc)},status_code=401)
+        except RuntimeError as exc:
+            return JSONResponse({"detail":str(exc)},status_code=503)
+    request.state.nexora_user_id = identity["id"]
+    request.state.nexora_user = identity["profile"]
+
+    match = re.match(r"^/api/(?:projects|v1/workspace/projects)/([A-Za-z0-9_-]+)(?:/|$)",path)
+    if match and request.method.upper() != "POST":
+        project_id = match.group(1)
+        try:
+            project_folder = manager.path_for(project_id)
+        except ValueError:
+            return JSONResponse({"detail":"Project not found."},status_code=404)
+        owner_file = project_folder / "nexora_owner.json"
+        if owner_file.is_file():
+            try:
+                recorded = json.loads(owner_file.read_text(encoding="utf-8")).get("user_id")
+            except (OSError,ValueError):
+                return JSONResponse({"detail":"Project ownership record is unreadable."},status_code=500)
+            if str(recorded) != identity["id"]:
+                return JSONResponse({"detail":"Project not found."},status_code=404)
+        elif AUTH_REQUIRED:
+            return JSONResponse({"detail":"This project predates account ownership records. Ask the NEXORA administrator to migrate it."},status_code=403)
+        else:
+            owner_file.write_text(json.dumps({"user_id":identity["id"]},indent=2),encoding="utf-8")
+
+    return await call_next(request)
 
 @app.get("/health")
 def health():
@@ -31,13 +106,29 @@ def capabilities():
             "genres": ["science-fiction", "fantasy", "modern", "survival", "adventure"], "dimensions": ["2d", "3d"], "export_targets": ["windows", "linux", "web", "android"]}
 
 @app.get("/api/projects")
-def list_projects():
-    return [p.model_dump(mode="json") for p in manager.list()]
+def list_projects(request: Request):
+    owner = getattr(request.state,"nexora_user_id","local")
+    result = []
+    for project in manager.list():
+        folder = manager.path_for(project.id)
+        owner_file = folder / "nexora_owner.json"
+        if owner_file.is_file():
+            try:
+                if json.loads(owner_file.read_text(encoding="utf-8")).get("user_id") != owner:
+                    continue
+            except (OSError,ValueError):
+                continue
+        elif AUTH_REQUIRED:
+            continue
+        result.append(project.model_dump(mode="json"))
+    return result
 
 @app.post("/api/projects", status_code=201)
-def create_project(request: ProjectCreate):
+def create_project(request: ProjectCreate, http_request: Request):
     try:
-        return manager.create(request).model_dump(mode="json")
+        created = manager.create(request)
+        (manager.path_for(created.id) / "nexora_owner.json").write_text(json.dumps({"user_id":getattr(http_request.state,"nexora_user_id","local")},indent=2),encoding="utf-8")
+        return created.model_dump(mode="json")
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -514,3 +605,10 @@ register_assembly_routes(app, lambda: manager)
 # Project-scoped Blender/creator asset ingestion with structural glTF validation.
 from core.asset_registry.api import register_asset_routes
 register_asset_routes(app, lambda: manager)
+
+
+# NEXORA Studio Pro integrated workspace adapter. It reuses the Foundry project
+# manager, asset registry, Godot assembler and job service rather than creating
+# a second project database.
+from core.nexora_workspace.api import register_nexora_workspace_routes
+register_nexora_workspace_routes(app, manager, jobs)
