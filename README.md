@@ -3,7 +3,7 @@
 **Nexora Foundry** is the flagship game-creation product of **NEXORA Interactive Studios**. The studio is an independent creative technology venture and is operationally separate from RevelaCode.
 
 
-**Model-free. Procedural. Library-driven. Built to produce playable games.**
+**The flagship game-creation platform from NEXORA Interactive Studios.**
 
 Nexora Foundry is a local-first game creation platform. It converts a versioned Foundry Project Definition (FPD) into a native Godot project using deterministic procedural generators, reusable gameplay components, validation and build tooling. Core generation does not require a neural model or paid AI API.
 
