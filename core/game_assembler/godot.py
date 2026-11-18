@@ -1,5 +1,8 @@
 import json
+import shutil
 from pathlib import Path
+
+from core.asset_registry.registry import AssetRegistry
 
 from core.project_engine.models import ProjectDefinition, WorldDocument
 from generators.terrain.heightfield import generate_heightfield, apply_terrain_edits
@@ -82,6 +85,29 @@ func _spawn_prop(item: Dictionary) -> void:
     root.position = Vector3(float(item.get("x", 0)), float(item.get("y", 0)), float(item.get("z", 0)))
     root.rotation.y = deg_to_rad(float(item.get("rotation", 0)))
     root.scale = Vector3.ONE * float(item.get("scale", 1))
+
+    if kind == "custom":
+        var model_path = str(item.get("model_path", ""))
+        if model_path.is_empty():
+            push_warning("Custom scene object has no validated model path: " + root.name)
+            root.queue_free()
+            return
+        var packed_model = load(model_path) as PackedScene
+        if packed_model == null:
+            push_warning("Godot could not import 3D model: " + model_path)
+            root.queue_free()
+            return
+        var imported_model = packed_model.instantiate()
+        imported_model.name = "ImportedModel"
+        root.add_child(imported_model)
+        var imported_collision = CollisionShape3D.new()
+        var imported_bounds = BoxShape3D.new()
+        imported_bounds.size = Vector3(2, 2, 2)
+        imported_collision.shape = imported_bounds
+        imported_collision.position.y = 1
+        root.add_child(imported_collision)
+        add_child(root)
+        return
 
     var tint = Color.from_string(str(item.get("color", "#8ba7c7")), Color("#8ba7c7"))
     var material = StandardMaterial3D.new()
@@ -274,8 +300,34 @@ def assemble_godot_project(definition: ProjectDefinition, destination: Path, wor
         "sun_angle": document.sun_angle, "fog": document.fog, "water_level": document.water_level,
     }
     scene_objects = []
+    registry_root = destination.parent / "assets"
+    registry = AssetRegistry(registry_root)
+    asset_records = registry.list()
+    asset_by_id = {record.get("asset_id"): record for record in asset_records}
+    game_assets = destination / "assets"
+    if any(item.model_asset_id for item in document.objects):
+        game_assets.mkdir(parents=True, exist_ok=True)
+        # glTF scenes may reference external .bin and texture files. Copy the
+        # complete project asset directory so relative dependencies remain intact.
+        for source in registry_root.rglob("*"):
+            if source.is_file() and source.name != "assets.json" and not source.name.endswith(".uploading"):
+                relative = source.relative_to(registry_root)
+                target = (game_assets / relative).resolve()
+                if game_assets.resolve() not in target.parents:
+                    raise ValueError("Creator asset path escaped the project asset directory")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
     for item in document.objects:
         record = item.model_dump(mode="json")
+        if item.model_asset_id:
+            asset = asset_by_id.get(item.model_asset_id)
+            if not asset:
+                raise ValueError(f"Scene object '{item.name}' references missing asset {item.model_asset_id}")
+            asset_path = Path(asset.get("path", ""))
+            if asset_path.suffix.lower() not in {".glb", ".gltf"}:
+                raise ValueError(f"Scene object '{item.name}' references a non-3D asset")
+            record["kind"] = "custom"
+            record["model_path"] = "res://assets/" + asset_path.as_posix()
         record["y"] = round(float(record["y"]) + _sample_height(heights, settings.width, settings.depth, item.x, item.z), 4)
         scene_objects.append(record)
     (destination / "pgf_world.json").write_text(json.dumps(terrain_data), encoding="utf-8")
