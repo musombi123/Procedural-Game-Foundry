@@ -27,8 +27,14 @@ def cube(name, location, scale, mat, bevel=.15):
 
 def build(spec):
     bpy.ops.object.select_all(action="SELECT"); bpy.ops.object.delete(use_global=False)
-    terrain_mat=material("Terrain",(0.16,.25,.13)); stone=material("Stone",(.32,.34,.36))
-    wood=material("Wood",(.28,.16,.08)); foliage=material("Foliage",(.08,.25,.1))
+    palette=spec.get("palette",{})
+    architecture=spec.get("architecture","sci_fi")
+    terrain_mat=material("Terrain",tuple(palette.get("terrain",(0.16,.25,.13))))
+    stone=material("Stone",tuple(palette.get("stone",(.32,.34,.36))))
+    wood=material("Structure",tuple(palette.get("wood",(.28,.16,.08))))
+    foliage=material("Foliage",tuple(palette.get("foliage",(.08,.25,.1))))
+    road_mat=material("Road",tuple(palette.get("road",(.18,.18,.18))))
+    accent=material("Accent",tuple(palette.get("accent",(.12,.5,.65))),roughness=.45)
     size_x,_,size_z=spec["dimensions"]; segments=spec["terrain"]["segments"]
     verts=[]; faces=[]
     seed=spec["seed"]; rng=random.Random(seed); amp=spec["terrain"]["amplitude"]; freq=spec["terrain"]["frequency"]
@@ -46,10 +52,24 @@ def build(spec):
     for landmark in spec.get("landmarks",[]):
         x,y,z=landmark["position"]; sx,sy,sz=landmark.get("footprint",[8,8,8])
         cube(landmark["id"]+"_foundation",(x,y+0.2,z),(sx,0.4,sz),stone)
-        cube(landmark["id"]+"_core",(x,y+sy/2,z),(sx*.7,sy,sz*.7),stone)
-        # Roof, entry and structural supports are separate meshes, not a single flat card.
-        cube(landmark["id"]+"_roof",(x,y+sy+0.5,z),(sx*1.15,1,sz*1.15),wood)
-        cube(landmark["id"]+"_door",(x,y+1.2,z+sz*.351),(sx*.2,2.4,.18),wood,0)
+        if architecture=="urban":
+            cube(landmark["id"]+"_building",(x,y+sy/2,z),(sx*.82,sy,sz*.82),stone)
+            for floor in range(max(2,int(sy//2))):
+                for side in (-1,1):
+                    cube(landmark["id"]+"_window_"+str(floor)+"_"+str(side),(x+side*sx*.42,y+1+floor*2,z+sz*.415),(sx*.16,1.0,.08),accent,0)
+            cube(landmark["id"]+"_roof",(x,y+sy+0.35,z),(sx*.95,.5,sz*.95),wood)
+        elif architecture=="fantasy":
+            cube(landmark["id"]+"_keep",(x,y+sy*.48,z),(sx*.68,sy*.96,sz*.68),stone)
+            for side in (-1,1):
+                cube(landmark["id"]+"_tower_"+str(side),(x+side*sx*.43,y+sy*.65,z),(sx*.22,sy*1.3,sz*.22),wood)
+                cube(landmark["id"]+"_spire_"+str(side),(x+side*sx*.43,y+sy*1.42,z),(sx*.28,.7,sz*.28),accent)
+        elif architecture=="wilderness":
+            cube(landmark["id"]+"_field_station",(x,y+sy*.45,z),(sx*.76,sy*.9,sz*.68),wood)
+            cube(landmark["id"]+"_roof",(x,y+sy,z),(sx*.94,.6,sz*.86),stone)
+        else:
+            cube(landmark["id"]+"_core",(x,y+sy/2,z),(sx*.7,sy,sz*.7),stone)
+            cube(landmark["id"]+"_roof",(x,y+sy+0.5,z),(sx*1.15,1,sz*1.15),wood)
+        cube(landmark["id"]+"_door",(x,y+1.2,z+sz*.351),(sx*.2,2.4,.18),accent,0)
     # Raised, walkable 3D route strips connect spawn to every landmark.
     for route_index, route in enumerate(spec.get("navigation", {}).get("paths", [])):
         target = next((item for item in spec.get("landmarks", []) if item["id"] == route.get("to")), None)
@@ -58,7 +78,7 @@ def build(spec):
             length = math.sqrt(tx*tx + tz*tz)
             midpoint = (tx/2, .18, tz/2)
             road = cube("Walkable_Path_%02d" % (route_index+1), midpoint,
-                        (spec["navigation"].get("path_width", 4.0), .25, length), stone, .05)
+                        (spec["navigation"].get("path_width", 4.0), .25, length), road_mat, .05)
             road.rotation_euler[1] = math.atan2(tx, tz)
     for prop in spec.get("props",[]):
         x,y,z=prop["position"]; s=prop["scale"]; kind=prop["geometry"]
