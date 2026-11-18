@@ -316,10 +316,11 @@ def _asset_rows(folder: Path) -> list[dict]:
 
 def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android: dict | None = None) -> None:
     sections = []
+    android = android or {}
     for index, (preset, platform, suffix) in enumerate(targets):
         out_dir = game.parent / "artifacts" / platform
         out_dir.mkdir(parents=True, exist_ok=True)
-        extension = "index.html" if platform == "web" else (f"{game.parent.name}{suffix}")
+        extension = "index.html" if platform == "web" else f"{game.parent.name}{suffix}"
         export_path = out_dir / extension
         lines = [
             f"[preset.{index}]", f'name="{preset}"', f'platform="{platform_label(platform)}"',
@@ -336,15 +337,40 @@ def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android
         elif platform == "web":
             options = {"variant/extensions_support":"false","vram_texture_compression/for_desktop":"true"}
         elif platform == "android":
-            android = android or {}
+            package_id = str(android.get("package_id") or "com.nexora.game").strip().lower()
+            if not re.fullmatch(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,}", package_id):
+                raise RuntimeError("Android package ID must use reverse-DNS format, for example com.studio.mygame.")
+            artifact_format = str(android.get("artifact_format") or "apk").lower()
+            build_type = str(android.get("build_type") or "debug").lower()
+            if artifact_format not in {"apk", "aab"}:
+                raise RuntimeError("Android export supports APK or AAB packages.")
+            if artifact_format == "aab" and build_type != "release":
+                raise RuntimeError("Android App Bundles (AAB) must be built as a release package.")
             options = {
                 "custom_template/debug":"", "custom_template/release":"",
-                "package/unique_name":str(android.get("package_id") or "com.nexora.game"),
-                "package/name":str(android.get("app_name") or "NEXORA Game"),
+                "package/unique_name":package_id,
+                "package/name":str(android.get("app_name") or "NEXORA Game")[:48],
                 "version/code":str(max(1,int(android.get("version_code") or 1))),
-                "version/name":str(android.get("version_name") or "1.0.0"),
-                "architectures/arm64-v8a":"true", "architectures/armeabi-v7a":"false",
+                "version/name":str(android.get("version_name") or "1.0.0")[:32],
+                "architectures/arm64-v8a":"true", "architectures/armeabi-v7a":"true",
+                "architectures/x86":"false", "architectures/x86_64":"false",
+                "gradle_build/use_gradle_build":"true" if artifact_format == "aab" else "false",
+                "gradle_build/export_format":"1" if artifact_format == "aab" else "0",
+                "permissions/internet":"true" if android.get("internet_permission", True) else "false",
+                "permissions/camera":"true" if android.get("camera_permission", False) else "false",
+                "permissions/record_audio":"true" if android.get("microphone_permission", False) else "false",
+                "screen/support_small":"true", "screen/support_normal":"true",
+                "screen/support_large":"true", "screen/support_xlarge":"true",
             }
+            icon_id = android.get("icon_asset_id")
+            if icon_id:
+                icon = next((item for item in AssetRegistry(game.parent / "assets").list() if item.get("asset_id") == icon_id), None)
+                if not icon:
+                    raise RuntimeError("The selected Android launcher icon is not in this project's asset library.")
+                icon_path = Path(icon.get("path", ""))
+                if icon_path.suffix.lower() != ".png":
+                    raise RuntimeError("The Android launcher icon must be a PNG image.")
+                options["launcher_icons/main_192x192"] = "res://assets/" + icon_path.as_posix()
         sections.extend(lines)
         if options:
             sections.append("")
@@ -352,6 +378,23 @@ def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android
             sections.extend(f'{key}="{value}"' if not value else f'{key}={value}' for key,value in options.items())
         sections.append("")
     (game / "export_presets.cfg").write_text("\n".join(sections), encoding="utf-8")
+
+
+def _apply_android_orientation(game: Path, android: dict | None) -> None:
+    if not android:
+        return
+    orientation_values = {"landscape":0, "portrait":1, "sensor":6}
+    orientation = str(android.get("orientation") or "landscape").lower()
+    if orientation not in orientation_values:
+        raise RuntimeError("Android orientation must be landscape, portrait or sensor.")
+    project_file = game / "project.godot"
+    text = project_file.read_text(encoding="utf-8")
+    text = re.sub(r"(?m)^display/window/handheld/orientation=.*\n?", "", text)
+    text += f"\ndisplay/window/handheld/orientation={orientation_values[orientation]}\n"
+    if orientation == "portrait":
+        text = re.sub(r"(?m)^window/size/viewport_width=.*$", "window/size/viewport_width=720", text)
+        text = re.sub(r"(?m)^window/size/viewport_height=.*$", "window/size/viewport_height=1280", text)
+    project_file.write_text(text, encoding="utf-8")
 
 def platform_label(platform: str) -> str:
     return {"windows":"Windows Desktop","linux":"Linux/X11","web":"Web","android":"Android"}[platform]
@@ -389,7 +432,34 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
         selected = EXPORT_TARGETS.get(target)
         if not selected:
             raise RuntimeError(f"Unsupported export target: {target}")
+        if target == "android":
+            android = android or {}
+            build_type = str(android.get("build_type") or "debug").lower()
+            artifact_format = str(android.get("artifact_format") or "apk").lower()
+            if build_type not in {"debug","release"}:
+                raise RuntimeError("Android build type must be debug or release.")
+            if artifact_format == "aab" and build_type != "release":
+                raise RuntimeError("AAB output requires a release build.")
+            if build_type == "release":
+                required = {
+                    "GODOT_ANDROID_KEYSTORE_RELEASE_PATH",
+                    "GODOT_ANDROID_KEYSTORE_RELEASE_USER",
+                    "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD",
+                }
+                missing = [key for key in required if not os.environ.get(key)]
+                if missing:
+                    raise RuntimeError("Release signing is not configured on this worker. Missing protected environment variables: " + ", ".join(sorted(missing)))
+                if not Path(os.environ["GODOT_ANDROID_KEYSTORE_RELEASE_PATH"]).is_file():
+                    raise RuntimeError("The configured Android release keystore file is not available on this worker.")
+            if artifact_format not in {"apk","aab"}:
+                raise RuntimeError("Android export supports APK or AAB.")
+            if artifact_format == "aab":
+                selected = [("Android","android",".aab")]
+            else:
+                selected = [("Android","android",".apk")]
         _write_export_presets(game, selected, android)
+        if target == "android":
+            _apply_android_orientation(game, android)
         output_records = []
         for index,(preset,platform,suffix) in enumerate(selected):
             jobs.update(job_id, progress=65 + int(25*index/len(selected)), message=f"Exporting {platform} game with Godot")
@@ -397,7 +467,8 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
             output.mkdir(parents=True,exist_ok=True)
             filename = "index.html" if platform == "web" else f"{definition.project.name.replace(' ','_')}{suffix}"
             target_file = output / filename
-            result = subprocess.run([exe,"--headless","--path",str(game),"--export-release",preset,str(target_file)],capture_output=True,text=True,timeout=1800)
+            export_flag = "--export-debug" if target == "android" and str((android or {}).get("build_type") or "debug").lower() == "debug" else "--export-release"
+            result = subprocess.run([exe,"--headless","--path",str(game),export_flag,preset,str(target_file)],capture_output=True,text=True,timeout=1800)
             if result.returncode != 0 or not target_file.exists():
                 detail = (result.stderr or result.stdout or "Godot did not produce an export file")[-3500:]
                 raise RuntimeError(f"{platform} export failed. Check that the Godot {platform} export template and platform SDK are installed. {detail}")
@@ -693,6 +764,19 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         target=str(payload.get("target") or "desktop")
         if kind not in {"scene.generate","build.export","playtest"}: raise HTTPException(400,"Unsupported production job.")
         if kind=="build.export" and target not in EXPORT_TARGETS: raise HTTPException(400,f"Unsupported export target: {target}")
+        android = payload.get("android") if isinstance(payload.get("android"),dict) else {}
+        if kind=="build.export" and target=="android":
+            package_id=str(android.get("package_id") or "com.nexora.game").strip().lower()
+            if not re.fullmatch(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,}",package_id):
+                raise HTTPException(422,"Android package ID must use reverse-DNS format, e.g. com.studio.mygame.")
+            if str(android.get("artifact_format") or "apk").lower()=="aab" and str(android.get("build_type") or "debug").lower()!="release":
+                raise HTTPException(422,"AAB output requires a release build.")
+            if str(android.get("build_type") or "debug").lower()=="release":
+                required={"GODOT_ANDROID_KEYSTORE_RELEASE_PATH","GODOT_ANDROID_KEYSTORE_RELEASE_USER","GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD"}
+                missing=sorted(key for key in required if not os.environ.get(key))
+                if missing: raise HTTPException(409,"Android release signing is not configured on the NEXORA worker.")
+                if not Path(os.environ["GODOT_ANDROID_KEYSTORE_RELEASE_PATH"]).is_file():
+                    raise HTTPException(409,"The configured Android release keystore file is unavailable on the NEXORA worker.")
         job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid))
         job_root=folder/"workspace_jobs"; job_root.mkdir(exist_ok=True)
         (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
