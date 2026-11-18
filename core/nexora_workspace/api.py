@@ -673,6 +673,8 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         from core.movie_pipeline.ingestion import UploadRejected, store_upload
         from core.movie_pipeline.models import RightsDeclaration, new_pipeline
         from core.movie_pipeline.service import PipelineStore
+        from core.nexora_workspace.creator_workflow import PLANS
+        limits=PLANS[workflow.plan]
         store=PipelineStore(folder)
         try:
             document=store.load()
@@ -694,7 +696,7 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         )
         document.rights=rights
         try:
-            metadata=await store_upload(file,"video",store.folder/"uploads")
+            metadata=await store_upload(file,"video",store.folder/"uploads",max_bytes=limits["max_video_bytes"])
         except UploadRejected as exc:
             raise HTTPException(400,str(exc)) from exc
         video_path=(store.folder/metadata["storage_key"]).resolve()
@@ -707,8 +709,6 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         except Exception as exc:
             video_path.unlink(missing_ok=True)
             raise HTTPException(422,"NEXORA could not verify the movie duration; the source was not accepted.") from exc
-        from core.nexora_workspace.creator_workflow import PLANS
-        limits=PLANS[workflow.plan]
         if duration>limits["video_limit_seconds"]:
             video_path.unlink(missing_ok=True)
             raise HTTPException(413,f'{limits["name"]} supports movie clips up to {limits["video_limit_seconds"]} seconds; this clip is {duration:.1f} seconds.')
