@@ -90,6 +90,11 @@ def build(spec):
         elif kind=="rock":
             bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1,radius=s,location=(x,y+s*.5,z))
             bpy.context.object.name=prop["id"]; bpy.context.object.scale=(1.2,.8,1); bpy.context.object.data.materials.append(stone)
+        elif kind=="beacon":
+            bpy.ops.mesh.primitive_cylinder_add(vertices=12,radius=.22*s,depth=2.8*s,location=(x,y+1.4*s,z))
+            bpy.context.object.name=prop["id"]+"_mast"; bpy.context.object.data.materials.append(stone)
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=16,ring_count=8,radius=.38*s,location=(x,y+3*s,z))
+            bpy.context.object.name=prop["id"]+"_light"; bpy.context.object.data.materials.append(accent)
         else: cube(prop["id"],(x,y+s*.5,z),(s*1.4,s,s),wood)
     bpy.ops.object.light_add(type="SUN", location=(0,30,0)); bpy.context.object.name="World_Sun"
     bpy.context.object.data.energy=spec.get("lighting",{}).get("energy",2)
