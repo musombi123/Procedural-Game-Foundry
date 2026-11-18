@@ -38,13 +38,14 @@ class SceneObject(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     name: str = Field(min_length=1, max_length=80)
-    kind: Literal["outpost","beacon","tree","rock","crate"]
+    kind: Literal["outpost","beacon","tree","rock","crate","custom"]
     x: float = Field(ge=-512, le=512)
     y: float = Field(default=0, ge=-100, le=100)
     z: float = Field(ge=-512, le=512)
     rotation: float = Field(default=0, ge=-360, le=360)
     scale: float = Field(default=1, ge=0.25, le=4)
     color: str = Field(default="#8ba7c7", pattern=r"^#[0-9A-Fa-f]{6}$")
+    model_asset_id: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
 
 class TerrainEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
