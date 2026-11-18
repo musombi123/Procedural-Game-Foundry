@@ -662,8 +662,10 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         _validate_plan(workflow)
         if workflow.mode!="movie":
             raise HTTPException(409,"Switch the Creator Flow mode to Movie before uploading a source clip.")
-        if not workflow.has_adaptation_rights:
-            raise HTTPException(403,"Movie adaptation rights have not been declared. Obtain the required permission or use an original/public-domain source.")
+        if not (workflow.has_adaptation_rights or workflow.copyright_declaration=="public_domain"):
+            raise HTTPException(403,"Movie adaptation rights have not been declared. Obtain permission or select a genuinely public-domain source.")
+        if not (workflow.has_performer_consents or workflow.avoids_performer_likeness):
+            raise HTTPException(403,"Confirm performer/likeness permissions or explicitly choose not to reproduce identifiable performers.")
         if workflow.player_source=="consented_portrait" and not workflow.has_performer_consents:
             raise HTTPException(403,"The selected player identity requires performer/likeness consent.")
         if not shutil.which("ffprobe"):
@@ -726,8 +728,9 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
             "source_video":metadata,
             "pipeline":document.model_dump(mode="json"),
             "rights_review":{
-                "adaptation_rights_declared":workflow.has_adaptation_rights,
+                "adaptation_rights_declared":workflow.has_adaptation_rights or workflow.copyright_declaration=="public_domain",
                 "performer_consent_declared":workflow.has_performer_consents,
+                "avoids_performer_likeness":workflow.avoids_performer_likeness,
                 "original_assets_only":True,
                 "source_music_reused":False,
             },
