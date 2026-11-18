@@ -464,6 +464,7 @@ def _run_environment_build(folder: Path, store: PipelineStore, document: Creator
         landmark["visual_features"]=visual.get("visual_features","")
         landmark["materials"]=visual.get("materials","")
         landmark["id"]=f"episode-{episode_index+1}-location"
+    spec["navigation"]["paths"]=[{"from":"spawn","to":item["id"]} for item in spec["landmarks"]]
     # Pack-specific set dressing and requested variations become actual
     # Blender scene objects, not just workload labels in the editor.
     geometry_sets={
