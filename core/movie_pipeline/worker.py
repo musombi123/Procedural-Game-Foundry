@@ -152,7 +152,7 @@ def _vision_analyze(frames: list[dict[str, Any]], analysis_dir: Path) -> dict[st
     if not response_text:
         return {"status": "failed", "reason": "Visual analysis provider returned no text result."}
     cleaned = response_text.strip().strip(chr(96))
-    cleaned = re.sub(r"^json\\s*", "", cleaned)
+    cleaned = re.sub(r"^json\s*", "", cleaned)
     try:
         result = json.loads(cleaned)
     except json.JSONDecodeError:
