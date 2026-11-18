@@ -515,7 +515,7 @@ def build_procedural_player(pid: str, request: dict):
         if not low <= values[key] <= high: raise HTTPException(400,f"{key} must be between {low} and {high}")
     if values["face_top"] + values["face_height"] > 1 or values["face_center_x"] - values["face_width"]/2 < 0 or values["face_center_x"] + values["face_width"]/2 > 1:
         raise HTTPException(400, "Face crop rectangle must stay inside the uploaded portrait")
-    portrait = (folder / pipeline.source_photo["storage_key"]).resolve()
+    portrait = (store.folder / pipeline.source_photo["storage_key"]).resolve()
     uploads = (store.folder / "uploads").resolve()
     if uploads not in portrait.parents or not portrait.is_file():
         raise HTTPException(400, "Player portrait is missing or outside the upload directory")
