@@ -774,7 +774,7 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         _assert_owner(folder,request)
         name = (file.filename or "").replace("\\","/").split("/")[-1]
         suffix = Path(name).suffix.lower()
-        if not name or suffix not in {".glb",".gltf",".bin",".png",".jpg",".jpeg",".webp",".wav",".ogg",".mp3"}:
+        if not name or suffix not in {".glb",".gltf",".obj",".fbx",".ply",".bin",".png",".jpg",".jpeg",".webp",".wav",".ogg",".mp3"}:
             raise HTTPException(400,"Supported creator assets: GLB, glTF, BIN, PNG, JPG, WebP, WAV, OGG and MP3.")
         if suffix in {".glb",".gltf"} and not license_name.strip():
             raise HTTPException(400,"Provide an asset rights declaration before uploading a 3D model.")
