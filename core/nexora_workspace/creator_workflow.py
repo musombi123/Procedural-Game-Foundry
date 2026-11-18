@@ -141,7 +141,7 @@ class CheckoutRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     plan: Literal["basic","standard","pro","studio"]
     project_id: str | None = None
-    payer_phone: str = Field(min_length=9,max_length=16,pattern=r"^[+0-9]+$")
+    payer_phone: str = Field(min_length=9,max_length=16,pattern=r"^\\+?[0-9]{9,15}$")
 
 class PaymentClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
