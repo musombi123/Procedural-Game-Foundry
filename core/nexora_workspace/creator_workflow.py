@@ -438,20 +438,54 @@ def _run_environment_build(folder: Path, store: PipelineStore, document: Creator
     spec=build_world_spec(story)
     pack=PACKS[document.world_pack]
     # Enrich deterministic geometry with creator-selected pack palette and
-    # approved visual scene cues. Vision supplies briefs, not final 3D art.
+    # approved visual scene cues. Vision supplies briefs, not final art.
     spec["source_pack"]=pack["id"]; spec["visual_style"]=document.visual_style; spec["palette"]=pack["palette"]; spec["architecture"]=pack["architecture"]
     spec["movie_vision_summary"]=vision_summary
     spec["movie_environment_briefs"]=vision.get("environments",[])[:12]
     spec["movie_action_beats"]=vision.get("action_beats",[])[:24]
     spec["episodes"]=[episode.model_dump(mode="json") for episode in document.episodes]
     visual_environments=vision.get("environments",[]) if isinstance(vision.get("environments",[]),list) else []
+    base_landmarks=[dict(item) for item in spec["landmarks"]]
+    dimension=float(spec["dimensions"][0])
+    # One persistent location is generated for every document/movie episode.
+    while len(spec["landmarks"])<len(document.episodes):
+        index=len(spec["landmarks"])
+        source=dict(base_landmarks[index%len(base_landmarks)])
+        angle=(2*math.pi*index)/max(1,len(document.episodes))
+        radius=dimension*0.27
+        source["position"]=[round(math.cos(angle)*radius,2),0.0,round(math.sin(angle)*radius,2)]
+        source["id"]=f"episode-location-{index+1}"
+        spec["landmarks"].append(source)
     for episode_index,episode in enumerate(document.episodes):
-        landmark=spec["landmarks"][episode_index%len(spec["landmarks"])]
+        landmark=spec["landmarks"][episode_index]
         visual=visual_environments[episode_index%len(visual_environments)] if visual_environments else {}
         landmark["name"]=episode.location or visual.get("label") or episode.title
         landmark["visual_features"]=visual.get("visual_features","")
         landmark["materials"]=visual.get("materials","")
         landmark["id"]=f"episode-{episode_index+1}-location"
+    # Pack-specific set dressing and requested variations become actual
+    # Blender scene objects, not just workload labels in the editor.
+    geometry_sets={
+        "sci_fi_survival":["crate","rock","beacon","crate"],
+        "urban_action":["crate","rock","crate","beacon"],
+        "fantasy_frontier":["tree","rock","tree","beacon"],
+        "wilderness_expedition":["tree","rock","tree","crate"],
+    }
+    geometry_set=geometry_sets[document.world_pack]
+    for index,prop in enumerate(spec.get("props",[])):
+        prop["geometry"]=geometry_set[index%len(geometry_set)]
+    for variant in range(1,document.environment_variants):
+        for index in range(max(8,len(spec.get("props",[]))//4)):
+            angle=(2*math.pi*index)/max(1,len(spec.get("props",[])))
+            radius=dimension*(0.18+0.025*variant)
+            spec["props"].append({
+                "id":f"variant-{variant+1}-prop-{index+1}",
+                "geometry":geometry_set[(index+variant)%len(geometry_set)],
+                "position":[round(math.cos(angle)*radius,2),0.0,round(math.sin(angle)*radius,2)],
+                "scale":round(0.7+0.1*((index+variant)%5),2),"collision":True,
+            })
+    dimension=max(dimension,48+len(document.episodes)*4+document.environment_variants*6)
+    spec["dimensions"]=[dimension,48,dimension]
     output_dir=store.folder/"environment"; output_dir.mkdir(parents=True,exist_ok=True)
     spec_path=output_dir/"world-spec.json"; spec_path.write_text(json.dumps(spec,indent=2),encoding="utf-8")
     blender=shutil.which("blender")
