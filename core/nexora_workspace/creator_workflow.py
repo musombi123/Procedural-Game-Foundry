@@ -700,7 +700,83 @@ def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_rol
         jobs.update(job_id,state=JobState.COMPLETED,progress=100,message="A validated GLB game asset is ready for preview and scene placement",error=None)
     except Exception as exc:
         jobs.update(job_id,state=JobState.FAILED,progress=100,message="Asset conversion failed",error=str(exc))
-\ndef register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
+\n
+def _execute_creator_step(job_id: str, project_id: str, owner_id: str, step: str, manager: Any, jobs: Any) -> None:
+    from core.orchestration.jobs import JobState
+    try:
+        folder=manager.path_for(project_id)
+        owner_file=folder/"nexora_owner.json"
+        if not owner_file.is_file() or json.loads(owner_file.read_text(encoding="utf-8")).get("user_id")!=owner_id:
+            raise RuntimeError("NEXORA project ownership changed before this job started.")
+        workflow=_load_workflow(folder)
+        _assert_entitled(manager,owner_id,workflow.plan)
+        _validate_plan(workflow)
+        store=_pipeline(folder)
+        jobs.update(job_id,state=JobState.RUNNING,progress=5,message="Starting Creator Flow stage: "+step)
+        if step=="player":
+            _run_player_build(folder,store,workflow,workflow.player_source=="consented_portrait")
+            message="Default / player avatar created; creator review is required."
+        elif step=="environment":
+            if workflow.mode=="movie":
+                pipeline=store.load()
+                analysis=next(item for item in pipeline.stages if item.stage==StageId.ANALYSIS)
+                if analysis.state!=StageState.APPROVED:
+                    raise RuntimeError("Review and approve extracted movie scenes before environment generation.")
+            _run_environment_build(folder,store,workflow,manager)
+            message="3D environment built; review geometry, locations and navigation."
+        elif step=="actors_props":
+            result=_run_actor_prop_build(folder,store,workflow)
+            message=f"Generated {result['actor_count']} enemies and {result['vehicle_count']} vehicles plus props; review before approval."
+        elif step=="audio":
+            _run_audio_build(folder,store)
+            message="Original procedural audio and soundtrack created; listen and approve."
+        elif step=="gameplay":
+            result=_build_gameplay(folder,store,workflow)
+            message=f"Compiled {result['mission_count']} episode missions; playtest before approval."
+        elif step=="assembly":
+            pipeline=store.load()
+            records={item.stage:item for item in pipeline.stages}
+            required=[StageId.ANALYSIS,StageId.PLAYER,StageId.ENVIRONMENT,StageId.ACTORS_PROPS,StageId.AUDIO,StageId.GAMEPLAY]
+            if any(records[stage].state!=StageState.APPROVED for stage in required):
+                raise RuntimeError("Approve analysis, player, environment, enemies/vehicles, audio and gameplay before final assembly.")
+            exe=godot_executable()
+            if not exe: raise RuntimeError("Godot 4 is not installed on the NEXORA production worker.")
+            stage_record=records[StageId.ASSEMBLY]
+            if stage_record.state!=StageState.READY: raise RuntimeError("Assembly stage is not READY.")
+            from core.movie_pipeline.assembly import assemble_movie_game
+            stage_record.state=StageState.RUNNING
+            stage_record.summary="Importing, assembling and validating the episode-driven game in Godot"
+            store.save(pipeline)
+            try:
+                report=assemble_movie_game(folder,pipeline,exe)
+                store.mark_review(StageId.ASSEMBLY,{"project":"game/project.godot","manifest":"game/assembly-manifest.json","validation":report.get("validation"),"requires_creator_review":True},"Godot assembled the episode-driven game. Creator playtesting and platform export are still required.")
+            except Exception as exc:
+                current=store.load()
+                rec=next(item for item in current.stages if item.stage==StageId.ASSEMBLY)
+                rec.state=StageState.FAILED
+                rec.error=str(exc)[-3000:]
+                rec.summary="Godot assembly failed"
+                store.save(current)
+                raise
+            message="Godot project assembled and validated; inspect and download the game for creator playtesting."
+        else:
+            raise RuntimeError("Unknown Creator Flow job: "+step)
+        jobs.update(job_id,state=JobState.COMPLETED,progress=100,message=message,error=None)
+    except Exception as exc:
+        jobs.update(job_id,state=JobState.FAILED,progress=100,message="Creator Flow stage failed: "+step,error=str(getattr(exc,"detail",None) or exc))
+
+def _queue_creator_step(pid: str, folder: Path, owner_id: str, step: str, background: BackgroundTasks, manager: Any, jobs: Any) -> dict:
+    workflow=_load_workflow(folder)
+    _assert_entitled(manager,owner_id,workflow.plan)
+    _validate_plan(workflow)
+    job=jobs.add(Job.create(pid))
+    job_root=folder/"workspace_jobs"
+    job_root.mkdir(exist_ok=True)
+    (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner_id},indent=2),encoding="utf-8")
+    background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs)
+    return {**job.as_dict(),"state":job.state.value.lower(),"kind":"creator."+step,"message":"Queued Creator Flow stage: "+step}
+
+def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
     router=APIRouter()
 
     @router.get("/api/v1/workspace/assets/conversion-capabilities")
