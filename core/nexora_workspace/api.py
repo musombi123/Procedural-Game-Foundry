@@ -37,6 +37,9 @@ TEMPLATES = [
     {"id":"alien_tree","name":"Alien Tree","category":"Environments","kind":"tree","description":"Procedural alien vegetation","default_scale":1.0},
     {"id":"rock_formation","name":"Rock Formation","category":"Environments","kind":"rock","description":"Natural terrain landmark","default_scale":1.0},
     {"id":"sci_fi_outpost","name":"Sci-Fi Outpost","category":"Environments","kind":"outpost","description":"Modular player shelter / mission site","default_scale":1.0},
+    {"id":"tactical_android","name":"Tactical Android","category":"Characters","kind":"character","description":"Original low-poly humanoid character blockout","default_scale":1.0},
+    {"id":"scout_drone","name":"Scout Drone","category":"Props","kind":"drone","description":"Compact reconnaissance drone","default_scale":1.0},
+    {"id":"heavy_door","name":"Sci-Fi Heavy Door","category":"Props","kind":"door","description":"Industrial sliding bulkhead door","default_scale":1.0},
 ]
 TEMPLATE_BY_ID = {item["id"]: item for item in TEMPLATES}
 
@@ -120,6 +123,30 @@ def _build_template_glb(template_id: str) -> bytes:
         sphere((0,0.65,0),0.92,"#7e858b")
         sphere((0.65,0.48,0.25),0.55,"#999b98")
         sphere((-0.48,0.4,-0.2),0.48,"#656f79")
+    elif template_id=="tactical_android":
+        # Static original character blockout; not a rigged or animated character.
+        box((0,1.45,0),(0.82,0.92,0.42),"#b58a43")
+        sphere((0,2.2,0),0.38,"#a9b7bd")
+        box((0,2.2,0.34),(0.42,0.09,0.08),"#45d8ed")
+        for x in (-0.58,0.58):
+            cylinder((x,1.35,0),0.14,0.92,"#667b8a")
+            sphere((x,0.91,0),0.16,"#d2a45c")
+        for x in (-0.23,0.23):
+            box((x,0.48,0),(0.2,0.78,0.24),"#596f7c")
+            box((x,0.08,0.12),(0.3,0.16,0.48),"#b58a43")
+    elif template_id=="scout_drone":
+        box((0,0,0),(1.0,0.28,0.72),"#647d8c")
+        sphere((0,0.12,0.42),0.16,"#48d9ee")
+        for x in (-0.72,0.72):
+            for z in (-0.58,0.58):
+                box((x*0.65,0,z*0.65),(0.7,0.1,0.1),"#b78e4c")
+                cylinder((x,0.08,z),0.24,0.08,"#a9b7bd")
+    elif template_id=="heavy_door":
+        box((0,1.5,0),(2.8,3.0,0.28),"#536b7a")
+        box((0,1.5,0.17),(2.45,2.68,0.08),"#243b49")
+        for x in (-1.05,1.05):
+            box((x,1.5,0.24),(0.12,2.35,0.1),"#c39b55")
+        box((0,1.5,0.28),(0.16,0.35,0.1),"#49d9ef")
     else:
         box((0,1.0,0),(5.4,2.0,4.4),"#596f7c")
         box((0,2.12,0),(5.8,0.24,4.8),"#c39a5f")
