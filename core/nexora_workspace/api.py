@@ -354,14 +354,15 @@ def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android
                 "version/name":str(android.get("version_name") or "1.0.0")[:32],
                 "architectures/arm64-v8a":"true", "architectures/armeabi-v7a":"true",
                 "architectures/x86":"false", "architectures/x86_64":"false",
-                "gradle_build/use_gradle_build":"true" if artifact_format == "aab" else "false",
-                "gradle_build/export_format":"1" if artifact_format == "aab" else "0",
-                "permissions/internet":"true" if android.get("internet_permission", True) else "false",
-                "permissions/camera":"true" if android.get("camera_permission", False) else "false",
-                "permissions/record_audio":"true" if android.get("microphone_permission", False) else "false",
-                "screen/support_small":"true", "screen/support_normal":"true",
-                "screen/support_large":"true", "screen/support_xlarge":"true",
+                "gradle_build/use_gradle_build": artifact_format == "aab",
+                "permissions/internet": bool(android.get("internet_permission", True)),
+                "permissions/camera": bool(android.get("camera_permission", False)),
+                "permissions/record_audio": bool(android.get("microphone_permission", False)),
+                "screen/support_small": True, "screen/support_normal": True,
+                "screen/support_large": True, "screen/support_xlarge": True,
             }
+            if artifact_format == "aab":
+                options["gradle_build/export_format"] = 1
             icon_id = android.get("icon_asset_id")
             if icon_id:
                 icon = next((item for item in AssetRegistry(game.parent / "assets").list() if item.get("asset_id") == icon_id), None)
@@ -375,7 +376,14 @@ def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android
         if options:
             sections.append("")
             sections.append(f"[preset.{index}.options]")
-            sections.extend(f'{key}="{value}"' if not value else f'{key}={value}' for key,value in options.items())
+            for key, value in options.items():
+                if isinstance(value, bool):
+                    serialized = "true" if value else "false"
+                elif isinstance(value, int):
+                    serialized = str(value)
+                else:
+                    serialized = json.dumps(str(value))
+                sections.append(f"{key}={serialized}")
         sections.append("")
     (game / "export_presets.cfg").write_text("\n".join(sections), encoding="utf-8")
 
@@ -389,11 +397,16 @@ def _apply_android_orientation(game: Path, android: dict | None) -> None:
         raise RuntimeError("Android orientation must be landscape, portrait or sensor.")
     project_file = game / "project.godot"
     text = project_file.read_text(encoding="utf-8")
-    text = re.sub(r"(?m)^display/window/handheld/orientation=.*\n?", "", text)
-    text += f"\ndisplay/window/handheld/orientation={orientation_values[orientation]}\n"
+    text = re.sub(r"(?m)^window/handheld/orientation=.*\\n?", "", text)
     if orientation == "portrait":
         text = re.sub(r"(?m)^window/size/viewport_width=.*$", "window/size/viewport_width=720", text)
         text = re.sub(r"(?m)^window/size/viewport_height=.*$", "window/size/viewport_height=1280", text)
+    display_section = re.search(r"(?m)^\\[display\\]\\s*$", text)
+    if display_section:
+        insert_at = display_section.end()
+        text = text[:insert_at] + f"\\nwindow/handheld/orientation={orientation_values[orientation]}" + text[insert_at:]
+    else:
+        text += f"\\n[display]\\nwindow/handheld/orientation={orientation_values[orientation]}\\n"
     project_file.write_text(text, encoding="utf-8")
 
 def platform_label(platform: str) -> str:
