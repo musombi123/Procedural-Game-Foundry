@@ -25,6 +25,7 @@ jobs = JobRegistry()
 app = FastAPI(title="Procedural Game Foundry API", version="0.2.0", description="Model-free local-first game creation service")
 _default_auth_required = bool(os.environ.get("RENDER")) or os.environ.get("NEXORA_ENV", "").lower() == "production"
 AUTH_REQUIRED = os.environ.get("NEXORA_AUTH_REQUIRED", "true" if _default_auth_required else "false").lower() in {"1", "true", "yes"}
+os.environ["NEXORA_AUTH_REQUIRED"] = "true" if AUTH_REQUIRED else "false"
 REVELACODE_AUTH_URL = os.environ.get("NEXORA_REVELACODE_AUTH_URL") or os.environ.get("REVELACODE_AUTH_URL") or "https://revelacode-backend.onrender.com/api/auth/me"
 _origins = [item.strip() for item in os.environ.get("NEXORA_CORS_ORIGINS", "https://revelacode.co.ke,https://www.revelacode.co.ke,http://localhost:5173,http://127.0.0.1:5173,tauri://localhost").split(",") if item.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","Accept","X-Revela-License"])
@@ -57,7 +58,7 @@ def _verify_revelacode_token(authorization: str) -> dict:
 @app.middleware("http")
 async def nexora_identity_and_project_scope(request: Request, call_next):
     path = request.url.path
-    if not path.startswith("/api/") or path in {"/api/capabilities"}:
+    if request.method.upper() == "OPTIONS" or not path.startswith("/api/") or path in {"/api/capabilities"}:
         return await call_next(request)
     identity = {"id":"local","profile":{"id":"local"}}
     if AUTH_REQUIRED:
@@ -74,7 +75,8 @@ async def nexora_identity_and_project_scope(request: Request, call_next):
     request.state.nexora_user = identity["profile"]
 
     match = re.match(r"^/api/(?:projects|v1/workspace/projects)/([A-Za-z0-9_-]+)(?:/|$)",path)
-    if match and request.method.upper() != "POST":
+    is_project_collection_create = path in {"/api/projects", "/api/v1/workspace/projects"} and request.method.upper() == "POST"
+    if match and not is_project_collection_create:
         project_id = match.group(1)
         try:
             project_folder = manager.path_for(project_id)
