@@ -27,7 +27,7 @@ class PropSpec(BaseModel):
 
 class ActorsPropsRequest(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    actors: list[ActorSpec] = Field(default_factory=list,max_length=12)
+    actors: list[ActorSpec] = Field(default_factory=list,max_length=24)
     props: list[PropSpec] = Field(default_factory=list,max_length=40)
 
     @field_validator("actors","props")
