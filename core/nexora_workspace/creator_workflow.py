@@ -422,14 +422,34 @@ def _run_environment_build(folder: Path, store: PipelineStore, document: Creator
     story=json.loads(story_path.read_text(encoding="utf-8"))
     story["world_scale"]=document.world_scale
     story["setting"]=document.synopsis or document.title
+    vision={}
+    analysis_files=sorted((store.folder/"analysis").glob("revision-*/analysis.json")) if (store.folder/"analysis").exists() else []
+    if analysis_files:
+        try:
+            analysis_doc=json.loads(analysis_files[-1].read_text(encoding="utf-8"))
+            candidate=analysis_doc.get("vision_analysis",{})
+            if candidate.get("status")=="complete": vision=candidate
+        except (OSError,ValueError):
+            vision={}
+    vision_summary=str(vision.get("environment_summary") or vision.get("movie_summary") or "")
+    if vision_summary:
+        story["setting"]=str(story.get("setting") or "")+" | Visual analysis: "+vision_summary
     spec=build_world_spec(story)
     pack=PACKS[document.world_pack]
-    # Enrich the base world with creator-selected pack-specific landmarks/prop categories.
+    # Enrich deterministic geometry with creator-selected pack palette and
+    # approved visual scene cues. Vision supplies briefs, not final 3D art.
     spec["source_pack"]=pack["id"]; spec["visual_style"]=document.visual_style; spec["palette"]=pack["palette"]; spec["architecture"]=pack["architecture"]
+    spec["movie_vision_summary"]=vision_summary
+    spec["movie_environment_briefs"]=vision.get("environments",[])[:12]
+    spec["movie_action_beats"]=vision.get("action_beats",[])[:24]
     spec["episodes"]=[episode.model_dump(mode="json") for episode in document.episodes]
+    visual_environments=vision.get("environments",[]) if isinstance(vision.get("environments",[]),list) else []
     for episode_index,episode in enumerate(document.episodes):
         landmark=spec["landmarks"][episode_index%len(spec["landmarks"])]
-        landmark["name"]=episode.location or episode.title
+        visual=visual_environments[episode_index%len(visual_environments)] if visual_environments else {}
+        landmark["name"]=episode.location or visual.get("label") or episode.title
+        landmark["visual_features"]=visual.get("visual_features","")
+        landmark["materials"]=visual.get("materials","")
         landmark["id"]=f"episode-{episode_index+1}-location"
     output_dir=store.folder/"environment"; output_dir.mkdir(parents=True,exist_ok=True)
     spec_path=output_dir/"world-spec.json"; spec_path.write_text(json.dumps(spec,indent=2),encoding="utf-8")
@@ -449,15 +469,31 @@ def _run_environment_build(folder: Path, store: PipelineStore, document: Creator
     reviewed=store.mark_review(StageId.ENVIRONMENT,{"glb_scene":str(output.relative_to(folder)),"geometry_spec":str(spec_path.relative_to(folder)),"landmarks":len(spec["landmarks"]),"props":len(spec["props"]),"dimensions":spec["dimensions"],"glb_bytes":output.stat().st_size,"pack":pack["id"],"episode_locations":len(document.episodes),"requires_creator_review":True},"Environment and set dressing generated; review each episode location, scale and navigation before approval.")
     return {"generated":True,"stage":next(item.model_dump(mode="json") for item in reviewed.stages if item.stage==StageId.ENVIRONMENT),"glb_scene":str(output.relative_to(folder)),"glb_bytes":output.stat().st_size,"dimensions":spec["dimensions"],"landmark_count":len(spec["landmarks"]),"prop_count":len(spec["props"]),"pack":pack["id"]}
 
-def _default_actor_prop_spec(document: CreatorWorkflowDocument) -> dict:
+def _latest_vision(folder: Path) -> dict:
+    files=sorted((folder/"analysis").glob("revision-*/analysis.json")) if (folder/"analysis").exists() else []
+    if not files: return {}
+    try:
+        analysis=json.loads(files[-1].read_text(encoding="utf-8"))
+        vision=analysis.get("vision_analysis",{})
+        return vision if vision.get("status")=="complete" else {}
+    except (OSError,ValueError):
+        return {}
+
+def _default_actor_prop_spec(document: CreatorWorkflowDocument, vision: dict | None = None) -> dict:
     actors=[]; props=[]
     enemy_types=["npc","robot","animal"]
+    detected=(vision or {}).get("enemy_archetypes",[])
     for i in range(document.enemies):
-        actors.append({"id":f"enemy-{i+1}","name":f"Enemy {i+1}","kind":enemy_types[i%len(enemy_types)],"behavior":"patrol; detect player; pursue and attack when in range","scale":1.0,"position":[float((i%4)*4-6),0.0,float(-8-(i//4)*5)]})
-    # Add each requested car plus essential interaction/environment objects.
+        source=detected[i%len(detected)] if detected else {}
+        label=str(source.get("label") or source.get("role") or f"Enemy {i+1}")[:80]
+        behavior=str(source.get("behavior_hint") or "patrol; detect player; pursue and attack when in range")[:500]
+        actors.append({"id":f"enemy-{i+1}","name":label,"kind":enemy_types[i%len(enemy_types)],"behavior":behavior,"scale":1.0,"position":[float((i%4)*4-6),0.0,float(-8-(i//4)*5)]})
     vehicle_names={"sci_fi_survival":"Scout Buggy","urban_action":"Street Vehicle","fantasy_frontier":"Pack Beast","wilderness_expedition":"Expedition Rover"}
+    detected_vehicles=(vision or {}).get("vehicles",[])
     for i in range(document.vehicles):
-        props.append({"id":f"vehicle-{i+1}","name":vehicle_names[document.world_pack] if i==0 else f"Vehicle {i+1}","kind":"vehicle","interaction":"enter; drive; exit","scale":1.2,"position":[float((i%3)*6-6),0.0,float(8+(i//3)*7)]})
+        source=detected_vehicles[i%len(detected_vehicles)] if detected_vehicles else {}
+        name=str(source.get("label") or source.get("type") or (vehicle_names[document.world_pack] if i==0 else f"Vehicle {i+1}"))[:80]
+        props.append({"id":f"vehicle-{i+1}","name":name,"kind":"vehicle","interaction":"enter; drive; exit","scale":1.2,"position":[float((i%3)*6-6),0.0,float(8+(i//3)*7)]})
     props.extend([
         {"id":"mission-container","name":"Mission Supply Cache","kind":"container","interaction":"open; collect supplies","scale":1.1,"position":[4.0,0.0,2.0]},
         {"id":"objective-tool","name":"Objective Device","kind":"tool","interaction":"activate; advance mission","scale":1.0,"position":[-4.0,0.0,1.0]},
@@ -468,7 +504,7 @@ def _run_actor_prop_build(folder: Path, store: PipelineStore, document: CreatorW
     from core.movie_pipeline.actors_api import ActorsPropsRequest
     pipeline=store.load(); stage=next(item for item in pipeline.stages if item.stage==StageId.ACTORS_PROPS)
     if stage.state!=StageState.READY: raise HTTPException(409,"Actors and props stage is not READY. Approve the generated environment first.")
-    spec=_default_actor_prop_spec(document)
+    spec=_default_actor_prop_spec(document,_latest_vision(folder))
     request_model=ActorsPropsRequest.model_validate(spec)
     blender=shutil.which("blender")
     if not blender: raise HTTPException(503,"Blender is required for enemy, vehicle and prop generation.")
