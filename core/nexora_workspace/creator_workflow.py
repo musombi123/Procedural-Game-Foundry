@@ -126,6 +126,7 @@ class CreatorWorkflowDocument(BaseModel):
     has_adaptation_rights: bool = False
     has_music_rights: bool = False
     has_performer_consents: bool = False
+    avoids_performer_likeness: bool = False
     created_at: str = Field(default_factory=lambda:datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda:datetime.now(timezone.utc).isoformat())
 
@@ -797,7 +798,7 @@ def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_rol
         workflow=_load_workflow(folder)
         _assert_entitled(manager,user,workflow.plan)
         _validate_plan(workflow)
-        if workflow.mode=="movie" and not (workflow.has_adaptation_rights and workflow.has_performer_consents):
+        if workflow.mode=="movie" and not ((workflow.has_adaptation_rights or workflow.copyright_declaration=="public_domain") and (workflow.has_performer_consents or workflow.avoids_performer_likeness)):
             raise HTTPException(403,"Movie-to-game adaptation requires declared adaptation rights and performer/likeness permissions. Choose original/public-domain input or obtain the necessary licences.")
         store,pipeline=_ensure_pipeline(folder,pid,workflow.mode)
         story={"schema_version":"1.0","source":"creator","mode":workflow.mode,"title":workflow.title,"premise":workflow.synopsis,"player_role":"Player","setting":workflow.synopsis or workflow.title,"tone":workflow.visual_style,"instructions":"Episode plan is creator-authored; preserve its order and objectives.","ending":"","mission_count":len(workflow.episodes),"world_scale":workflow.world_scale,"player":{"identity_source":"synthetic_default","role":"Player","is_player_avatar":True},"missions":[{"id":episode.id,"title":episode.title,"objective":episode.player_goal or episode.synopsis} for episode in workflow.episodes],"episodes":[episode.model_dump(mode="json") for episode in workflow.episodes],"approval_required":True}
