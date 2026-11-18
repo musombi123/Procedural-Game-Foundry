@@ -198,6 +198,21 @@ def _validate_plan(document: CreatorWorkflowDocument) -> dict[str, Any]:
 def _database_url() -> str:
     return os.environ.get("NEXORA_DATABASE_URL", "").strip()
 
+def _pochi_merchant_number() -> str:
+    """NEXORA's configured Pochi la Biashara collection destination.
+
+    The merchant mobile number is public checkout information, not a secret.
+    Keep it server-configurable so production can override it without a code
+    change; never put Daraja credentials or payment verification secrets here.
+    """
+    raw = os.environ.get("NEXORA_POCHI_MERCHANT_NUMBER", "0742466828").strip()
+    digits = re.sub(r"[^0-9]", "", raw)
+    if digits.startswith("0") and len(digits) == 10:
+        return digits
+    if digits.startswith("254") and len(digits) == 12:
+        return "0" + digits[3:]
+    return ""
+
 def _connect():
     url=_database_url()
     if not url: return None
@@ -819,7 +834,7 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         user=getattr(request.state,"nexora_user_id",None)
         if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
         prices=_price_map()
-        return {"plans":[{**plan,"price_kes":prices.get(plan_id),"price_configured":plan_id in prices} for plan_id,plan in PLANS.items()],"payment":{"method":"Pochi la Biashara","merchant_number_configured":bool(os.environ.get("NEXORA_POCHI_MERCHANT_NUMBER")),"automatic_confirmation":False,"reason":"Pochi incoming merchant payments are reconciled against merchant records. This deployment uses a receipt claim and verified reconciliation, not a fake STK confirmation."},"active_entitlement":_get_entitlement(manager,user)}
+        return {"plans":[{**plan,"price_kes":prices.get(plan_id),"price_configured":plan_id in prices} for plan_id,plan in PLANS.items()],"payment":{"method":"Pochi la Biashara","merchant_number_configured":bool(_pochi_merchant_number()),"merchant_number":_pochi_merchant_number() or None,"automatic_confirmation":False,"reason":"Pochi incoming merchant payments are reconciled against merchant records. This deployment uses a receipt claim and verified reconciliation, not a fake STK confirmation."},"active_entitlement":_get_entitlement(manager,user)}
 
     @router.get("/api/v1/creator-flow/packs")
     def get_creator_packs(request: Request):
@@ -830,7 +845,7 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
     def create_checkout(payload: CheckoutRequest, request: Request):
         user=getattr(request.state,"nexora_user_id",None)
         if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
-        merchant=os.environ.get("NEXORA_POCHI_MERCHANT_NUMBER","").strip()
+        merchant=_pochi_merchant_number()
         prices=_price_map()
         if not merchant: raise HTTPException(503,"Configure NEXORA_POCHI_MERCHANT_NUMBER with the enrolled Pochi merchant mobile number.")
         if payload.plan not in prices: raise HTTPException(503,f"Configure the approved KES price for the {PLANS[payload.plan]['name']} plan in NEXORA_PLAN_PRICES_KES.")
