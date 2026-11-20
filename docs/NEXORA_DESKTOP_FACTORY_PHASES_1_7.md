@@ -13,7 +13,7 @@
 | 3. Creation workspaces | Existing Creator Flow, asset generation, scene editing, local Godot editor handoff and local job queue are retained; Studio now exposes a Project Factory and local code/file explorer | Full embedded IDE capabilities remain a staged integration; Godot Editor remains the authoritative advanced scene editor |
 | 4. Test lab | Existing local project validation and headless Godot playtest remain available through the paired agent; project and file ownership checks protect local operations | Interactive playtest matrix, automated regression fixtures per target, performance budgets and physical device acceptance |
 | 5. Build and export | Existing local export pipeline supports Web, Android APK/AAB and Windows/Linux Godot exports; release preparation can hash a selected artifact; Web exports are bundled with their supporting files | Windows release installer/MSIX, platform-specific automated signing and end-to-end build verification on supported creator machines; Apple target is not implemented |
-| 6. Backup and versions | Local snapshot ZIPs, per-file SHA-256 manifest, archive integrity check, safe restore staging and traversal/symlink rejection | Google Drive OAuth connector and off-device backup/restore are not yet implemented; configure user-owned OAuth before claiming cloud backup |
+| 6. Backup and versions | Local snapshot ZIPs, per-file SHA-256 manifest, archive integrity check, safe staged restore, plus Google Desktop OAuth PKCE, restricted drive.file scope, OS credential-vault refresh-token storage, resumable upload and owner/project-verified Drive restore | Configure the creator-owned Google OAuth Desktop client, complete consent, then run real-account upload/interruption/restore acceptance; Linux requires a supported Secret Service keyring |
 | 7. Release and publishing | Publisher readiness checks and a local release manifest with owner, target, path, byte count and SHA-256; no credential values are exposed to the web client | Google Play Publishing API, App Store Connect upload and Microsoft Store submission connectors are not yet implemented; store accounts, app records, agreements and final publish approval remain creator-owned |
 
 ## Local project layout
@@ -46,6 +46,7 @@ The project root is selected on the desktop agent. Imported Godot projects are c
 - The file editor is limited to text formats, a 2 MiB per-file cap, project-relative paths and SHA-256 optimistic concurrency checks. Symlinks and path traversal are rejected.
 - Import and backup enforce file-count and total-size ceilings. Snapshot restore validates ZIP paths and symbolic-link entries before extraction, restores through a staging directory and retains the snapshot.
 - The tool installer accepts only fixed package IDs and uses shell=False; it requires a separate confirmation flag. This initial package installer is Windows/WinGet only.
+- Google Drive OAuth redirects to the Local Agent loopback root on port 8765. Refresh credentials are restricted to recognized OS keyring backends; the connector never stores them in browser storage or project files.
 - Release checks inspect credential-file presence and platform prerequisites; they never return credentials to the browser and never claim a release has been submitted or approved.
 
 ## Important limits
@@ -54,7 +55,7 @@ This is a substantial product implementation, not a claim of production acceptan
 
 1. The NEXORA developer's physical Windows machine must run the installer and validate the workspace, toolchains, Godot export templates and actual exports.
 2. Android AAB release signing requires the creator's protected keystore. A physical Android device is needed for the final install/playtest gate.
-3. This implementation does not upload project backups to Google Drive. Local snapshots are not off-device disaster recovery.
+3. Google Drive backup is implemented but remains opt-in: configure NEXORA_GOOGLE_OAUTH_CLIENT_ID in the Local Agent environment, restart the agent, connect the creator's Google account, and verify an upload plus restore. Local snapshots remain available even when Drive is disconnected.
 4. Store readiness is not store publishing. Store API submission connectors, credentials and app-specific identifiers require additional implementation and creator-owned accounts.
 5. Apple builds require a supported Mac/Xcode workflow; the Apple export target is not part of this release.
 6. GitHub Actions must complete the repository's existing Python, web, Godot and Blender/Godot integration gates before merge. No local desktop build is inferred from a passing CI run.
