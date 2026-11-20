@@ -1,53 +1,47 @@
 # NEXORA Default Asset Library
 
-NEXORA installs a local starter asset pack as part of every generated Godot game build. This removes the empty-project problem for creators who describe a game in plain language and expect the first build to contain usable resources.
+NEXORA now has two complementary asset layers: a small original offline 2D starter kit and a direct-download 3D library. The 2D kit is useful for sprites and interface scaffolding; **real 3D models are downloaded as source model files**, not represented by SVG illustrations.
 
-## Automatic selection
+## 2D starter kit
 
-The local Foundry build worker reads the project name, description and genre and selects one of four original procedural packs:
+The local Foundry build worker installs one of four original procedural 2D packs based on the game prompt: Adventure, Fantasy, Sci-Fi or Modern. It includes editable SVG starter poses, environment textures, simple props, UI textures and synthesized WAV cues. These are lightweight scaffolding assets, not a substitute for finished art or rigged 3D models.
 
-| Pack | Prompt signals | Visual direction |
-|---|---|---|
-| Adventure | jungle, exploration, platformer, adventure | Natural environments and warm accents |
-| Fantasy | wizard, magic, dragon, castle, enchanted | Enchanted woodland and magical palette |
-| Sci-Fi | space, robot, alien, cyber, futuristic | Technology, dark blue and neon palette |
-| Modern | city, street, urban, racing, school | Contemporary neutral palette |
+## Real 3D library — direct to NEXORA
 
-If no stronger signal is found, Adventure is selected. If a project already has a pack installed, later builds preserve that pack and all existing files. Switching packs requires an explicit overwrite through the local asset-pack endpoint.
+The Asset Factory includes a Poly Haven search and download workflow. The creator searches real models, selects 1K, 2K or 4K, and clicks **Download to NEXORA**. The paired desktop Foundry downloads the model files directly into the selected project's local Godot workspace:
 
-## Included resources
+`game/assets/3d/polyhaven/{asset_id}/`
 
-Each pack creates original, offline resources under `game/assets/nexora-defaults/`:
+The implementation uses the official Poly Haven public API:
+- `GET https://api.polyhaven.com/assets` — model metadata, names, tags, categories and thumbnails
+- `GET https://api.polyhaven.com/files/{asset_id}` — provider download URLs, sizes and MD5 checksums
+- Asset file downloads are accepted only from `dl.polyhaven.org`; API metadata requests are accepted only from `api.polyhaven.com`.
+- The downloader prefers GLB, otherwise it selects glTF and the provider-listed dependencies at the chosen resolution.
+- File sizes and provider MD5 hashes are checked before final files are written. Each file has a 250 MB cap.
+- An asset manifest records provider, source page, CC0-1.0 license, resolution, files and integrity status.
 
-- Character starter poses: idle, run and jump SVG textures
-- Environment: sky background, ground tile and platform
-- Props and actors: crate, enemy and collectible gem
-- UI: health heart, panel, primary/secondary buttons, play and pause icons
-- Audio: jump, collect and hit effects, ambience and a short synthesized music loop
-- `asset-pack.json`: asset roles, provenance, license and generated file list
-
-A Godot helper is installed at `game/scripts/nexora_default_assets.gd` with typed loaders for character, environment and UI textures, plus an audio cue helper.
-
-The SVGs remain editable source assets. The starter character poses are separate textures, not a skeletal rig or a finished frame-by-frame animation. Creators can replace, animate or extend them in Godot.
+The Poly Haven API is free for commercial use and its assets are CC0. Poly Haven requires software integrating its live API to visibly credit the source, so the NEXORA panel labels the library "Powered by Poly Haven". NEXORA does not rehost a bulk asset mirror or redistribute standalone asset packs; users download chosen assets directly from the provider to their own project.
 
 ## Local API
 
-- `GET /api/v1/desktop/assets/default-packs` lists the available packs.
-- `POST /api/v1/desktop/projects/{project_id}/assets/default-pack` installs a selected pack on the paired computer.
+- `GET /api/v1/desktop/assets/3d/search?q=character&limit=40` searches the Poly Haven model catalogue.
+- `POST /api/v1/desktop/projects/{project_id}/assets/3d/download` downloads a selected model to the project.
 
 Example request:
 
 ```json
 {
-  "pack_id": "adventure",
-  "overwrite_existing": false
+  "asset_id": "dirty_football",
+  "resolution": "2k"
 }
 ```
 
-The route is owner-scoped and writes only inside the project's Godot folder. Overwrite is false by default; existing asset files are preserved. A different installed pack cannot be silently replaced.
+The endpoint is owner-scoped and writes only under the project's Godot directory. It is executed by the paired desktop engine, not the cloud control plane. No asset binaries pass through Render or NEXORA cloud storage.
 
-## Rights and execution
+## License and provenance
 
-The starter textures are generated from original vector geometry and the WAV files are synthesized locally. They do not fetch third-party asset packs, use external image URLs, require a model download, or consume Render compute. The generated pack is marked CC0-1.0. Godot imports the SVG and WAV resources locally.
+- Original 2D resources: CC0-1.0, generated by NEXORA.
+- Poly Haven 3D assets: CC0-1.0, downloaded from the official provider. The API integration displays the required Poly Haven credit.
+- Creator-imported assets: creator must own them or have permission to use them.
 
-This is a useful default starter kit, not a claim that every prompt can be fully art-directed from generic assets. Specialized characters, detailed 3D models, custom animation, voice acting and genre-specific art still require creator assets or additional local generation and review.
+The asset downloader validates provider hosts, limits file sizes, verifies file hashes, sanitizes paths and writes only inside the selected project. It does not execute downloaded files.
