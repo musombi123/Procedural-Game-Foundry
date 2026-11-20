@@ -348,6 +348,24 @@ def _find_snapshot(folder: Path, snapshot_id: str, owner_id: str) -> tuple[dict[
 
 def register_local_factory_routes(app: Any) -> None:
     """Attach local-only factory endpoints to the paired loopback agent."""
+    # Restore the user's last selected root when the local agent restarts.
+    # This is local configuration, never cloud-synced. The owner marker on
+    # every project remains the authorization boundary after pairing.
+    manager = _manager()
+    settings_root = Path(os.environ.get("NEXORA_LOCAL_AGENT_DATA", str(Path.home() / ".nexora-local-agent"))).expanduser().resolve()
+    settings_file = settings_root / "workspace.json"
+    if settings_file.is_file():
+        try:
+            saved = json.loads(settings_file.read_text(encoding="utf-8"))
+            saved_root = Path(str(saved.get("workspace_root") or "")).expanduser()
+            if saved_root.is_absolute():
+                restored = saved_root.resolve()
+                if restored != Path(restored.anchor) and restored.is_dir():
+                    manager.root = restored
+        except (OSError, ValueError, TypeError):
+            # A damaged preference must not prevent the Local Agent from
+            # starting; keep the safe default root and expose it to the UI.
+            pass
 
     @app.get("/workspace")
     def get_workspace(owner_id: str = Depends(_paired_user)):
