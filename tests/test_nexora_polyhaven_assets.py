@@ -82,3 +82,50 @@ def test_refuses_download_when_provider_checksum_is_missing(tmp_path):
             12,
             "",
         )
+
+
+
+def test_auto_install_from_prompt_selects_and_registers_relevant_models(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_search(query, limit=12):
+        calls.append(query)
+        return {"results": [{
+            "id": f"{query}_model",
+            "name": f"{query.title()} Model",
+            "description": "A real 3D model",
+            "category": "Props",
+            "tags": [query],
+        }]}
+
+    monkeypatch.setattr(assets, "search_models", fake_search)
+    monkeypatch.setattr(assets, "_request_json", lambda url: {
+        "gltf": {"1k": {"glb": {
+            "url": "https://dl.polyhaven.org/file/ph-assets/Models/model.glb",
+            "size": 10,
+            "md5": "a" * 32,
+        }}}
+    })
+    monkeypatch.setattr(assets, "download_model", lambda root, asset_id, resolution: {
+        "downloaded": True, "asset_id": asset_id,
+        "asset_registry_id": f"polyhaven_{asset_id}",
+        "name": asset_id.replace("_", " ").title(),
+        "model_path": f"3d/polyhaven/{asset_id}/{asset_id}.glb",
+        "total_bytes": 10,
+    })
+
+    result = assets.auto_install_from_prompt(tmp_path, "A jungle survival adventure", "1k", 3)
+    assert result["resolution"] == "1k"
+    assert 1 <= len(result["assets"]) <= 3
+    assert result["assets"][0]["asset_registry_id"].startswith("polyhaven_")
+    assert calls[0] == "tree"
+
+
+def test_auto_3d_asset_discovery_fails_soft_when_provider_is_offline(tmp_path, monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise assets.PolyHavenError("provider offline")
+
+    monkeypatch.setattr(assets, "search_models", unavailable)
+    result = assets.auto_install_from_prompt(tmp_path, "A jungle game")
+    assert result["assets"] == []
+    assert result["warnings"]
