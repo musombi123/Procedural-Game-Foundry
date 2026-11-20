@@ -456,6 +456,11 @@ from services.api.main import app as foundry_app
 app.mount("/engine", foundry_app)
 
 
+# Desktop factory services: workspace root, portable projects, snapshots,
+# toolchain inventory and local store-handoff preparation.
+from services.worker.local_factory import register_local_factory_routes
+register_local_factory_routes(app)
+
 if __name__ == "__main__":
     import uvicorn
 
