@@ -318,6 +318,38 @@ def _activate_entitlement(manager: Any, user_id: str, plan_id: str, reference: s
     tmp=path.with_suffix(".json.tmp"); tmp.write_text(json.dumps(data,indent=2),encoding="utf-8"); tmp.replace(path)
 
 def _get_entitlement(manager: Any, user_id: str) -> dict | None:
+    # A local worker never receives Neon credentials. It asks the cloud
+    # control plane to validate the short-lived account token captured during
+    # device pairing; the token remains in the agent's process memory only.
+    if os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}:
+        from urllib.error import HTTPError, URLError
+        from urllib.parse import urlparse
+        from urllib.request import Request as UrlRequest, urlopen
+        from services.worker.local_security import get_cloud_access_token
+
+        account_token = get_cloud_access_token(user_id)
+        if not account_token:
+            raise HTTPException(401, "The NEXORA account session is no longer paired. Sign in and pair this computer again.")
+        cloud_base = os.environ.get("NEXORA_CLOUD_API_URL", "https://nexora-foundry-api.onrender.com").rstrip("/")
+        parsed = urlparse(cloud_base)
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"}:
+            raise HTTPException(503, "NEXORA cloud entitlement checks require HTTPS.")
+        request = UrlRequest(
+            cloud_base + "/api/v1/creator-flow/plans",
+            headers={"Authorization": "Bearer " + account_token, "Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read(512 * 1024).decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code == 401:
+                raise HTTPException(401, "Your NEXORA account session expired. Sign in again and pair this computer.") from exc
+            raise HTTPException(503, f"Could not verify your Creator Flow entitlement (HTTP {exc.code}).") from exc
+        except (URLError, TimeoutError, OSError, ValueError) as exc:
+            raise HTTPException(503, "NEXORA could not verify your Creator Flow entitlement. Check your internet connection.") from exc
+        return payload.get("active_entitlement") if isinstance(payload, dict) else None
+
     conn=_connect()
     if conn:
         _ensure_billing_schema(conn)
