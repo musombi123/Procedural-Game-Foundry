@@ -658,7 +658,7 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
             saved = manager.save_world(pid,document,reason="authenticated workspace world builder update")
         except Exception as exc:
             raise HTTPException(400,str(exc)) from exc
-        return {**saved,"world_document":document.model_dump(mode="json"),"objects":len(document.objects),"seed":document.seed}
+        return {"saved":True,"save_result":saved,"document":document.model_dump(mode="json")}
 
     @router.get("/api/v1/workspace/projects/{pid}/movie-pipeline")
     def get_workspace_movie_pipeline(pid: str, request: Request):
