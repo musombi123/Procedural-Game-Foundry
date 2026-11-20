@@ -23,7 +23,7 @@ def test_search_returns_only_real_3d_models(monkeypatch):
 
 def test_direct_download_verifies_provider_file_and_writes_project_manifest(tmp_path, monkeypatch):
     payloads = {
-        f"{assets.API_ROOT}/assets": {
+        f"{assets.API_ROOT}/assets?t=models": {
             "dirty_football": {"type": 2, "name": "Dirty Football", "category": "Sports"}
         },
         f"{assets.API_ROOT}/files/dirty_football": {
