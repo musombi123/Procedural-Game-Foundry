@@ -3,7 +3,7 @@
 # Uploading a build is not the same as submitting it for App Review or release.
 set -euo pipefail
 
-IPA_PATH="\${1:-}"
+IPA_PATH="${1:-}"
 if [[ -z "$IPA_PATH" || ! -f "$IPA_PATH" ]]; then
   echo "Usage: scripts/nexora-publish-apple.sh /absolute/path/to/signed.ipa" >&2
   exit 2
@@ -17,9 +17,9 @@ if ! command -v xcrun >/dev/null 2>&1; then
   exit 2
 fi
 
-: "\${NEXORA_APPLE_API_KEY_PATH:?Set NEXORA_APPLE_API_KEY_PATH to the local App Store Connect .p8 API key file}"
-: "\${NEXORA_APPLE_KEY_ID:?Set NEXORA_APPLE_KEY_ID from App Store Connect}"
-: "\${NEXORA_APPLE_ISSUER_ID:?Set NEXORA_APPLE_ISSUER_ID from App Store Connect}"
+: "$NEXORA_APPLE_API_KEY_PATH:?Set NEXORA_APPLE_API_KEY_PATH to the local App Store Connect .p8 API key file}"
+: "$NEXORA_APPLE_KEY_ID:?Set NEXORA_APPLE_KEY_ID from App Store Connect}"
+: "$NEXORA_APPLE_ISSUER_ID:?Set NEXORA_APPLE_ISSUER_ID from App Store Connect}"
 
 if [[ ! -f "$NEXORA_APPLE_API_KEY_PATH" ]]; then
   echo "App Store Connect API key file was not found." >&2
