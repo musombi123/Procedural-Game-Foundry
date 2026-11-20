@@ -94,8 +94,9 @@ def test_world_document_cannot_be_read_or_written_by_another_account(tmp_path):
     project_id = created.json()["id"]
 
     other_client = make_client(tmp_path, "creator-other")
+    world_document = owner_client.get(f"/api/v1/workspace/projects/{project_id}/world").json()
     assert other_client.get(f"/api/v1/workspace/projects/{project_id}/world").status_code == 404
     assert other_client.put(
         f"/api/v1/workspace/projects/{project_id}/world",
-        json={"seed": 1},
+        json=world_document,
     ).status_code == 404
