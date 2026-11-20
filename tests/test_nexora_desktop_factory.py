@@ -218,3 +218,55 @@ def test_workspace_migration_rejects_project_symlinks_without_touching_source(tm
     assert (project / "pgf.json").is_file()
     assert not (destination / "linked-game").exists()
     assert not (destination / ".nexora-workspace.json").exists()
+
+
+def test_google_drive_pkce_flow_stores_refresh_token_in_os_vault(monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    from core.nexora_workspace import drive_oauth
+
+    class FakeKeyring:
+        passwords = {}
+
+        @classmethod
+        def set_password(cls, service, username, password):
+            cls.passwords[(service, username)] = password
+
+        @classmethod
+        def get_password(cls, service, username):
+            return cls.passwords.get((service, username))
+
+        @classmethod
+        def delete_password(cls, service, username):
+            cls.passwords.pop((service, username), None)
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit):
+            return json.dumps({
+                "refresh_token": "test-refresh-token",
+                "access_token": "test-access-token",
+                "expires_in": 3600,
+                "scope": "https://www.googleapis.com/auth/drive.file",
+            }).encode("utf-8")
+
+    monkeypatch.setattr(drive_oauth, "_client_config", lambda: ("desktop-client-id", None))
+    monkeypatch.setattr(drive_oauth, "_keyring", lambda: (FakeKeyring, None))
+    monkeypatch.setattr(drive_oauth, "urlopen", lambda *_args, **_kwargs: FakeResponse())
+
+    authorization_url = drive_oauth.begin_drive_oauth("creator-1")
+    parsed = urlsplit(authorization_url)
+    query = parse_qs(parsed.query)
+    assert parsed.netloc == "accounts.google.com"
+    assert query["redirect_uri"] == ["http://127.0.0.1:8765/drive/oauth/callback"]
+    assert query["code_challenge_method"] == ["S256"]
+
+    result = drive_oauth.finish_drive_oauth("authorization-code", query["state"][0])
+    assert result["connected"] is True
+    assert FakeKeyring.get_password("NEXORA Desktop Studio", "refresh:creator-1") == "test-refresh-token"
+    assert drive_oauth.drive_access_token("creator-1") == "test-access-token"
