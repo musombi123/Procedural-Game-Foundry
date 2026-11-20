@@ -84,11 +84,15 @@ def _safe_relative(raw: str) -> Path:
 def _resolve_project_path(folder: Path, raw: str) -> Path:
     relative = _safe_relative(raw)
     root = folder.resolve()
-    target = (root / relative).resolve()
+    candidate = root
+    for part in relative.parts:
+        candidate = candidate / part
+        # Check each lexical component before resolve() follows any symlink.
+        if candidate.is_symlink():
+            raise HTTPException(403, "Symbolic links are not editable through NEXORA Studio.")
+    target = candidate.resolve()
     if root not in target.parents and target != root:
         raise HTTPException(403, "Project path escapes the selected project.")
-    if target.is_symlink():
-        raise HTTPException(403, "Symbolic links are not editable through NEXORA Studio.")
     return target
 
 
@@ -138,6 +142,8 @@ def _restore_archive(manager: Any, folder: Path, definition: Any, owner_id: str,
     stage_root = Path(manager.root) / ".nexora-restore-staging"
     stage_root.mkdir(parents=True, exist_ok=True)
     stage = stage_root / uuid.uuid4().hex
+    replacement = folder.parent / f".{folder.name}.restore-{uuid.uuid4().hex}"
+    rollback = folder.parent / f".{folder.name}.rollback-{uuid.uuid4().hex}"
     stage.mkdir()
     try:
         report = _safe_extract(archive, stage)
@@ -150,6 +156,12 @@ def _restore_archive(manager: Any, folder: Path, definition: Any, owner_id: str,
             raise HTTPException(422, "Backup project definition is corrupt.")
         if str(pgf.get("id")) != str(definition.id):
             raise HTTPException(409, "Backup belongs to a different project ID.")
+        try:
+            from core.project_engine.models import ProjectDefinition
+            ProjectDefinition.model_validate(pgf)
+        except Exception as exc:
+            raise HTTPException(422, "Backup project definition does not match the current NEXORA project schema.") from exc
+
         owner_file = stage / "nexora_owner.json"
         if owner_file.is_file():
             try:
@@ -158,26 +170,58 @@ def _restore_archive(manager: Any, folder: Path, definition: Any, owner_id: str,
                 raise HTTPException(422, "Backup ownership metadata is invalid.")
             if str(backup_owner) != owner_id:
                 raise HTTPException(404, "Backup not found.")
-        # Preserve the authoritative owner marker and snapshot archive store.
-        for item in folder.iterdir():
-            if item.name == "nexora_owner.json":
-                continue
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink(missing_ok=True)
+
+        # NEXORA's project manifest is independently owner-bound. Reject a
+        # backup whose project ID or account ownership contradicts its marker.
+        manifest_path = stage / ".nexora" / "project.json"
+        if manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raise HTTPException(422, "Backup NEXORA project manifest is invalid.")
+            if str(manifest.get("project_id") or "") != str(definition.id):
+                raise HTTPException(409, "Backup manifest belongs to a different project ID.")
+            if str(manifest.get("owner_id") or "") != owner_id:
+                raise HTTPException(404, "Backup not found.")
+
+        # Construct a complete replacement beside the existing project. The
+        # live project is not touched until extraction, schema and ownership
+        # checks and all copies have succeeded.
+        replacement.mkdir(parents=True, exist_ok=False)
         for item in stage.iterdir():
             if item.name == "nexora_owner.json":
                 continue
-            destination = folder / item.name
+            destination = replacement / item.name
             if item.is_dir():
                 shutil.copytree(item, destination, symlinks=False)
             else:
                 shutil.copy2(item, destination, follow_symlinks=False)
-        manager.load(definition.id)
+
+        # Preserve the currently authenticated owner marker, not an archive
+        # supplied marker. Snapshot history lives outside this project folder.
+        current_owner = folder / "nexora_owner.json"
+        if not current_owner.is_file():
+            raise HTTPException(500, "The current project owner marker is missing.")
+        replacement_owner = replacement / "nexora_owner.json"
+        shutil.copy2(current_owner, replacement_owner, follow_symlinks=False)
+
+        try:
+            folder.rename(rollback)
+            replacement.rename(folder)
+            manager.load(definition.id)
+        except Exception as exc:
+            # Restore the prior project if promotion or final validation fails.
+            if folder.exists():
+                shutil.rmtree(folder, ignore_errors=True)
+            if rollback.exists():
+                rollback.rename(folder)
+            raise HTTPException(500, "Project restore failed validation; the previous project was restored unchanged.") from exc
+
+        shutil.rmtree(rollback, ignore_errors=True)
         return {"restored": True, "files": report["file_count"], "expanded_bytes": report["expanded_bytes"]}
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+        shutil.rmtree(replacement, ignore_errors=True)
 
 
 def _drive_request(user_id: str, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> dict:
