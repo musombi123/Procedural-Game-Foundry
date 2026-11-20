@@ -518,7 +518,13 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
             if probe.returncode != 0:
                 raise RuntimeError("Imported Godot project failed the headless editor validation: " + (probe.stderr or probe.stdout)[-3000:])
         if kind == "scene.generate":
-            message = "Imported Godot project passed native validation" if imported_project else "Godot scene generated and structurally validated"
+            if imported_project:
+                message = "Imported Godot project passed native validation"
+            else:
+                message = (
+                    f"Godot scene generated and validated. Installed {default_assets['asset_count']} "
+                    f"offline {selected_pack} starter assets (CC0-1.0)."
+                )
             jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message=message, error=None)
             return
         if kind == "playtest":
