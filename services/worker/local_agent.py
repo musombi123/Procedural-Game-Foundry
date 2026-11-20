@@ -43,13 +43,6 @@ from services.worker.local_security import PairingAuthority, get_pairing_authori
 from services.worker.system_profile import check_requirements, collect_system_profile
 from services.worker.local_workspace import load_workspace_root, register_local_workspace_routes
 
-# Restore the creator-selected projects folder before the Foundry engine is imported.
-_SAVED_WORKSPACE_ROOT = load_workspace_root(DATA_ROOT)
-if _SAVED_WORKSPACE_ROOT:
-    # Keep runtime state outside the creator's source projects. The shared
-    # ProjectManager root is reassigned to the selected workspace after import.
-    os.environ["PGF_DATA_DIR"] = str(_SAVED_WORKSPACE_ROOT / ".nexora-runtime")
-
 VERSION = "1.0.0"
 PORT = 8765
 MAX_APK_BYTES = 1024 * 1024 * 1024
@@ -65,6 +58,14 @@ ORIGINS = {
     if item.strip()
 }
 DATA_ROOT = Path(os.environ.get("NEXORA_LOCAL_AGENT_DATA", str(Path.home() / ".nexora-local-agent"))).expanduser().resolve()
+
+# Restore the creator-selected projects folder before the Foundry engine is imported.
+_SAVED_WORKSPACE_ROOT = load_workspace_root(DATA_ROOT)
+if _SAVED_WORKSPACE_ROOT:
+    # Keep runtime state outside the creator's source projects. The shared
+    # ProjectManager root is reassigned to the selected workspace after import.
+    os.environ["PGF_DATA_DIR"] = str(_SAVED_WORKSPACE_ROOT / ".nexora-runtime")
+
 STAGING_ROOT = DATA_ROOT / "device-staging"
 STAGING_ROOT.mkdir(parents=True, exist_ok=True)
 
