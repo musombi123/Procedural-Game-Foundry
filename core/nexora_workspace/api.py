@@ -533,12 +533,21 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
                 artifact_filename = web_archive.name
                 artifact_content_type = "application/zip"
 
-            output_records.append({
+            artifact_record = {
                 "id": platform,
                 "filename": artifact_filename,
                 "path": str(artifact_path.relative_to(folder)),
                 "content_type": artifact_content_type,
-            })
+            }
+            if platform == "android":
+                artifact_record.update({
+                    "artifact_format": str((android or {}).get("artifact_format") or "apk").lower(),
+                    "package_id": str((android or {}).get("package_id") or ""),
+                    "version_name": str((android or {}).get("version_name") or "1.0.0"),
+                    "version_code": max(1, int((android or {}).get("version_code") or 1)),
+                    "build_type": str((android or {}).get("build_type") or "debug").lower(),
+                })
+            output_records.append(artifact_record)
         _save_artifacts(folder, job_id, output_records)
         jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message="Platform export completed: " + ", ".join(item["filename"] for item in output_records), error=None)
     except Exception as exc:
