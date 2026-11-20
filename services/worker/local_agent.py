@@ -35,7 +35,7 @@ if not os.environ.get("PGF_DATA_DIR"):
         os.environ["PGF_DATA_DIR"] = str(Path.home() / ".local" / "share" / "nexora" / "foundry")
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -483,8 +483,47 @@ from core.nexora_workspace.drive_backup import handle_drive_callback
 
 
 @app.get("/")
-def google_drive_oauth_callback(request: Request):
+def google_drive_legacy_oauth_callback(request: Request):
     return handle_drive_callback(request)
+
+
+@app.get("/drive/oauth/callback")
+def google_drive_desktop_oauth_callback(request: Request):
+    # The desktop API's PKCE flow redirects here. Its state token binds the
+    # callback to the NEXORA account that initiated authorization.
+    from core.nexora_workspace.drive_oauth import finish_drive_oauth
+    from html import escape
+
+    error = request.query_params.get("error")
+    if error:
+        message = "Google Drive authorization was cancelled or denied."
+        status = 400
+    else:
+        code = request.query_params.get("code", "")
+        state = request.query_params.get("state", "")
+        if not code or not state:
+            message = "Google did not return the required authorization code and state."
+            status = 400
+        else:
+            try:
+                result = finish_drive_oauth(code, state)
+                message = "NEXORA is connected to Google Drive. You can close this window and return to NEXORA."
+                status = 200
+            except Exception as exc:
+                message = str(exc)[:500]
+                status = 400
+    safe_message = escape(message)
+    page = (
+        "<!doctype html><html lang='en'><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>NEXORA Google Drive</title>"
+        "<body style='font:16px system-ui;background:#08111e;color:#e8f3ff;"
+        "display:grid;place-items:center;min-height:100vh;margin:0'>"
+        "<main style='max-width:560px;padding:32px;border:1px solid #29415f;"
+        "border-radius:16px;background:#101d2d'><h1>NEXORA · Google Drive</h1>"
+        f"<p>{safe_message}</p><p>You may close this browser tab.</p></main></body></html>"
+    )
+    return HTMLResponse(page, status_code=status)
 
 
 
