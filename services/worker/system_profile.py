@@ -230,6 +230,85 @@ def _android_sdk() -> dict[str, Any]:
     }
 
 
+def _triposr_worker_status() -> dict[str, Any]:
+    root_value = os.environ.get("NEXORA_TRIPOSR_ROOT", "").strip()
+    root = Path(root_value).expanduser() if root_value else None
+    runner = root / "run.py" if root else None
+    if not runner or not runner.is_file():
+        return {
+            "available": False,
+            "root_configured": bool(root_value),
+            "cuda_available": False,
+            "reason": "TripoSR run.py is not configured.",
+        }
+
+    python_value = os.environ.get("NEXORA_TRIPOSR_PYTHON", "").strip()
+    python_path = str(Path(python_value).expanduser()) if python_value else sys.executable
+    located = shutil.which(python_path) if not Path(python_path).is_file() else python_path
+    if not located:
+        return {
+            "available": False,
+            "root_configured": True,
+            "python_path": python_path,
+            "cuda_available": False,
+            "reason": "The configured TripoSR Python interpreter was not found.",
+        }
+    command = [
+        located,
+        "-c",
+        "import json,torch; ok=bool(torch.cuda.is_available()); "
+        "print(json.dumps({'torch_version':getattr(torch,'__version__','unknown'),"
+        "'cuda_available':ok,'cuda_version':getattr(torch.version,'cuda',None),"
+        "'gpu_name':torch.cuda.get_device_name(0) if ok else None}))",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=25,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            shell=False,
+        )
+        if result.returncode != 0:
+            return {
+                "available": False,
+                "root_configured": True,
+                "python_path": str(Path(located).resolve()),
+                "cuda_available": False,
+                "reason": (result.stderr or result.stdout or "PyTorch CUDA probe failed")[-900:],
+            }
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        cuda_available = bool(data.get("cuda_available"))
+        return {
+            "available": cuda_available,
+            "root_configured": True,
+            "python_path": str(Path(located).resolve()),
+            "torch_version": data.get("torch_version"),
+            "cuda_version": data.get("cuda_version"),
+            "cuda_available": cuda_available,
+            "gpu_name": data.get("gpu_name"),
+            "reason": None if cuda_available else "PyTorch is installed but torch.cuda.is_available() returned false.",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "root_configured": True,
+            "python_path": str(Path(located).resolve()),
+            "cuda_available": False,
+            "reason": "PyTorch CUDA initialization probe timed out after 25 seconds.",
+        }
+    except (OSError, ValueError, IndexError) as exc:
+        return {
+            "available": False,
+            "root_configured": True,
+            "python_path": str(Path(located).resolve()),
+            "cuda_available": False,
+            "reason": str(exc)[:900],
+        }
+
+
 def collect_system_profile(data_root: str | Path | None = None) -> dict[str, Any]:
     """Return a bounded, privacy-conscious resource and toolchain inventory."""
     cpu_count = os.cpu_count() or 1
@@ -297,13 +376,7 @@ def collect_system_profile(data_root: str | Path | None = None) -> dict[str, Any
         "tools": tools,
         "android": android,
         "workers": {
-            "triposr": {
-                "available": bool(
-                    os.environ.get("NEXORA_TRIPOSR_ROOT")
-                    and (Path(os.environ["NEXORA_TRIPOSR_ROOT"]).expanduser() / "run.py").is_file()
-                ),
-                "root_configured": bool(os.environ.get("NEXORA_TRIPOSR_ROOT")),
-            }
+            "triposr": _triposr_worker_status(),
         },
         "privacy": {
             "sent_to_cloud": False,
@@ -427,7 +500,7 @@ def check_requirements(profile_id: str, profile: dict[str, Any]) -> dict[str, An
         add(
             "TripoSR worker",
             bool(triposr.get("available")),
-            "TripoSR local worker is configured." if triposr.get("available") else "Install the licensed TripoSR worker and set NEXORA_TRIPOSR_ROOT to its local checkout.",
+            f"TripoSR and PyTorch CUDA are ready on {triposr.get('gpu_name') or 'the local GPU'}." if triposr.get("available") else str(triposr.get("reason") or "Install TripoSR and a CUDA-enabled PyTorch environment; set NEXORA_TRIPOSR_ROOT and optionally NEXORA_TRIPOSR_PYTHON."),
         )
 
     if requirements["requires_nvidia"]:
