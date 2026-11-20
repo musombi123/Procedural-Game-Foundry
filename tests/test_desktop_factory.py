@@ -60,11 +60,24 @@ def test_snapshot_integrity_and_restore_round_trip(tmp_path: Path):
     (game / "project.godot").write_text("config_version=5\n", encoding="utf-8")
     script = game / "player.gd"
     script.write_text("extends Node\n", encoding="utf-8")
+    owner_file = project / "nexora_owner.json"
+    owner_file.write_text(json.dumps({"user_id": "creator-1"}), encoding="utf-8")
+    workspace_file = project / "nexora_workspace.json"
+    workspace_file.write_text('{"scene":"original"}', encoding="utf-8")
     snapshot = _backup_project(project, "snapshot-20261120T172100-1234abcd")
     script.write_text("changed\n", encoding="utf-8")
-    result = _safe_restore_archive(project / "backups" / (snapshot["id"] + ".zip"), project)
+    workspace_file.write_text('{"scene":"modified"}', encoding="utf-8")
+    result = _safe_restore_archive(
+        project / "backups" / (snapshot["id"] + ".zip"),
+        project,
+        expected_owner="creator-1",
+    )
     assert result["restored"] is True
     assert script.read_text(encoding="utf-8") == "extends Node\n"
+    assert workspace_file.read_text(encoding="utf-8") == '{"scene":"original"}'
+    assert json.loads(owner_file.read_text(encoding="utf-8"))["user_id"] == "creator-1"
+    assert (project / "backups" / (snapshot["id"] + ".zip")).is_file()
+
 
 
 def test_restore_rejects_zip_path_traversal(tmp_path: Path):
@@ -111,3 +124,21 @@ def test_google_desktop_oauth_redirect_is_loopback_root_only(monkeypatch):
     with pytest.raises(HTTPException) as error:
         _redirect_uri()
     assert error.value.status_code == 503
+
+
+def test_snapshot_restore_rejects_another_account_owner(tmp_path: Path):
+    project = tmp_path / "project"
+    game = project / "game"
+    game.mkdir(parents=True)
+    (game / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    (project / "nexora_owner.json").write_text(json.dumps({"user_id": "creator-1"}), encoding="utf-8")
+    snapshot = _backup_project(project, "snapshot-20261120T172102-1234abcd")
+    before = (game / "project.godot").read_text(encoding="utf-8")
+    with pytest.raises(HTTPException) as error:
+        _safe_restore_archive(
+            project / "backups" / (snapshot["id"] + ".zip"),
+            project,
+            expected_owner="creator-2",
+        )
+    assert error.value.status_code == 403
+    assert (game / "project.godot").read_text(encoding="utf-8") == before
