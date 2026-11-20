@@ -25,6 +25,23 @@ PGF now includes a rights-gated, persisted seven-stage movie-to-game pipeline ma
 
 **Current boundary:** rights-gated uploads and deterministic FFmpeg/FFprobe media inspection are implemented. The worker writes metadata, scene-cut candidates and sampled keyframes. No speech, vision or language models are loaded; the creator supplies story/dialogue context directly.
 
+## NEXORA production execution model
+
+NEXORA's production compute runs on the creator's own computer. The hosted API is a control plane for account authentication, plans and billing; it does not accept projects, source media, raw assets, GPU jobs, Blender generation or Godot builds. Project/workspace routes on the cloud API are rejected with `LOCAL_COMPUTE_REQUIRED`.
+
+The local agent binds to `127.0.0.1:8765`, uses an expiring one-time pairing code, checks CPU/RAM/free storage/GPU VRAM and installed tools, and exposes the same Foundry engine beneath `/engine`. The web workspace sends project, asset, generation, job and export requests to that paired local engine. Android device installation uses the local ADB bridge.
+
+On Windows, from a cloned repository, run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\install-nexora-local-environment.ps1
+```
+
+Python 3.11+ is installed into an isolated NEXORA virtual environment. Blender, Godot 4, FFmpeg/FFprobe, Android SDK/ADB, Java and GPU inference workers are detected separately; install only the tools required by the workload. See [the local compute and artifact hosting architecture](docs/architecture/local-compute-and-artifact-hosting.md).
+
+**Deployment status:** the local agent, local-only routing policy, hardware preflight and Windows source installer are implemented on the `nexora-local-compute-p0` feature branch. Durable public hosting of final APK/Web/desktop artifacts requires the separately configured object-storage publishing service and a physical-device acceptance run. Do not set `NEXORA_LOCAL_AGENT=true` on Render.
+
 ## Quick start
 Python 3.11+:
 ```bash

@@ -30,6 +30,7 @@ from core.build_engine.godot_cli import executable as godot_executable
 from core.game_assembler.godot import assemble_godot_project
 from core.project_engine.models import ProjectCreate, SceneObject, WorldDocument
 from core.validation.validator import validate_project
+from services.worker.workload_guard import require_device_profile
 
 _WRITE_LOCK = RLock()
 TEMPLATES = [
@@ -1024,6 +1025,10 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         if kind=="build.export" and target not in EXPORT_TARGETS: raise HTTPException(400,f"Unsupported export target: {target}")
         android = payload.get("android") if isinstance(payload.get("android"),dict) else {}
         if kind=="build.export" and target=="android":
+            # The local machine must have the complete Android toolchain before
+            # an export job is accepted. The general 2D/3D profile is checked
+            # by the local API middleware; this adds the Android-specific gate.
+            require_device_profile("android_export")
             package_id=str(android.get("package_id") or "com.nexora.game").strip().lower()
             if not re.fullmatch(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,}",package_id):
                 raise HTTPException(422,"Android package ID must use reverse-DNS format, e.g. com.studio.mygame.")
