@@ -231,6 +231,7 @@ def _drive_upload_file(user_id: str, source: Path, metadata: dict) -> dict:
     connection = HTTPSConnection(parsed.hostname, parsed.port or 443, timeout=120)
     try:
         connection.putrequest("PUT", parsed.path + (("?" + parsed.query) if parsed.query else ""))
+        connection.putheader("Authorization", "Bearer " + token)
         connection.putheader("Content-Type", "application/zip")
         connection.putheader("Content-Length", str(size))
         connection.endheaders()
@@ -542,7 +543,16 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
                 "message": "The selected components require their official installer or sdkmanager. No installation was started."
             }
         if os.name != "nt" or not shutil.which("winget"):
-            raise HTTPException(409, "The allowlisted installer is currently available only through Windows Package Manager. Use the official download links for this operating system.")
+            manual_ids = payload.tools
+            return {
+                "started": False,
+                "installers": [],
+                "manual_setup": [{
+                    "id": item,
+                    "message": "Install from the official download link in Toolchain Manager, then select Detect tools."
+                } for item in manual_ids],
+                "message": "Automatic installation is currently supported only on Windows with winget. No installer was started; use the official links shown for each selected tool."
+            }
         started = []
         for item in installed:
             package = WINGET_PACKAGES[item]
@@ -604,11 +614,9 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             and apple_bundle
         )
         microsoft_msix = os.environ.get("NEXORA_MS_STORE_MSIX_PATH", "").strip()
-        microsoft_ready = bool(
-            os.environ.get("NEXORA_MS_STORE_APP_ID")
-            and os.environ.get("NEXORA_MS_STORE_ACCESS_TOKEN")
-            and microsoft_msix and Path(microsoft_msix).is_file()
-        )
+        # The first Partner Center listing is creator-managed; this codebase
+        # does not yet implement the Microsoft Store submission API connector.
+        microsoft_ready = False
         providers = [
             {"id":"google_play","name":"Google Play Console","ready":bool(play_file and Path(play_file).is_file() and play_package), "missing":[item for item,ok in [
                 ("Creator-owned Play Console account and existing app record", bool(play_package)),
@@ -625,6 +633,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
                 ("Creator-owned Partner Center developer account and app identity", bool(os.environ.get("NEXORA_MS_STORE_APP_ID"))),
                 ("Authorized Microsoft Store submission access token", bool(os.environ.get("NEXORA_MS_STORE_ACCESS_TOKEN"))),
                 ("Signed MSIX package path", bool(microsoft_msix and Path(microsoft_msix).is_file())),
+                ("NEXORA Microsoft Store submission connector (not yet implemented)", False),
             ] if not ok]},
         ]
         return {"providers": providers, "final_submission_requires_creator_confirmation": True}
