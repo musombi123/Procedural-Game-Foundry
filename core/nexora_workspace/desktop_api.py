@@ -36,6 +36,10 @@ from services.worker.local_workspace import set_workspace_root
 from core.nexora_workspace.drive_oauth import (
     begin_drive_oauth, drive_access_token, drive_status, disconnect_drive,
 )
+from core.nexora_workspace.default_assets import (
+    catalog as default_asset_catalog,
+    install_pack as install_default_asset_pack,
+)
 
 TEXT_EXTENSIONS = {
     ".gd", ".tscn", ".tres", ".godot", ".cfg", ".ini", ".json", ".md", ".txt",
@@ -400,6 +404,12 @@ class ToolchainLockRequest(BaseModel):
     targets: list[str] = Field(default_factory=lambda: ["web", "android", "windows"])
 
 
+class DefaultAssetPackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pack_id: str = Field(pattern=r"^(adventure|fantasy|sci_fi|modern)$")
+    overwrite_existing: bool = False
+
+
 def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     router = APIRouter()
 
@@ -439,6 +449,32 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     def initialize_project(pid: str, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
         return {"initialized": True, "manifest": _ensure_project_layout(folder, definition, owner_id)}
+
+    @router.get("/api/v1/desktop/assets/default-packs")
+    def list_default_asset_packs(request: FastAPIRequest):
+        _owner(request)
+        return default_asset_catalog()
+
+    @router.post("/api/v1/desktop/projects/{pid}/assets/default-pack")
+    def apply_default_asset_pack(pid: str, payload: DefaultAssetPackRequest, request: FastAPIRequest):
+        folder, definition, owner_id = _project(manager, pid, request)
+        project_root = (folder / "game").resolve()
+        if folder.resolve() not in project_root.parents:
+            raise HTTPException(403, "Invalid Godot project directory.")
+        if not project_root.is_dir() or not (project_root / "project.godot").is_file():
+            raise HTTPException(409, "Initialize or import a Godot project before installing default assets.")
+        try:
+            result = install_default_asset_pack(
+                project_root, payload.pack_id, overwrite=payload.overwrite_existing
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {
+            **result,
+            "project_id": definition.id,
+            "project_name": definition.project.name,
+            "owner_id": owner_id,
+        }
 
     @router.post("/api/v1/desktop/projects/import", status_code=201)
     def import_godot_folder(payload: DesktopImportRequest, request: FastAPIRequest):
