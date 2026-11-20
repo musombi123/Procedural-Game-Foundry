@@ -199,8 +199,10 @@ def download_model(project_root: Path, asset_id: str, resolution: str = "2k") ->
         # Preserve dependency paths where the API describes them, but never
         # allow an absolute path or parent traversal into the workspace.
         safe_parts = [re.sub(r"[^A-Za-z0-9_.-]", "_", part) for part in path_parts if part not in {"", ".", ".."}]
-        if safe_parts and safe_parts[0].lower() in {"gltf", "blend", "fbx", "obj"}:
-            safe_parts = safe_parts[1:]
+        safe_parts = [
+            part for part in safe_parts
+            if part.lower() not in {"gltf", "glb", "blend", "fbx", "obj", "1k", "2k", "4k"}
+        ]
         relative = Path(*safe_parts[:-1], filename) if safe_parts else Path(filename)
         target = (destination / relative).resolve()
         if destination not in target.parents:
