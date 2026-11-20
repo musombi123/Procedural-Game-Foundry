@@ -28,6 +28,7 @@ from core.asset_registry.gltf_validator import MAX_ASSET_BYTES, validate_gltf
 from core.asset_registry.registry import AssetRegistry
 from core.build_engine.godot_cli import executable as godot_executable
 from core.game_assembler.godot import assemble_godot_project
+from core.nexora_workspace.default_assets import infer_pack, install_pack
 from core.project_engine.models import ProjectCreate, SceneObject, WorldDocument
 from core.validation.validator import validate_project
 from services.worker.workload_guard import require_device_profile
@@ -476,6 +477,36 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
             world = _sync_editor_scene_to_world(folder, definition, state)
             jobs.update(job_id, progress=20, message="Synchronised scene, 3D assets and world data")
             game = assemble_godot_project(definition, folder / "game", world.model_dump(mode="json"))
+            # Every text-to-game build receives a local, original starter asset
+            # pack. Preserve a previously selected pack and all creator edits.
+            asset_manifest = game / "assets" / "nexora-defaults" / "asset-pack.json"
+            if asset_manifest.is_file():
+                try:
+                    existing_pack = json.loads(asset_manifest.read_text(encoding="utf-8")).get("pack_id")
+                except (OSError, ValueError):
+                    existing_pack = None
+            else:
+                existing_pack = None
+            prompt_context = " ".join([
+                str(state.get("name") or ""),
+                str(state.get("description") or ""),
+                str(state.get("genre") or ""),
+                str(getattr(definition.project, "genre", "") or ""),
+            ])
+            selected_pack = existing_pack or infer_pack(prompt_context)
+            default_assets = install_pack(game, selected_pack, overwrite=False)
+            build_manifest_path = game / "pgf_build.json"
+            try:
+                build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                build_manifest = {}
+            build_manifest["default_assets"] = {
+                "pack": selected_pack,
+                "asset_count": default_assets["asset_count"],
+                "manifest": default_assets["manifest"],
+                "license": default_assets["license"],
+            }
+            build_manifest_path.write_text(json.dumps(build_manifest, indent=2), encoding="utf-8")
             report = validate_project(folder)
             if not report.get("valid"):
                 raise RuntimeError("Generated Godot project validation failed: " + "; ".join(report.get("errors",[])))
@@ -487,7 +518,13 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
             if probe.returncode != 0:
                 raise RuntimeError("Imported Godot project failed the headless editor validation: " + (probe.stderr or probe.stdout)[-3000:])
         if kind == "scene.generate":
-            message = "Imported Godot project passed native validation" if imported_project else "Godot scene generated and structurally validated"
+            if imported_project:
+                message = "Imported Godot project passed native validation"
+            else:
+                message = (
+                    f"Godot scene generated and validated. Installed {default_assets['asset_count']} "
+                    f"offline {selected_pack} starter assets (CC0-1.0)."
+                )
             jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message=message, error=None)
             return
         if kind == "playtest":
