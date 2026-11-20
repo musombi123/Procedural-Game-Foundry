@@ -825,6 +825,11 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
                 "path": relative.as_posix(), "size_bytes": artifact_path.stat().st_size,
                 "sha256": digest.hexdigest(),
                 "content_type": matched.get("content_type") or mimetypes.guess_type(artifact_path.name)[0] or "application/octet-stream",
+                **({
+                    key: matched[key]
+                    for key in ("artifact_format", "package_id", "version_name", "version_code", "build_type")
+                    if key in matched
+                }),
             }],
             "warning": "Preparation only. A creator rights review and publisher-side final approval are still required.",
         }
