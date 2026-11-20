@@ -242,6 +242,15 @@ def collect_system_profile(data_root: str | Path | None = None) -> dict[str, Any
         },
         "tools": tools,
         "android": android,
+        "workers": {
+            "triposr": {
+                "available": bool(
+                    os.environ.get("NEXORA_TRIPOSR_ROOT")
+                    and (Path(os.environ["NEXORA_TRIPOSR_ROOT"]).expanduser() / "run.py").is_file()
+                ),
+                "root_configured": bool(os.environ.get("NEXORA_TRIPOSR_ROOT")),
+            }
+        },
         "privacy": {
             "sent_to_cloud": False,
             "note": "This inventory is returned to the local studio only; it is not uploaded to NEXORA cloud.",
@@ -334,6 +343,21 @@ def check_requirements(profile_id: str, profile: dict[str, Any]) -> dict[str, An
     for tool in requirements["recommended_tools"]:
         available = bool(tools.get(tool, {}).get("available"))
         add(tool, available, "Detected." if available else f"{tool} is recommended for this workload.", required=False)
+
+    if profile_id == "android_export":
+        android = profile.get("android") or {}
+        sdk_ready = bool(android.get("sdk_root") and android.get("build_tools_installed"))
+        add("Android SDK", sdk_ready, "Android SDK and build-tools detected." if sdk_ready else "Install Android SDK command-line tools and at least one build-tools version.")
+        apk_inspector_ready = bool(android.get("ready_to_verify_apk"))
+        add("APK inspector", apk_inspector_ready, "apkanalyzer or aapt detected." if apk_inspector_ready else "Install Android SDK command-line tools or build-tools so NEXORA can inspect package IDs before installation.")
+
+    if profile_id == "image_to_3d":
+        triposr = profile.get("workers", {}).get("triposr") or {}
+        add(
+            "TripoSR worker",
+            bool(triposr.get("available")),
+            "TripoSR local worker is configured." if triposr.get("available") else "Install the licensed TripoSR worker and set NEXORA_TRIPOSR_ROOT to its local checkout.",
+        )
 
     if requirements["requires_nvidia"]:
         primary = gpu.get("primary") or {}
