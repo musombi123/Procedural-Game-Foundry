@@ -16,6 +16,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import json
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request as UrlRequest, urlopen
 from pathlib import Path
 from typing import Any
 from datetime import datetime, timezone
@@ -91,6 +95,7 @@ async def loopback_and_origin_guard(request: Request, call_next):
 
 class PairRequest(BaseModel):
     code: str = Field(min_length=8, max_length=8, pattern=r"^[0-9]{8}$")
+    account_access_token: str = Field(min_length=20, max_length=4096)
 
 
 class RequirementsRequest(BaseModel):
@@ -241,10 +246,40 @@ def health():
     }
 
 
+def _verify_cloud_account(token: str) -> dict[str, Any]:
+    base = os.environ.get("NEXORA_CLOUD_API_URL", "https://nexora-foundry-api.onrender.com").rstrip("/")
+    parsed = urlparse(base)
+    if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"}:
+        raise HTTPException(503, "NEXORA cloud API must use HTTPS for local-agent account pairing.")
+    request = UrlRequest(
+        base + "/api/v1/auth/me",
+        headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read(256 * 1024).decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code == 401:
+            raise HTTPException(401, "Your NEXORA account session expired. Sign in again before pairing this computer.") from exc
+        raise HTTPException(503, f"NEXORA account verification failed (HTTP {exc.code}).") from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        raise HTTPException(503, "Could not verify your NEXORA account with the cloud service. Check your internet connection.") from exc
+    user = payload.get("user") if isinstance(payload, dict) else None
+    if not isinstance(user, dict) or not user.get("id"):
+        raise HTTPException(401, "The cloud service did not return a valid NEXORA account.")
+    return user
+
+
 @app.post("/pair")
 def pair(payload: PairRequest):
+    account = _verify_cloud_account(payload.account_access_token)
     try:
-        token, expires_at = _authority().exchange(payload.code)
+        token, expires_at = _authority().exchange(
+            payload.code,
+            user_id=str(account["id"]),
+            cloud_access_token=payload.account_access_token,
+        )
     except ValueError as exc:
         raise HTTPException(401, str(exc)) from exc
     return {
