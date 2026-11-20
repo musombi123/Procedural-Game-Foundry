@@ -43,3 +43,18 @@ def test_install_is_safe_and_preserves_existing_creator_files(tmp_path):
     second = install_pack(tmp_path, "fantasy", overwrite=False)
     assert custom.read_text(encoding="utf-8") == "keep me"
     assert second["asset_count"] == first["asset_count"]
+
+
+
+def test_switching_pack_requires_explicit_overwrite(tmp_path):
+    install_pack(tmp_path, "adventure")
+    try:
+        install_pack(tmp_path, "fantasy", overwrite=False)
+    except ValueError as exc:
+        assert "Confirm overwrite" in str(exc)
+    else:
+        raise AssertionError("A pack switch must never silently replace the creator's current assets.")
+
+    changed = install_pack(tmp_path, "fantasy", overwrite=True)
+    manifest = json.loads((tmp_path / "assets" / "nexora-defaults" / "asset-pack.json").read_text(encoding="utf-8"))
+    assert changed["pack"] == manifest["pack_id"] == "fantasy"
