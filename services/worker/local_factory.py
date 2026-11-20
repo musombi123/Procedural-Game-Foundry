@@ -393,15 +393,28 @@ def register_local_factory_routes(app: Any) -> None:
             raise HTTPException(400, f"Could not create or access the selected workspace: {exc}") from exc
         if target == Path(target.anchor):
             raise HTTPException(422, "Choose a project folder, not a drive or filesystem root.")
+        project_dirs: list[Path] = []
         with ROOT_LOCK:
             current = Path(manager.root).resolve()
             if current != target:
-                project_dirs = [item for item in current.iterdir() if item.is_dir() and (item / "pgf.json").is_file()] if current.is_dir() else []
+                if current.is_dir():
+                    for item in current.iterdir():
+                        marker = item / "nexora_owner.json"
+                        if not item.is_dir() or not (item / "pgf.json").is_file() or not marker.is_file():
+                            continue
+                        try:
+                            recorded_owner = json.loads(marker.read_text(encoding="utf-8")).get("user_id")
+                        except (OSError, ValueError, TypeError):
+                            continue
+                        # Never move another local account's project when one
+                        # account changes the shared computer's workspace root.
+                        if str(recorded_owner) == str(owner_id):
+                            project_dirs.append(item)
                 collisions = [str(target / item.name) for item in project_dirs if (target / item.name).exists()]
                 if collisions:
                     raise HTTPException(409, {
                         "code": "WORKSPACE_PROJECT_COLLISION",
-                        "message": "The selected folder already contains one or more project IDs. No files were moved.",
+                        "message": "The selected folder already contains one or more owned project IDs. No files were moved.",
                         "conflicts": collisions[:20],
                     })
                 for item in project_dirs:
@@ -413,7 +426,7 @@ def register_local_factory_routes(app: Any) -> None:
             "updated_by": str(owner_id),
             "authority": "local_filesystem",
         })
-        return {"workspace_root": str(target), "moved_projects": len(project_dirs) if "project_dirs" in locals() else 0, "message": "Workspace location saved. Local project folders remain on this computer."}
+        return {"workspace_root": str(target), "moved_projects": len(project_dirs), "message": "Workspace location saved. Local project folders remain on this computer."}
 
     @app.post("/workspace/import")
     async def import_godot_project(file: UploadFile = File(...), owner_id: str = Depends(_paired_user)):
