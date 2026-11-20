@@ -16,12 +16,13 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.asset_registry.gltf_validator import MAX_ASSET_BYTES, validate_gltf
 from core.asset_registry.registry import AssetRegistry
@@ -537,6 +538,18 @@ def _save_artifacts(folder: Path, job_id: str, items: list[dict]) -> None:
     path = root / f"{job_id}.json"
     path.write_text(json.dumps({"artifacts":items},indent=2),encoding="utf-8")
 
+
+
+class WorkspaceTaskPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1,max_length=160)
+    description: str = Field(default="",max_length=1200)
+    category: str = Field(default="General",max_length=50)
+    priority: Literal["low","medium","high"] = "medium"
+    assignee: str = Field(default="",max_length=100)
+    status: Literal["backlog","in_progress","in_review","done"] = "backlog"
+    due_date: str | None = Field(default=None,pattern=r"^\\d{4}-\\d{2}-\\d{2}$")
+
 def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
     router = APIRouter()
 
@@ -659,6 +672,130 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         except Exception as exc:
             raise HTTPException(400,str(exc)) from exc
         return {"saved":True,"save_result":saved,"document":document.model_dump(mode="json")}
+
+    @router.get("/api/v1/workspace/projects/{pid}/tasks")
+    def list_workspace_tasks(pid: str, request: Request):
+        try:
+            folder = manager.path_for(pid)
+            manager.load(pid)
+        except FileNotFoundError:
+            raise HTTPException(404,"Project not found.")
+        except ValueError as exc:
+            raise HTTPException(400,str(exc)) from exc
+        _assert_owner(folder,request)
+        path = folder / "tasks.json"
+        if not path.is_file():
+            return {"tasks":[]}
+        try:
+            records = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError,ValueError):
+            raise HTTPException(500,"Project task data is unreadable.")
+        if not isinstance(records,list):
+            raise HTTPException(500,"Project task data is invalid.")
+        return {"tasks":records}
+
+    @router.post("/api/v1/workspace/projects/{pid}/tasks",status_code=201)
+    def create_workspace_task(pid: str, payload: WorkspaceTaskPayload, request: Request):
+        try:
+            folder = manager.path_for(pid)
+            manager.load(pid)
+        except FileNotFoundError:
+            raise HTTPException(404,"Project not found.")
+        except ValueError as exc:
+            raise HTTPException(400,str(exc)) from exc
+        _assert_owner(folder,request)
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(422,"Task title is required.")
+        data = payload.model_dump()
+        data["title"] = title
+        data["dueDate"] = data.pop("due_date")
+        record = {
+            "id":uuid4().hex,
+            "projectId":pid,
+            **data,
+            "createdAt":_utc(),
+            "updatedAt":_utc(),
+        }
+        path = folder / "tasks.json"
+        with _WRITE_LOCK:
+            try:
+                records = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+            except (OSError,ValueError):
+                raise HTTPException(500,"Project task data is unreadable.")
+            if not isinstance(records,list):
+                raise HTTPException(500,"Project task data is invalid.")
+            records.append(record)
+            temporary = path.with_suffix(".json.tmp")
+            temporary.write_text(json.dumps(records,indent=2),encoding="utf-8")
+            temporary.replace(path)
+        return {"task":record}
+
+    @router.put("/api/v1/workspace/projects/{pid}/tasks/{task_id}")
+    def update_workspace_task(pid: str, task_id: str, payload: WorkspaceTaskPayload, request: Request):
+        try:
+            folder = manager.path_for(pid)
+            manager.load(pid)
+        except FileNotFoundError:
+            raise HTTPException(404,"Project not found.")
+        except ValueError as exc:
+            raise HTTPException(400,str(exc)) from exc
+        _assert_owner(folder,request)
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(422,"Task title is required.")
+        path = folder / "tasks.json"
+        with _WRITE_LOCK:
+            try:
+                records = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+            except (OSError,ValueError):
+                raise HTTPException(500,"Project task data is unreadable.")
+            if not isinstance(records,list):
+                raise HTTPException(500,"Project task data is invalid.")
+            index = next((i for i,row in enumerate(records) if isinstance(row,dict) and row.get("id")==task_id),None)
+            if index is None:
+                raise HTTPException(404,"Task not found.")
+            data = payload.model_dump()
+            data["title"] = title
+            data["dueDate"] = data.pop("due_date")
+            updated = {
+                **records[index],
+                **data,
+                "id":task_id,
+                "projectId":pid,
+                "updatedAt":_utc(),
+            }
+            records[index] = updated
+            temporary = path.with_suffix(".json.tmp")
+            temporary.write_text(json.dumps(records,indent=2),encoding="utf-8")
+            temporary.replace(path)
+        return {"task":updated}
+
+    @router.delete("/api/v1/workspace/projects/{pid}/tasks/{task_id}")
+    def delete_workspace_task(pid: str, task_id: str, request: Request):
+        try:
+            folder = manager.path_for(pid)
+            manager.load(pid)
+        except FileNotFoundError:
+            raise HTTPException(404,"Project not found.")
+        except ValueError as exc:
+            raise HTTPException(400,str(exc)) from exc
+        _assert_owner(folder,request)
+        path = folder / "tasks.json"
+        with _WRITE_LOCK:
+            try:
+                records = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+            except (OSError,ValueError):
+                raise HTTPException(500,"Project task data is unreadable.")
+            if not isinstance(records,list):
+                raise HTTPException(500,"Project task data is invalid.")
+            remaining = [row for row in records if not (isinstance(row,dict) and row.get("id")==task_id)]
+            if len(remaining)==len(records):
+                raise HTTPException(404,"Task not found.")
+            temporary = path.with_suffix(".json.tmp")
+            temporary.write_text(json.dumps(remaining,indent=2),encoding="utf-8")
+            temporary.replace(path)
+        return {"deleted":True,"id":task_id}
 
     @router.get("/api/v1/workspace/projects/{pid}/movie-pipeline")
     def get_workspace_movie_pipeline(pid: str, request: Request):
