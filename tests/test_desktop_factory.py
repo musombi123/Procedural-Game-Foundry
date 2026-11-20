@@ -94,7 +94,7 @@ def test_starter_project_is_created_and_existing_project_is_preserved(tmp_path: 
     project_file = game / "project.godot"
     assert project_file.is_file()
     text = project_file.read_text(encoding="utf-8")
-    assert "config/name=\\"Starter Game\\"" in text
+    assert 'config/name="Starter Game"' in text
     script = game / "scripts" / "custom.gd"
     script.write_text("extends Node\\n", encoding="utf-8")
     _ensure_starter_godot_project(folder, "Renamed Game")
