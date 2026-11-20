@@ -24,6 +24,10 @@ The implementation uses the official Poly Haven public API:
 
 The Poly Haven API is free for commercial use and its assets are CC0. Poly Haven requires software integrating its live API to visibly credit the source, so the NEXORA panel labels the library "Powered by Poly Haven". NEXORA does not rehost a bulk asset mirror or redistribute standalone asset packs; users download chosen assets directly from the provider to their own project.
 
+### Text-to-game automatic 3D population
+
+For newly generated Godot projects, the local build worker also reads the project name, description and genre, matches relevant asset keywords (for example jungle → trees/plants/rocks, racing → cars/vehicles, space → robots/spaceships), and attempts to install up to three matching real models at 1K resolution. Models are registered in the existing AssetRegistry and inserted into the generated 3D world through the existing `model_asset_id` scene contract. The default 2D pack remains available even when the network or provider is unavailable; failed 3D discovery is recorded as a build warning rather than blocking the game build. Automatic downloads have a bounded asset count and byte budget.
+
 ## Local API
 
 - `GET /api/v1/desktop/assets/3d/search?q=character&limit=40` searches the Poly Haven model catalogue.
