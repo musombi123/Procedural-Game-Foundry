@@ -548,7 +548,7 @@ class WorkspaceTaskPayload(BaseModel):
     priority: Literal["low","medium","high"] = "medium"
     assignee: str = Field(default="",max_length=100)
     status: Literal["backlog","in_progress","in_review","done"] = "backlog"
-    due_date: str | None = Field(default=None,pattern=r"^\\d{4}-\\d{2}-\\d{2}$")
+    due_date: str | None = Field(default=None,pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
     router = APIRouter()
