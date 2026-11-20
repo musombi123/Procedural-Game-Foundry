@@ -16,6 +16,10 @@ import subprocess
 import sys
 import struct
 import zlib
+import base64
+import secrets
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -149,6 +153,20 @@ class PaymentClaim(BaseModel):
     paid_amount_kes: int = Field(ge=1,le=250000)
     payer_phone: str = Field(min_length=9,max_length=16,pattern=r"^[+0-9]+$")
 
+class RewardIntentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tool_id: Literal["environment","actors_props"]
+
+class RewardCreditConsumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tool_id: Literal["environment","actors_props"]
+    consumed_for: str = Field(min_length=1,max_length=160)
+
+class RewardCreditRefundRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    intent_id: str = Field(min_length=20,max_length=128)
+    consumed_for: str = Field(min_length=1,max_length=160)
+
 def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -205,7 +223,7 @@ def _pochi_merchant_number() -> str:
     Keep it server-configurable so production can override it without a code
     change; never put Daraja credentials or payment verification secrets here.
     """
-    raw = os.environ.get("NEXORA_POCHI_MERCHANT_NUMBER", "0742466828").strip()
+    raw = os.environ.get("NEXORA_POCHI_MERCHANT_NUMBER", "+254742466828").strip()
     digits = re.sub(r"[^0-9]", "", raw)
     if digits.startswith("0") and len(digits) == 10:
         return digits
@@ -242,6 +260,22 @@ def _ensure_billing_schema(conn) -> None:
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS nexora_creator_reward_intents (
+          intent_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, tool_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending', ad_unit_id TEXT NOT NULL,
+          reward_item TEXT NOT NULL, reward_amount INTEGER NOT NULL,
+          transaction_id TEXT UNIQUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          expires_at TIMESTAMPTZ NOT NULL,
+          credited_at TIMESTAMPTZ, consumed_at TIMESTAMPTZ,
+          consumed_for TEXT
+        )
+        """)
+        cur.execute("""
+        CREATE INDEX IF NOT EXISTS nexora_creator_reward_balance_idx
+        ON nexora_creator_reward_intents(user_id,tool_id,status,created_at)
+        """)
 
 def _price_map() -> dict[str,int]:
     raw=os.environ.get("NEXORA_PLAN_PRICES_KES","")
@@ -249,6 +283,252 @@ def _price_map() -> dict[str,int]:
     try: values=json.loads(raw)
     except json.JSONDecodeError as exc: raise HTTPException(503,"NEXORA_PLAN_PRICES_KES must be valid JSON.") from exc
     return {key:int(values[key]) for key in PLANS if key in values and int(values[key])>0}
+
+REWARDED_BASIC_TOOLS = {
+    "environment": "Blender environment generation",
+    "actors_props": "Enemies and vehicles generation",
+}
+ADMOB_SSV_KEYS_URL = "https://www.gstatic.com/admob/reward/verifier-keys.json"
+_ADMOB_KEY_CACHE: dict[str, Any] = {"loaded_at": 0.0, "keys": {}}
+_ADMOB_KEY_LOCK = threading.Lock()
+
+def _reward_database():
+    if not _database_url():
+        raise HTTPException(503, "Rewarded access needs the configured NEXORA_DATABASE_URL on the cloud API.")
+    conn = _connect()
+    _ensure_billing_schema(conn)
+    return conn
+
+def _cloud_reward_request(user_id: str, path: str, payload: dict) -> dict:
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import urlparse
+    from urllib.request import Request as UrlRequest, urlopen
+    from services.worker.local_security import get_cloud_access_token
+
+    account_token = get_cloud_access_token(user_id)
+    if not account_token:
+        raise HTTPException(401, "The paired NEXORA account session expired. Sign in and pair this computer again.")
+    cloud_base = os.environ.get("NEXORA_CLOUD_API_URL", "https://nexora-foundry-api.onrender.com").rstrip("/")
+    parsed = urlparse(cloud_base)
+    if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"}:
+        raise HTTPException(503, "NEXORA cloud reward requests require HTTPS.")
+    request = UrlRequest(
+        cloud_base + path,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": "Bearer " + account_token, "Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=12) as response:
+            return json.loads(response.read(64 * 1024).decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            detail = json.loads(exc.read(16 * 1024).decode("utf-8")).get("detail")
+        except Exception:
+            detail = None
+        raise HTTPException(exc.code, detail or "NEXORA cloud could not process the rewarded tool credit.") from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        raise HTTPException(503, "NEXORA cloud reward service is unavailable. Check this computer's internet connection.") from exc
+
+def _consume_reward_credit_db(user_id: str, tool_id: str, consumed_for: str) -> str:
+    if tool_id not in REWARDED_BASIC_TOOLS:
+        raise HTTPException(422, "This tool is not eligible for Basic rewarded access.")
+    conn = _reward_database()
+    try:
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT plan,status,expires_at FROM nexora_creator_entitlements WHERE user_id=%s",
+                (user_id,),
+            )
+            entitlement = cur.fetchone()
+            now = datetime.now(timezone.utc)
+            if not entitlement or entitlement[0] != "basic" or entitlement[1] != "active" or (entitlement[2] and entitlement[2] <= now):
+                raise HTTPException(403, "Rewarded tool credits are available only to an active Basic subscriber.")
+            cur.execute(
+                """SELECT intent_id FROM nexora_creator_reward_intents
+                   WHERE user_id=%s AND tool_id=%s AND status='credited'
+                   ORDER BY credited_at ASC FOR UPDATE SKIP LOCKED LIMIT 1""",
+                (user_id, tool_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(402, "No verified ad credit is available for this tool. Watch a rewarded ad to unlock one use.")
+            intent_id = row[0]
+            cur.execute(
+                """UPDATE nexora_creator_reward_intents
+                   SET status='consumed', consumed_at=NOW(), consumed_for=%s
+                   WHERE intent_id=%s AND user_id=%s AND status='credited'""",
+                (consumed_for, intent_id, user_id),
+            )
+        conn.commit()
+        return str(intent_id)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def _refund_reward_credit_db(user_id: str, intent_id: str, consumed_for: str) -> bool:
+    conn = _reward_database()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE nexora_creator_reward_intents
+                   SET status='credited', consumed_at=NULL, consumed_for=NULL
+                   WHERE intent_id=%s AND user_id=%s AND status='consumed' AND consumed_for=%s""",
+                (intent_id, user_id, consumed_for),
+            )
+            restored = cur.rowcount == 1
+        return restored
+    finally:
+        conn.close()
+
+def _consume_reward_credit(manager: Any, user_id: str, tool_id: str, consumed_for: str) -> str:
+    if os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}:
+        result = _cloud_reward_request(
+            user_id, "/api/v1/creator-flow/rewards/credits/consume",
+            {"tool_id": tool_id, "consumed_for": consumed_for},
+        )
+        return str(result["intent_id"])
+    return _consume_reward_credit_db(user_id, tool_id, consumed_for)
+
+def _refund_reward_credit(manager: Any, user_id: str, intent_id: str, consumed_for: str) -> None:
+    if not intent_id:
+        return
+    if os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}:
+        _cloud_reward_request(
+            user_id, "/api/v1/creator-flow/rewards/credits/refund",
+            {"intent_id": intent_id, "consumed_for": consumed_for},
+        )
+        return
+    _refund_reward_credit_db(user_id, intent_id, consumed_for)
+
+def _load_admob_public_keys() -> dict[int, Any]:
+    now = time.monotonic()
+    with _ADMOB_KEY_LOCK:
+        if _ADMOB_KEY_CACHE["keys"] and now - float(_ADMOB_KEY_CACHE["loaded_at"]) < 23 * 60 * 60:
+            return _ADMOB_KEY_CACHE["keys"]
+        from urllib.request import urlopen
+        from cryptography.hazmat.primitives import serialization
+        try:
+            with urlopen(ADMOB_SSV_KEYS_URL, timeout=10) as response:
+                payload = json.loads(response.read(256 * 1024).decode("utf-8"))
+            keys = {}
+            for item in payload.get("keys", []):
+                key_id = int(item["keyId"])
+                if item.get("pem"):
+                    public_key = serialization.load_pem_public_key(item["pem"].encode("ascii"))
+                else:
+                    raw_key = base64.b64decode(item["base64"])
+                    public_key = serialization.load_der_public_key(raw_key)
+                keys[key_id] = public_key
+            if not keys:
+                raise ValueError("AdMob returned an empty rewarded verification key set.")
+        except Exception as exc:
+            raise HTTPException(503, "Could not retrieve AdMob's trusted SSV verification keys.") from exc
+        _ADMOB_KEY_CACHE["keys"] = keys
+        _ADMOB_KEY_CACHE["loaded_at"] = now
+        return keys
+
+def _verify_admob_ssv_signature(request: Request) -> dict[str, str]:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    raw_query = request.scope.get("query_string", b"")
+    if not isinstance(raw_query, bytes):
+        raw_query = str(raw_query).encode("ascii", errors="strict")
+    marker = b"&signature="
+    if marker not in raw_query:
+        raise HTTPException(400, "AdMob SSV signature is missing.")
+    signed_query, callback_tail = raw_query.rsplit(marker, 1)
+    signature_token, separator, key_id_tail = callback_tail.partition(b"&key_id=")
+    if not separator or b"&" in key_id_tail or not signature_token or not key_id_tail:
+        raise HTTPException(400, "AdMob SSV query parameters are malformed.")
+    try:
+        signature = base64.urlsafe_b64decode(signature_token + b"=" * (-len(signature_token) % 4))
+        key_id = int(key_id_tail.decode("ascii"))
+        public_key = _load_admob_public_keys()[key_id]
+        public_key.verify(signature, signed_query, ec.ECDSA(hashes.SHA256()))
+    except KeyError as exc:
+        raise HTTPException(403, "AdMob SSV used an unknown verification key.") from exc
+    except InvalidSignature as exc:
+        raise HTTPException(403, "AdMob SSV signature verification failed.") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, "AdMob SSV signature could not be decoded.") from exc
+
+    params = request.query_params
+    required = ("ad_unit", "custom_data", "reward_amount", "reward_item", "timestamp", "transaction_id", "user_id")
+    if any(not params.get(name) for name in required):
+        raise HTTPException(400, "AdMob SSV is missing required reward parameters.")
+    configured_unit = os.environ.get("NEXORA_ADMOB_REWARDED_AD_UNIT_ID", "").strip()
+    if not configured_unit:
+        raise HTTPException(503, "The NEXORA AdMob rewarded ad unit is not configured.")
+    expected_unit_id = configured_unit.rsplit("/", 1)[-1]
+    expected_item = os.environ.get("NEXORA_REWARDED_ADMOB_REWARD_ITEM", "nexora_basic_tool_credit").strip()
+    try:
+        expected_amount = int(os.environ.get("NEXORA_REWARDED_ADMOB_REWARD_AMOUNT", "1"))
+        reward_amount = int(params["reward_amount"])
+        timestamp_ms = int(params["timestamp"])
+    except ValueError as exc:
+        raise HTTPException(400, "AdMob SSV reward parameters are invalid.") from exc
+    now_ms = int(time.time() * 1000)
+    if params["ad_unit"] != expected_unit_id or params["reward_item"] != expected_item or reward_amount != expected_amount:
+        raise HTTPException(403, "AdMob SSV ad unit or reward definition does not match NEXORA configuration.")
+    if timestamp_ms > now_ms + 10 * 60 * 1000 or timestamp_ms < now_ms - 48 * 60 * 60 * 1000:
+        raise HTTPException(403, "AdMob SSV callback timestamp is outside the accepted verification window.")
+    return {
+        "intent_id": params["custom_data"],
+        "user_id": params["user_id"],
+        "ad_unit_id": params["ad_unit"],
+        "reward_item": params["reward_item"],
+        "reward_amount": str(reward_amount),
+        "transaction_id": params["transaction_id"],
+    }
+
+def _credit_admob_reward(callback: dict[str, str]) -> dict[str, Any]:
+    conn = _reward_database()
+    try:
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT user_id,tool_id,status,transaction_id,ad_unit_id,reward_item,reward_amount,expires_at
+                   FROM nexora_creator_reward_intents WHERE intent_id=%s FOR UPDATE""",
+                (callback["intent_id"],),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Reward intent was not found.")
+            user_id, tool_id, status, transaction_id, ad_unit_id, reward_item, reward_amount, expires_at = row
+            if str(user_id) != callback["user_id"]:
+                raise HTTPException(403, "AdMob SSV user does not match the reward intent.")
+            if callback["ad_unit_id"] != str(ad_unit_id).rsplit("/", 1)[-1]:
+                raise HTTPException(403, "AdMob SSV ad unit does not match the reward intent.")
+            if callback["reward_item"] != reward_item or int(callback["reward_amount"]) != int(reward_amount):
+                raise HTTPException(403, "AdMob SSV reward definition does not match the reward intent.")
+            if transaction_id == callback["transaction_id"] and status in {"credited", "consumed"}:
+                conn.commit()
+                return {"credited": True, "duplicate": True}
+            if status != "pending":
+                raise HTTPException(409, "This reward intent is no longer pending.")
+            if expires_at <= datetime.now(timezone.utc):
+                raise HTTPException(410, "This reward intent expired before Google confirmed it.")
+            cur.execute(
+                """UPDATE nexora_creator_reward_intents
+                   SET status='credited', transaction_id=%s, credited_at=NOW()
+                   WHERE intent_id=%s AND status='pending'""",
+                (callback["transaction_id"], callback["intent_id"]),
+            )
+        conn.commit()
+        return {"credited": True, "duplicate": False, "tool_id": tool_id}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def _payments_dir(manager: Any) -> Path:
     root=Path(os.environ.get("NEXORA_COMMERCE_DIR",str(manager.root.parent/"nexora-commerce"))).resolve()
@@ -752,8 +1032,9 @@ def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_rol
         jobs.update(job_id,state=JobState.COMPLETED,progress=100,message="A validated GLB game asset is ready for preview and scene placement",error=None)
     except Exception as exc:
         jobs.update(job_id,state=JobState.FAILED,progress=100,message="Asset conversion failed",error=str(exc))
-def _execute_creator_step(job_id: str, project_id: str, owner_id: str, step: str, manager: Any, jobs: Any) -> None:
+def _execute_creator_step(job_id: str, project_id: str, owner_id: str, step: str, manager: Any, jobs: Any, reward_credit_id: str | None = None) -> None:
     from core.orchestration.jobs import JobState
+    consumed_for = "creator-step:" + job_id
     try:
         folder=manager.path_for(project_id)
         owner_file=folder/"nexora_owner.json"
@@ -814,17 +1095,25 @@ def _execute_creator_step(job_id: str, project_id: str, owner_id: str, step: str
             raise RuntimeError("Unknown Creator Flow job: "+step)
         jobs.update(job_id,state=JobState.COMPLETED,progress=100,message=message,error=None)
     except Exception as exc:
+        if reward_credit_id:
+            try:
+                _refund_reward_credit(manager, owner_id, reward_credit_id, consumed_for)
+            except Exception:
+                pass
         jobs.update(job_id,state=JobState.FAILED,progress=100,message="Creator Flow stage failed: "+step,error=str(getattr(exc,"detail",None) or exc))
 
 def _queue_creator_step(pid: str, folder: Path, owner_id: str, step: str, background: BackgroundTasks, manager: Any, jobs: Any) -> dict:
     workflow=_load_workflow(folder)
-    _assert_entitled(manager,owner_id,workflow.plan)
+    entitlement=_assert_entitled(manager,owner_id,workflow.plan)
     _validate_plan(workflow)
     job=jobs.add(Job.create(pid))
+    reward_credit_id=None
+    if entitlement.get("plan") == "basic" and step in REWARDED_BASIC_TOOLS:
+        reward_credit_id=_consume_reward_credit(manager,owner_id,step,"creator-step:"+job.id)
     job_root=folder/"workspace_jobs"
     job_root.mkdir(exist_ok=True)
     (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner_id},indent=2),encoding="utf-8")
-    background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs)
+    background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs,reward_credit_id)
     return {**job.as_dict(),"state":job.state.value.lower(),"kind":"creator."+step,"message":"Queued Creator Flow stage: "+step}
 
 def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
@@ -863,6 +1152,88 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
         background.add_task(_run_asset_conversion,folder,asset_id,owner,payload.target_role,payload.max_faces,job.id,jobs)
         return {**job.as_dict(),"state":job.state.value.lower(),"kind":"asset.convert","target_role":payload.target_role}
+
+    @router.get("/api/v1/creator-flow/rewards")
+    def get_creator_rewards(request: Request):
+        user=getattr(request.state,"nexora_user_id",None)
+        if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
+        entitlement=_get_entitlement(manager,str(user))
+        active_basic=bool(entitlement and entitlement.get("plan")=="basic" and entitlement.get("status")=="active" and (not entitlement.get("expires_at") or datetime.fromisoformat(str(entitlement["expires_at"]).replace("Z","+00:00"))>datetime.now(timezone.utc)))
+        unit=os.environ.get("NEXORA_ADMOB_REWARDED_AD_UNIT_ID","").strip()
+        enabled=bool(_database_url() and unit)
+        balances={tool_id:0 for tool_id in REWARDED_BASIC_TOOLS}
+        if _database_url():
+            conn=_reward_database()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""SELECT tool_id,COUNT(*) FROM nexora_creator_reward_intents
+                                   WHERE user_id=%s AND status='credited' GROUP BY tool_id""",(str(user),))
+                    balances.update({row[0]:int(row[1]) for row in cur.fetchall() if row[0] in balances})
+            finally:
+                conn.close()
+        return {"enabled":enabled,"platform":"android","provider":"AdMob","basic_subscriber":active_basic,"tools":[{"id":key,"name":label,"reward_per_ad":1} for key,label in REWARDED_BASIC_TOOLS.items()],"balances":balances,"note":"Each verified rewarded ad grants one non-transferable NEXORA tool-use credit. Credits have no cash value."}
+
+    @router.post("/api/v1/creator-flow/rewards/intents",status_code=201)
+    def create_creator_reward_intent(payload: RewardIntentRequest, request: Request):
+        user=getattr(request.state,"nexora_user_id",None)
+        if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
+        entitlement=_get_entitlement(manager,str(user))
+        if not entitlement or entitlement.get("plan")!="basic" or entitlement.get("status")!="active":
+            raise HTTPException(403,"Ad-rewarded tool access is reserved for active Basic subscribers.")
+        if entitlement.get("expires_at") and datetime.fromisoformat(str(entitlement["expires_at"]).replace("Z","+00:00"))<=datetime.now(timezone.utc):
+            raise HTTPException(403,"Your Basic plan has expired.")
+        ad_unit=os.environ.get("NEXORA_ADMOB_REWARDED_AD_UNIT_ID","").strip()
+        if not ad_unit: raise HTTPException(503,"Configure NEXORA_ADMOB_REWARDED_AD_UNIT_ID after creating the NEXORA rewarded ad unit in AdMob.")
+        conn=_reward_database()
+        intent_id=secrets.token_urlsafe(32)
+        reward_item=os.environ.get("NEXORA_REWARDED_ADMOB_REWARD_ITEM","nexora_basic_tool_credit").strip()
+        reward_amount=int(os.environ.get("NEXORA_REWARDED_ADMOB_REWARD_AMOUNT","1"))
+        if reward_amount!=1: raise HTTPException(503,"NEXORA Basic rewarded tools require one-use ad credits.")
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO nexora_creator_reward_intents
+                    (intent_id,user_id,tool_id,status,ad_unit_id,reward_item,reward_amount,expires_at)
+                    VALUES(%s,%s,%s,'pending',%s,%s,%s,NOW()+INTERVAL '4 hours')""",
+                    (intent_id,str(user),payload.tool_id,ad_unit,reward_item,reward_amount))
+        finally:
+            conn.close()
+        return {"intent_id":intent_id,"custom_data":intent_id,"user_id":str(user),"tool_id":payload.tool_id,"ad_unit_id":ad_unit,"reward_item":reward_item,"reward_amount":reward_amount,"status":"pending","expires_in_seconds":14400}
+
+    @router.get("/api/v1/creator-flow/rewards/intents/{intent_id}")
+    def get_creator_reward_intent(intent_id: str, request: Request):
+        user=getattr(request.state,"nexora_user_id",None)
+        if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
+        conn=_reward_database()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT intent_id,tool_id,status,expires_at,credited_at
+                               FROM nexora_creator_reward_intents WHERE intent_id=%s AND user_id=%s""",
+                            (intent_id,str(user)))
+                row=cur.fetchone()
+        finally:
+            conn.close()
+        if not row: raise HTTPException(404,"Reward intent not found.")
+        return {"intent_id":row[0],"tool_id":row[1],"status":row[2],"expires_at":row[3].isoformat() if row[3] else None,"credited_at":row[4].isoformat() if row[4] else None}
+
+    @router.post("/api/v1/creator-flow/rewards/credits/consume")
+    def consume_creator_reward_credit(payload: RewardCreditConsumeRequest, request: Request):
+        user=getattr(request.state,"nexora_user_id",None)
+        if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
+        intent_id=_consume_reward_credit_db(str(user),payload.tool_id,payload.consumed_for)
+        return {"consumed":True,"intent_id":intent_id,"tool_id":payload.tool_id}
+
+    @router.post("/api/v1/creator-flow/rewards/credits/refund")
+    def refund_creator_reward_credit(payload: RewardCreditRefundRequest, request: Request):
+        user=getattr(request.state,"nexora_user_id",None)
+        if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
+        restored=_refund_reward_credit_db(str(user),payload.intent_id,payload.consumed_for)
+        return {"restored":restored}
+
+    @router.get("/api/v1/creator-flow/rewards/admob/ssv")
+    def admob_rewarded_ssv(request: Request):
+        callback=_verify_admob_ssv_signature(request)
+        result=_credit_admob_reward(callback)
+        return {"ok":True,**result}
 
     @router.get("/api/v1/creator-flow/plans")
     def get_creator_plans(request: Request):
