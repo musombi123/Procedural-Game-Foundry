@@ -63,9 +63,12 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
     target = _safe_target(raw_path, agent_root)
     current = Path(manager.root).resolve()
     marker = target / ".nexora-workspace.json"
+    marker_preexisted = marker.is_file()
 
+    # A selected existing workspace is account-bound, even when it is already
+    # the active root. Never relabel another account's root as the caller's.
     if target.exists():
-        if marker.is_file():
+        if marker_preexisted:
             try:
                 recorded = json.loads(marker.read_text(encoding="utf-8")).get("owner_id")
             except (OSError, ValueError):
@@ -74,10 +77,12 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
                 raise HTTPException(404, "Workspace not found.")
         elif target != current and list(target.iterdir()):
             raise HTTPException(409, "The selected folder is not empty and is not already a verified NEXORA workspace. Choose an empty folder or select its verified NEXORA workspace root.")
-        elif target == current and not marker.is_file():
-            # Legacy current workspaces can be initialized, but never claim
-            # projects owned by another account or projects without ownership.
+        elif target == current:
+            # A legacy current root can be initialized only after every project
+            # folder that has a project definition proves the current owner.
             for child in target.iterdir():
+                if child.is_symlink():
+                    raise HTTPException(403, "The current workspace contains a symbolic link. Remove it or migrate its target explicitly.")
                 if not child.is_dir() or not (child / "pgf.json").is_file():
                     continue
                 owner_file = child / "nexora_owner.json"
@@ -89,58 +94,123 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
                     raise HTTPException(403, "The current workspace contains a project that is not verified as owned by this NEXORA account.")
     target.mkdir(parents=True, exist_ok=True)
 
-    # Copy, never move, account-owned projects. Original files remain recoverable.
-    source_projects = []
+    # Copy, never move, account-owned projects. Reject symlinks rather than
+    # following them outside the project root during migration.
+    source_projects: list[Path] = []
     if current != target and current.is_dir() and current != agent_root:
         for owner_file in current.glob("*/nexora_owner.json"):
             folder = owner_file.parent
+            if folder.is_symlink() or owner_file.is_symlink():
+                raise HTTPException(422, "A project selected for migration contains a symbolic-link ownership path.")
             try:
                 record = json.loads(owner_file.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if str(record.get("user_id")) == str(user_id) and (folder / "pgf.json").is_file():
-                source_projects.append(folder)
+            if str(record.get("user_id")) != str(user_id) or not (folder / "pgf.json").is_file():
+                continue
+            for current_dir, directories, files in os.walk(folder, followlinks=False):
+                base = Path(current_dir)
+                if base.is_symlink():
+                    raise HTTPException(422, f"Project '{folder.name}' contains a symbolic link and cannot be migrated safely.")
+                for entry in directories + files:
+                    if (base / entry).is_symlink():
+                        raise HTTPException(422, f"Project '{folder.name}' contains a symbolic link and cannot be migrated safely.")
+            source_projects.append(folder)
+
+    copy_projects: list[Path] = []
     for folder in source_projects:
         destination = target / folder.name
         if destination.exists():
+            destination_owner = destination / "nexora_owner.json"
+            try:
+                existing_owner = json.loads(destination_owner.read_text(encoding="utf-8")).get("user_id") if destination_owner.is_file() else None
+            except (OSError, ValueError):
+                raise HTTPException(409, f"Destination project '{folder.name}' has unreadable ownership metadata.")
+            if str(existing_owner or "") == str(user_id) and (destination / "pgf.json").is_file():
+                # A prior interrupted migration may already have copied this
+                # project. Treat that verified destination as completed.
+                continue
             raise HTTPException(409, f"Cannot migrate project '{folder.name}': a folder with that ID already exists at the destination.")
-    if source_projects and not confirm_migration:
+        copy_projects.append(folder)
+
+    if copy_projects and not confirm_migration:
         raise HTTPException(409, {
             "code": "WORKSPACE_MIGRATION_CONFIRMATION_REQUIRED",
-            "message": f"{len(source_projects)} existing project(s) will be copied to the selected folder. The original files will remain untouched.",
-            "projects_to_copy": [folder.name for folder in source_projects],
+            "message": f"{len(copy_projects)} existing project(s) will be copied to the selected folder. The original files will remain untouched.",
+            "projects_to_copy": [folder.name for folder in copy_projects],
         })
-    migrated = 0
-    for folder in source_projects:
-        shutil.copytree(folder, target / folder.name, symlinks=False)
-        migrated += 1
 
-    import datetime
-    marker_payload = {
-        "schema_version": 1,
-        "owner_id": str(user_id),
-        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
-    temporary = marker.with_name(marker.name + ".tmp")
-    temporary.write_text(json.dumps(marker_payload, indent=2), encoding="utf-8")
-    temporary.replace(marker)
+    staging_root = target / ".nexora-migration-staging"
+    staging = staging_root / __import__("uuid").uuid4().hex
+    promoted: list[Path] = []
+    marker_created = False
     config = _config_path(agent_root)
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config_tmp = config.with_name(config.name + ".tmp")
-    config_tmp.write_text(json.dumps({"path": str(target)}, indent=2), encoding="utf-8")
-    config_tmp.replace(config)
-    manager.root = target
-    manager.root.mkdir(parents=True, exist_ok=True)
-    # Keep disk preflight pointed at the chosen workspace's volume during this
-    # running session, not the previous default project directory.
-    runtime_root = target / ".nexora-runtime"
-    runtime_root.mkdir(parents=True, exist_ok=True)
-    os.environ["PGF_DATA_DIR"] = str(runtime_root)
+    previous_config = config.read_bytes() if config.is_file() else None
+    try:
+        if copy_projects:
+            staging.mkdir(parents=True, exist_ok=False)
+            for folder in copy_projects:
+                shutil.copytree(folder, staging / folder.name, symlinks=False)
+            # Promote only complete copies. The original project folders stay
+            # untouched in the previous workspace.
+            for staged_project in sorted(staging.iterdir()):
+                destination = target / staged_project.name
+                if destination.exists():
+                    raise HTTPException(409, f"Destination project '{staged_project.name}' appeared during migration.")
+                staged_project.rename(destination)
+                promoted.append(destination)
+
+        if not marker_preexisted:
+            import datetime
+            marker_payload = {
+                "schema_version": 1,
+                "owner_id": str(user_id),
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+            temporary = marker.with_name(marker.name + ".tmp")
+            temporary.write_text(json.dumps(marker_payload, indent=2), encoding="utf-8")
+            temporary.replace(marker)
+            marker_created = True
+
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config_tmp = config.with_name(config.name + ".tmp")
+        config_tmp.write_text(json.dumps({"path": str(target)}, indent=2), encoding="utf-8")
+        config_tmp.replace(config)
+
+        manager.root = target
+        manager.root.mkdir(parents=True, exist_ok=True)
+        runtime_root = target / ".nexora-runtime"
+        runtime_root.mkdir(parents=True, exist_ok=True)
+        os.environ["PGF_DATA_DIR"] = str(runtime_root)
+    except Exception:
+        # Roll back only folders created by this attempt. A workspace that was
+        # already valid before this request is never removed or relabelled.
+        for destination in reversed(promoted):
+            if destination.exists():
+                shutil.rmtree(destination, ignore_errors=True)
+        if marker_created:
+            marker.unlink(missing_ok=True)
+        if previous_config is None:
+            config.unlink(missing_ok=True)
+        else:
+            temporary = config.with_name(config.name + ".restore.tmp")
+            temporary.write_bytes(previous_config)
+            temporary.replace(config)
+        manager.root = current
+        raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        try:
+            staging_root.rmdir()
+        except OSError:
+            pass
+
     return {
         "saved": True,
         "workspace_root": str(target),
         "projects_directory": str(target),
-        "projects_migrated": migrated,
+        "projects_migrated": len(promoted),
         "original_workspace_preserved": True,
     }
 
