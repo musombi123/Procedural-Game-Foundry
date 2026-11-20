@@ -22,7 +22,7 @@ if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
     throw "Python Launcher was not found. Install Python 3.11 or newer from https://www.python.org/downloads/windows/ and rerun this script."
 }
 
-$PythonVersion = (& py -3.11 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+$PythonVersion = (& py -3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
 if ($LASTEXITCODE -ne 0 -or [version]$PythonVersion -lt [version]"3.11") {
     throw "Python 3.11+ is required. Install it from https://www.python.org/downloads/windows/."
 }
@@ -31,7 +31,7 @@ New-Item -ItemType Directory -Force -Path $LocalRoot, $DataRoot, $AgentData | Ou
 
 if (-not (Test-Path $Python)) {
     Write-Host "Creating isolated NEXORA Python environment..."
-    & py -3.11 -m venv $Venv
+    & py -3 -m venv $Venv
     if ($LASTEXITCODE -ne 0) { throw "Could not create the NEXORA Python virtual environment." }
 }
 
@@ -63,7 +63,13 @@ Write-Host "Optional tools are detected, not silently installed: Blender, Godot 
 Write-Host "Install only the tools required by your selected workload, then restart this agent."
 Write-Host ""
 
-& $Python -m services.worker.local_agent
-if ($LASTEXITCODE -ne 0) {
-    throw "NEXORA Local Compute Agent exited with an error (exit code $LASTEXITCODE)."
+Push-Location $RepoRoot
+try {
+    & $Python -m services.worker.local_agent
+    if ($LASTEXITCODE -ne 0) {
+        throw "NEXORA Local Compute Agent exited with an error (exit code $LASTEXITCODE)."
+    }
+}
+finally {
+    Pop-Location
 }
