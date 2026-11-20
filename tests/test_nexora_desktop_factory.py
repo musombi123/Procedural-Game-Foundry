@@ -191,3 +191,30 @@ def test_snapshot_restore_is_atomic_and_preserves_owner_record(tmp_path: Path):
     assert json.loads((folder / "nexora_owner.json").read_text(encoding="utf-8")) == owner_record
     assert manager.load(definition.id).id == definition.id
     assert not list(root.glob(f".{definition.id}.rollback-*"))
+
+
+
+def test_workspace_migration_rejects_project_symlinks_without_touching_source(tmp_path: Path):
+    old_root = tmp_path / "old-projects"
+    agent_root = tmp_path / "agent-secrets"
+    destination = tmp_path / "new-projects"
+    project = old_root / "linked-game"
+    project.mkdir(parents=True)
+    agent_root.mkdir()
+    (project / "pgf.json").write_text('{"id":"linked-game"}', encoding="utf-8")
+    (project / "nexora_owner.json").write_text(json.dumps({"user_id":"creator-1"}), encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("must never be copied", encoding="utf-8")
+    try:
+        (project / "outside-link.txt").symlink_to(outside)
+    except OSError:
+        pytest.skip("The current operating system does not allow creating a symlink in this test environment.")
+
+    manager = DummyProjectManager(old_root)
+    with pytest.raises(HTTPException) as blocked:
+        set_workspace_root(manager, agent_root, str(destination), "creator-1", confirm_migration=True)
+
+    assert blocked.value.status_code == 422
+    assert (project / "pgf.json").is_file()
+    assert not (destination / "linked-game").exists()
+    assert not (destination / ".nexora-workspace.json").exists()
