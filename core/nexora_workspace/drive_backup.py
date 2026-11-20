@@ -22,6 +22,7 @@ from urllib.request import Request as UrlRequest, urlopen
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 from core.nexora_workspace.desktop_factory import (
     BACKUP_TOTAL_LIMIT,
@@ -64,14 +65,22 @@ def _client_id() -> str:
 
 
 def _redirect_uri() -> str:
-    value = os.environ.get(
-        "NEXORA_GOOGLE_DRIVE_REDIRECT_URI",
-        "http://127.0.0.1:8765/engine/api/v1/desktop/drive/callback",
-    ).strip()
+    # Google Desktop OAuth loopback redirects use only the loopback host and
+    # port (no arbitrary callback path). The outer Local Agent owns this root.
+    value = os.environ.get("NEXORA_GOOGLE_DRIVE_REDIRECT_URI", "http://127.0.0.1:8765").strip()
     parsed = urlparse(value)
-    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
-        raise HTTPException(503, "Google Drive OAuth must return to the paired local loopback agent.")
-    return value
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+        or parsed.port != 8765
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+    ):
+        raise HTTPException(503, "Google Desktop OAuth must redirect to http://127.0.0.1:8765 (the NEXORA Local Agent loopback address).")
+    return "http://" + (parsed.hostname or "127.0.0.1") + ":8765"
 
 
 def _store_refresh_token(owner: str, token: str) -> None:
@@ -338,51 +347,56 @@ def register_drive_backup_routes(app: Any, manager: Any) -> None:
         })
         return {"authorization_url": "https://accounts.google.com/o/oauth2/v2/auth?" + query, "expires_in_seconds": 600}
 
-    @router.get("/callback")
-    def drive_callback(request: Request):
-        state = str(request.query_params.get("state") or "")
-        code = str(request.query_params.get("code") or "")
-        error = str(request.query_params.get("error") or "")
-        with _DRIVE_LOCK:
-            pending = _PENDING_AUTH.pop(state, None)
-        if not pending or time.time() - float(pending.get("created_at") or 0) > 600:
-            raise HTTPException(400, "Google Drive authorization state is invalid or expired. Start the connection again.")
-        if error:
-            raise HTTPException(400, "Google Drive connection was not authorized: " + error[:120])
-        if not code:
-            raise HTTPException(400, "Google Drive did not return an authorization code.")
-        data = {
-            "client_id": _client_id(),
-            "code": code,
-            "code_verifier": str(pending["verifier"]),
-            "redirect_uri": str(pending["redirect_uri"]),
-            "grant_type": "authorization_code",
-        }
-        client_secret = os.environ.get("NEXORA_GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
-        if client_secret:
-            data["client_secret"] = client_secret
-        payload = _token_request(data)
-        refresh = str(payload.get("refresh_token") or "")
-        if not refresh:
-            # A consent refresh can omit a new refresh token on a subsequent
-            # authorization. Retain the existing vault token if one exists.
-            refresh = _get_refresh_token(str(pending["owner"])) or ""
-        if not refresh:
-            raise HTTPException(502, "Google did not issue an offline refresh token. Disconnect this app in your Google account and reconnect with consent.")
-        _store_refresh_token(str(pending["owner"]), refresh)
-        access = str(payload["access_token"])
-        with _DRIVE_LOCK:
-            _ACCESS_CACHE[str(pending["owner"])] = (
-                access,
-                time.time() + max(120, int(payload.get("expires_in") or 3600)),
-            )
-        return {
-            "connected": True,
-            "provider": "Google Drive",
-            "owner_account_id": str(pending["owner"]),
-            "scope": DRIVE_SCOPE,
-            "message": "Google Drive is connected. You may close this tab and return to NEXORA Studio.",
-        }
+def handle_drive_callback(request: Request) -> HTMLResponse:
+    """Handle Google's installed-desktop loopback redirect at the agent root."""
+    state = str(request.query_params.get("state") or "")
+    code = str(request.query_params.get("code") or "")
+    error = str(request.query_params.get("error") or "")
+    with _DRIVE_LOCK:
+        pending = _PENDING_AUTH.pop(state, None)
+    if not pending or time.time() - float(pending.get("created_at") or 0) > 600:
+        raise HTTPException(400, "Google Drive authorization state is invalid or expired. Start the connection again.")
+    if error:
+        return HTMLResponse(
+            "<!doctype html><html><meta charset='utf-8'><title>NEXORA Drive connection</title>"
+            "<body style='font:16px system-ui;max-width:640px;margin:12vh auto;padding:24px'>"
+            "<h2>Google Drive was not connected</h2><p>Authorization was declined or cancelled. Return to NEXORA Studio and try again.</p>"
+            "<p>You may close this tab.</p></body></html>",
+            status_code=200,
+        )
+    if not code:
+        raise HTTPException(400, "Google Drive did not return an authorization code.")
+    data = {
+        "client_id": _client_id(),
+        "code": code,
+        "code_verifier": str(pending["verifier"]),
+        "redirect_uri": str(pending["redirect_uri"]),
+        "grant_type": "authorization_code",
+    }
+    client_secret = os.environ.get("NEXORA_GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    if client_secret:
+        data["client_secret"] = client_secret
+    payload = _token_request(data)
+    refresh = str(payload.get("refresh_token") or "")
+    if not refresh:
+        refresh = _get_refresh_token(str(pending["owner"])) or ""
+    if not refresh:
+        raise HTTPException(502, "Google did not issue an offline refresh token. Disconnect this app in your Google account and reconnect with consent.")
+    _store_refresh_token(str(pending["owner"]), refresh)
+    access = str(payload["access_token"])
+    with _DRIVE_LOCK:
+        _ACCESS_CACHE[str(pending["owner"])] = (
+            access,
+            time.time() + max(120, int(payload.get("expires_in") or 3600)),
+        )
+    return HTMLResponse(
+        "<!doctype html><html><meta charset='utf-8'><title>NEXORA Drive connected</title>"
+        "<body style='font:16px system-ui;max-width:640px;margin:12vh auto;padding:24px'>"
+        "<h2>Google Drive connected</h2><p>Your NEXORA account can now store verified project backups in your Google Drive.</p>"
+        "<p>Return to NEXORA Studio and refresh Backup &amp; Versions.</p><p>You may close this tab.</p></body></html>",
+        status_code=200,
+    )
+
 
     @router.post("/disconnect")
     def drive_disconnect(request: Request):
