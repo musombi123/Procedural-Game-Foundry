@@ -463,15 +463,15 @@ def register_desktop_factory_routes(app, require_paired, data_root: Path) -> Non
         }
 
     @router.get("/toolchains")
-    def toolchains(owner: str = Depends(require_paired)):
+    def toolchains(project_id: str | None = Query(default=None, max_length=64), owner: str = Depends(require_paired)):
         catalog = [
-            {"id":"godot4","label":"Godot 4","purpose":"Game engine and matching export templates","required_for":["web","android","windows"]},
-            {"id":"blender","label":"Blender","purpose":"Optional 3D asset creation and processing"},
-            {"id":"ffmpeg","label":"FFmpeg","purpose":"Optional audio/video conversion"},
-            {"id":"java","label":"OpenJDK 17","purpose":"Android export toolchain"},
-            {"id":"android_sdk","label":"Android SDK","purpose":"Android APK/AAB export"},
-            {"id":"adb","label":"Android Platform Tools","purpose":"Optional physical-device testing"},
-            {"id":"sdkmanager","label":"Android SDK Manager","purpose":"Install pinned Android SDK components"},
+            {"id":"godot4","label":"Godot 4","purpose":"Game engine and matching export templates","required_for":["web","android","windows"],"installable":False},
+            {"id":"blender","label":"Blender","purpose":"Optional 3D asset creation and processing","installable":False},
+            {"id":"ffmpeg","label":"FFmpeg","purpose":"Optional audio/video conversion","installable":False},
+            {"id":"java","label":"OpenJDK 17","purpose":"Android export toolchain","installable":False},
+            {"id":"android_sdk","label":"Android SDK","purpose":"Android APK/AAB export components","installable":True},
+            {"id":"adb","label":"Android Platform Tools","purpose":"Optional physical-device testing","installable":False},
+            {"id":"sdkmanager","label":"Android SDK Manager","purpose":"Install pinned Android SDK components","installable":False},
         ]
         tools = _tool_inventory()
         profile = {}
@@ -480,7 +480,16 @@ def register_desktop_factory_routes(app, require_paired, data_root: Path) -> Non
             profile = collect_system_profile(Path(data_root))
         except Exception:
             pass
-        return {"machine":{"system":platform.system()},"install_provider":"android_sdkmanager_only","catalog":catalog,"tools":tools,"lock":None,"profile":profile,
+        lock = None
+        if project_id:
+            directory, _ = _project(owner, project_id)
+            lock_path = directory / ".nexora" / "toolchain.lock.json"
+            if lock_path.is_file():
+                try:
+                    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    lock = None
+        return {"machine":{"system":platform.system()},"install_provider":"android_sdkmanager_only" if tools["sdkmanager"]["available"] else None,"catalog":catalog,"tools":tools,"lock":lock,"profile":profile,
                 "android_export_ready": bool(tools["java"]["available"] and tools["android_sdk"]["available"] and tools["godot4"]["available"])}
 
     @router.post("/toolchains/install")
