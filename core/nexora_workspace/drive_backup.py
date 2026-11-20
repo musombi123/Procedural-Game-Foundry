@@ -50,8 +50,16 @@ def _keyring():
         raise HTTPException(503, "The local OS credential-vault package is unavailable. Reinstall the NEXORA Local Agent.") from exc
     try:
         backend = keyring.get_keyring()
-        if float(getattr(backend, "priority", 0)) <= 0:
-            raise RuntimeError("No operating-system credential vault is configured.")
+        module = type(backend).__module__.lower()
+        secure_os_backends = (
+            "keyring.backends.windows",
+            "keyring.backends.macos",
+            "keyring.backends.secretservice",
+            "keyring.backends.kwallet",
+            "keyring.backends.libsecret",
+        )
+        if float(getattr(backend, "priority", 0)) <= 0 or not any(item in module for item in secure_os_backends):
+            raise RuntimeError("The selected keyring backend is not an approved operating-system credential vault.")
     except Exception as exc:
         raise HTTPException(503, "NEXORA cannot access an operating-system credential vault on this computer.") from exc
     return keyring
@@ -147,7 +155,7 @@ def _access_token(owner: str, *, force_refresh: bool = False) -> str:
     return access
 
 
-def _google_request_json(method: str, url: str, owner: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _google_request_json(method: str, url: str, owner: str, payload: dict[str, Any] | None = None, _retried: bool = False) -> dict[str, Any]:
     token = _access_token(owner)
     headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
     body = None
@@ -159,9 +167,9 @@ def _google_request_json(method: str, url: str, owner: str, payload: dict[str, A
         with urlopen(request, timeout=45) as response:
             result = json.loads(response.read(2 * 1024 * 1024).decode("utf-8"))
     except HTTPError as exc:
-        if exc.code == 401:
+        if exc.code == 401 and not _retried:
             _access_token(owner, force_refresh=True)
-            return _google_request_json(method, url, owner, payload)
+            return _google_request_json(method, url, owner, payload, _retried=True)
         detail = exc.read(4096).decode("utf-8", errors="replace")
         raise HTTPException(502, "Google Drive API request failed: " + detail[:700]) from exc
     except (URLError, TimeoutError, OSError, ValueError) as exc:
@@ -336,7 +344,7 @@ def _drive_upload_resumable(archive: Path, owner: str, project_id: str, snapshot
 
     raise HTTPException(502, "Google Drive did not confirm completion of the full backup archive.")
 
-def _drive_download(file_id: str, destination: Path, owner: str) -> int:
+def _drive_download(file_id: str, destination: Path, owner: str, _retried: bool = False) -> int:
     token = _access_token(owner)
     request = UrlRequest(
         "https://www.googleapis.com/drive/v3/files/" + file_id + "?alt=media",
@@ -355,9 +363,9 @@ def _drive_download(file_id: str, destination: Path, owner: str) -> int:
                     raise HTTPException(413, "The Drive backup exceeds the 10 GiB local restore limit.")
                 output.write(chunk)
     except HTTPError as exc:
-        if exc.code == 401:
+        if exc.code == 401 and not _retried:
             _access_token(owner, force_refresh=True)
-            return _drive_download(file_id, destination, owner)
+            return _drive_download(file_id, destination, owner, _retried=True)
         detail = exc.read(4096).decode("utf-8", errors="replace")
         raise HTTPException(502, "Could not download the selected Google Drive backup: " + detail[:500]) from exc
     except HTTPException:
