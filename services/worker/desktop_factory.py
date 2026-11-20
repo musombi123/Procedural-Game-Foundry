@@ -67,7 +67,7 @@ class SaveFileRequest(BaseModel):
 
 class ToolInstallRequest(BaseModel):
     tools: list[str] = Field(min_length=1, max_length=12)
-    confirm: bool = False
+    confirm_install: bool = False
 
 
 class PublishRequest(BaseModel):
@@ -416,7 +416,7 @@ def register_desktop_factory_routes(app, require_paired, data_root: Path) -> Non
     @router.post("/toolchains/install")
     def install_toolchains(payload: ToolInstallRequest, owner: str = Depends(require_paired)):
         allowed = {"godot4","blender","ffmpeg","java17","android_sdk","adb"}
-        if not payload.confirm:
+        if not payload.confirm_install:
             raise HTTPException(403, "Explicitly confirm installation on this computer.")
         unknown = sorted(set(payload.tools) - allowed)
         if unknown:
