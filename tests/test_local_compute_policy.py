@@ -16,14 +16,25 @@ def test_cloud_compute_routes_are_local_only():
 
 
 def test_cloud_control_plane_routes_remain_available():
-    assert not is_local_compute_only_request("GET", "/api/projects")
     assert not is_local_compute_only_request("GET", "/health")
+    assert not is_local_compute_only_request("GET", "/api/capabilities")
     assert not is_local_compute_only_request(
         "POST", "/api/v1/creator-flow/checkout"
     )
     assert not is_local_compute_only_request(
-        "PUT", "/api/v1/workspace/projects/demo"
+        "GET", "/api/v1/creator-flow/plans"
     )
+
+
+def test_all_project_and_workspace_data_is_local_only():
+    assert is_local_compute_only_request("GET", "/api/projects")
+    assert is_local_compute_only_request("GET", "/api/projects/demo")
+    assert is_local_compute_only_request("PUT", "/api/projects/demo/world")
+    assert is_local_compute_only_request("GET", "/api/v1/workspace/projects")
+    assert is_local_compute_only_request("PATCH", "/api/v1/workspace/projects/demo")
+    assert is_local_compute_only_request("GET", "/api/v1/workspace/jobs/job-1/artifacts")
+    assert is_local_compute_only_request("GET", "/api/v1/studio/templates")
+    assert is_local_compute_only_request("GET", "/api/v1/workspace/assets/conversion-capabilities")
 
 
 def test_local_compute_block_response_is_machine_readable():
