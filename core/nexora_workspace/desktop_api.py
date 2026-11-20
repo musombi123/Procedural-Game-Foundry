@@ -389,6 +389,8 @@ class PublishPrepareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     platform: str = Field(pattern=r"^(android|web|windows|linux)$")
     artifact_id: str = Field(min_length=1, max_length=100)
+    version: str = Field(default="1.0.0", min_length=1, max_length=40, pattern=r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$")
+    release_notes: str = Field(default="", max_length=5000)
     rights_confirmed: bool = False
 
 
@@ -815,7 +817,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         record = {
             "schema_version": 1, "id": release_id, "project_id": pid, "owner_id": owner_id,
             "project_name": definition.project.name, "provider_status": "prepared_not_submitted",
-            "target": target, "version": "1.0.0", "release_notes": "",
+            "target": target, "version": payload.version, "release_notes": payload.release_notes,
             "created_at": _utc(), "rights_confirmed": True,
             "job_id": job_id,
             "artifacts": [{
