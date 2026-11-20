@@ -88,12 +88,14 @@ def test_image_to_3d_profile_requires_cuda_vram():
         "machine": {
             "logical_cpu_count": 8,
             "ram_total_gib": 32,
+            "ram_available_gib": 12,
             "disk_free_gib": 80,
         },
         "gpu": {
             "primary": {
                 "vendor": "NVIDIA",
                 "memory_total_bytes": 8 * 1024**3,
+                "memory_free_bytes": 5 * 1024**3,
             }
         },
         "tools": {"blender": {"available": True}, "python": {"available": True}},
@@ -101,3 +103,29 @@ def test_image_to_3d_profile_requires_cuda_vram():
     }
     result = check_requirements("image_to_3d", profile)
     assert result["ready"] is True
+
+
+def test_image_to_3d_is_blocked_when_gpu_vram_is_busy():
+    profile = {
+        "machine": {
+            "logical_cpu_count": 8,
+            "ram_total_gib": 32,
+            "ram_available_gib": 12,
+            "disk_free_gib": 80,
+        },
+        "gpu": {
+            "primary": {
+                "vendor": "NVIDIA",
+                "memory_total_bytes": 8 * 1024**3,
+                "memory_free_bytes": 1 * 1024**3,
+            }
+        },
+        "tools": {"blender": {"available": True}, "python": {"available": True}},
+        "workers": {"triposr": {"available": True}},
+    }
+    result = check_requirements("image_to_3d", profile)
+    assert result["ready"] is False
+    assert any(
+        item["name"] == "Available GPU memory" and item["status"] == "fail"
+        for item in result["checks"]
+    )
