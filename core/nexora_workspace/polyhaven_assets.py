@@ -184,6 +184,99 @@ def _download_verified(url: str, target: Path, expected_size: int, expected_md5:
         raise
 
 
+PROMPT_ASSET_HINTS = {
+    "jungle": ("tree", "plant", "rock"),
+    "forest": ("tree", "plant", "rock"),
+    "nature": ("tree", "plant", "rock"),
+    "survival": ("tree", "rock", "crate"),
+    "city": ("building", "car", "street"),
+    "urban": ("building", "car", "street"),
+    "racing": ("car", "vehicle", "road"),
+    "vehicle": ("car", "vehicle", "truck"),
+    "space": ("spaceship", "robot", "satellite"),
+    "sci-fi": ("robot", "spaceship", "futuristic"),
+    "robot": ("robot", "machine", "drone"),
+    "fantasy": ("castle", "sword", "dragon"),
+    "medieval": ("castle", "sword", "armor"),
+    "animal": ("animal", "horse", "dog"),
+    "farm": ("tractor", "animal", "barn"),
+    "football": ("football", "goal", "stadium"),
+    "sports": ("football", "ball", "stadium"),
+}
+MAX_AUTO_MODEL_BYTES = 60 * 1024 * 1024
+MAX_AUTO_TOTAL_BYTES = 120 * 1024 * 1024
+
+
+def auto_install_from_prompt(
+    project_root: Path, prompt: str, resolution: str = "1k", limit: int = 3
+) -> dict[str, Any]:
+    """Find a few relevant real models and register them for generated scenes.
+
+    This runs only in the paired desktop build worker. Network/provider failures
+    are non-fatal so an offline creator can still build the procedural world.
+    """
+    prompt_text = str(prompt or "").lower()
+    hints = []
+    for signal, values in PROMPT_ASSET_HINTS.items():
+        if signal in prompt_text:
+            hints.extend(values)
+    if not hints:
+        hints = ["tree", "rock", "crate"]
+    unique_hints = list(dict.fromkeys(hints))
+    registry = AssetRegistry((project_root / "assets").resolve())
+    existing = {item.get("asset_id"): item for item in registry.list()}
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    total_bytes = 0
+    errors = []
+    for hint in unique_hints:
+        if len(selected) >= max(1, min(int(limit), 5)):
+            break
+        try:
+            matches = search_models(hint, limit=12)["results"]
+        except PolyHavenError as exc:
+            errors.append(str(exc))
+            break
+        for match in matches:
+            asset_id = match["id"]
+            if asset_id in selected_ids:
+                continue
+            registry_id = f"polyhaven_{asset_id}"
+            if registry_id in existing:
+                selected.append({
+                    "asset_id": asset_id, "asset_registry_id": registry_id,
+                    "name": match["name"], "already_installed": True,
+                    "total_bytes": 0, "model_path": existing[registry_id].get("path"),
+                })
+                selected_ids.add(asset_id)
+                break
+            try:
+                file_tree = _request_json(f"{API_ROOT}/files/{urllib.parse.quote(asset_id, safe='')}")
+                files = _choose_model_files(file_tree, resolution)
+                expected_bytes = sum(int(record.get("size") or 0) for _, record in files)
+                if expected_bytes <= 0 or expected_bytes > MAX_AUTO_MODEL_BYTES:
+                    continue
+                if total_bytes + expected_bytes > MAX_AUTO_TOTAL_BYTES:
+                    return {
+                        "provider": "Poly Haven", "resolution": resolution,
+                        "assets": selected, "total_bytes": total_bytes,
+                        "warnings": errors + ["Automatic 3D asset download reached its 120 MB build budget."],
+                    }
+                result = download_model(project_root, asset_id, resolution)
+                result["already_installed"] = False
+                selected.append(result)
+                selected_ids.add(asset_id)
+                total_bytes += int(result["total_bytes"])
+                break
+            except PolyHavenError as exc:
+                errors.append(f"{asset_id}: {exc}")
+                continue
+    return {
+        "provider": "Poly Haven", "resolution": resolution,
+        "assets": selected, "total_bytes": total_bytes, "warnings": errors,
+    }
+
+
 def download_model(project_root: Path, asset_id: str, resolution: str = "2k") -> dict[str, Any]:
     if not ASSET_ID_RE.fullmatch(str(asset_id or "")):
         raise PolyHavenError("Invalid Poly Haven asset identifier.")
