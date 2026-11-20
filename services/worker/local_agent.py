@@ -447,6 +447,13 @@ def short_capabilities(user_id: str = Depends(_require_paired)):
     }
 
 
+# Desktop factory APIs are mounted only inside this loopback agent. They are
+# deliberately absent from the hosted cloud application.
+from services.worker.desktop_factory import register_desktop_factory_routes
+
+register_desktop_factory_routes(app, _require_paired, DATA_ROOT)
+
+
 # The complete Foundry application is available locally under /engine. Its
 # generation endpoints are blocked on the cloud host by execution_policy.py.
 # The agent process runs with NEXORA_LOCAL_AGENT=true, so those operations run
