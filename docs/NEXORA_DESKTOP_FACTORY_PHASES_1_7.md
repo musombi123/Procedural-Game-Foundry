@@ -49,6 +49,18 @@ The project root is selected on the desktop agent. Imported Godot projects are c
 - Google Drive OAuth redirects to the Local Agent loopback root on port 8765. Refresh credentials are restricted to recognized OS keyring backends; the connector never stores them in browser storage or project files.
 - Release checks inspect credential-file presence and platform prerequisites; they never return credentials to the browser and never claim a release has been submitted or approved.
 
+## Optional Google Drive backup setup
+
+The Drive connector uses a Google OAuth **Desktop app** client and the desktop loopback redirect. It requests only the `https://www.googleapis.com/auth/drive.file` scope. This allows NEXORA to create and manage only files created by, or explicitly opened/shared with, this application; it does not grant NEXORA general access to the creator's entire Drive.
+
+1. In the creator's Google Cloud project, enable the Google Drive API and configure the OAuth consent screen. Add the creator as a test user while the app is in Testing mode.
+2. Create an OAuth client whose application type is **Desktop app**. Do not use a Web application client for the local agent loopback flow.
+3. Set `NEXORA_GOOGLE_OAUTH_CLIENT_ID` in the Windows user environment for the Local Agent. An optional client secret may be set as `NEXORA_GOOGLE_OAUTH_CLIENT_SECRET`; the Desktop app flow does not depend on treating a public client secret as confidential.
+4. The default OAuth redirect is `http://127.0.0.1:8765` with no callback path. This must remain the Local Agent's loopback port. Restart the agent after changing environment variables.
+5. In NEXORA Studio, open Backup & Versions, connect Google Drive, grant consent, return to Studio and refresh. Create a local snapshot, then choose Back up to Drive. Confirm the remote copy appears and test restore into a disposable copy of the project before relying on it for recovery.
+
+The refresh token is stored with the local operating system's credential vault. On Windows this uses the Windows credential backend; macOS uses Keychain; Linux requires a supported Secret Service/KWallet backend. NEXORA rejects plaintext file keyring backends. Drive backup is optional and local snapshots remain available when Drive is disconnected.
+
 ## Important limits
 
 This is a substantial product implementation, not a claim of production acceptance on every desktop configuration. The following are still external or unverified:
