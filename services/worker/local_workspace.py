@@ -64,7 +64,7 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
     current = Path(manager.root).resolve()
     marker = target / ".nexora-workspace.json"
 
-    if target.exists() and target != current:
+    if target.exists():
         if marker.is_file():
             try:
                 recorded = json.loads(marker.read_text(encoding="utf-8")).get("owner_id")
@@ -72,10 +72,21 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
                 raise HTTPException(409, "Selected folder has an invalid NEXORA workspace marker.")
             if str(recorded) != str(user_id):
                 raise HTTPException(404, "Workspace not found.")
-        else:
-            meaningful = list(target.iterdir())
-            if meaningful:
-                raise HTTPException(409, "The selected folder is not empty and is not already a verified NEXORA workspace. Choose an empty folder or select its verified NEXORA workspace root.")
+        elif target != current and list(target.iterdir()):
+            raise HTTPException(409, "The selected folder is not empty and is not already a verified NEXORA workspace. Choose an empty folder or select its verified NEXORA workspace root.")
+        elif target == current and not marker.is_file():
+            # Legacy current workspaces can be initialized, but never claim
+            # projects owned by another account or projects without ownership.
+            for child in target.iterdir():
+                if not child.is_dir() or not (child / "pgf.json").is_file():
+                    continue
+                owner_file = child / "nexora_owner.json"
+                try:
+                    child_owner = json.loads(owner_file.read_text(encoding="utf-8")).get("user_id") if owner_file.is_file() else None
+                except (OSError, ValueError):
+                    raise HTTPException(409, "A project in this workspace has unreadable ownership metadata.")
+                if str(child_owner or "") != str(user_id):
+                    raise HTTPException(403, "The current workspace contains a project that is not verified as owned by this NEXORA account.")
     target.mkdir(parents=True, exist_ok=True)
 
     # Copy, never move, account-owned projects. Original files remain recoverable.
@@ -120,6 +131,11 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
     config_tmp.replace(config)
     manager.root = target
     manager.root.mkdir(parents=True, exist_ok=True)
+    # Keep disk preflight pointed at the chosen workspace's volume during this
+    # running session, not the previous default project directory.
+    runtime_root = target / ".nexora-runtime"
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    os.environ["PGF_DATA_DIR"] = str(runtime_root)
     return {
         "saved": True,
         "workspace_root": str(target),
