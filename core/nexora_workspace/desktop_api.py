@@ -700,7 +700,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "started": True,
             "installers": started,
             "manual_setup": [{"id":item,"message":"Use the official installer or sdkmanager; complete Google licence prompts yourself."} for item in manual],
-            "message": "Installer windows have been started. Complete each installer, accept vendor licences yourself, then return and select Detect tools. Installation is not marked complete until detection succeeds."
+            "message": "Installer windows have been started. Complete each installer and accept vendor licences yourself. Restart NEXORA Local Agent so updated PATH values are detected, then select Detect tools. Installation is not marked complete until detection succeeds."
         }
 
     @router.post("/api/v1/desktop/toolchains/lock")
