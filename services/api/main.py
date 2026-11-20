@@ -122,14 +122,27 @@ def health():
 
 @app.get("/api/capabilities")
 def capabilities():
+    if not LOCAL_AGENT_MODE:
+        return {
+            "project_creation": False,
+            "procedural_terrain": False,
+            "scene_editing": False,
+            "scene_persistence": False,
+            "godot_assembly": False,
+            "godot_installed": False,
+            "blender_installed": False,
+            "execution_location": "creator_device",
+            "cloud_compute_enabled": False,
+            "cloud_role": "accounts_billing_and_finished_artifact_delivery",
+        }
     return {
         "project_creation": True,
         "procedural_terrain": True,
         "scene_editing": True,
         "scene_persistence": True,
-        "godot_assembly": LOCAL_AGENT_MODE,
-        "godot_installed": bool(LOCAL_AGENT_MODE and (shutil.which("godot") or shutil.which("godot4"))),
-        "blender_installed": bool(LOCAL_AGENT_MODE and shutil.which("blender")),
+        "godot_assembly": True,
+        "godot_installed": bool(shutil.which("godot") or shutil.which("godot4")),
+        "blender_installed": bool(shutil.which("blender")),
         "execution_location": "creator_device",
         "cloud_compute_enabled": False,
         "genres": ["science-fiction", "fantasy", "modern", "survival", "adventure"],
