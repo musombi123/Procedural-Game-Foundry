@@ -74,8 +74,10 @@ def test_world_document_is_persisted_for_project_owner(tmp_path):
     }
     saved = client.put(f"/api/v1/workspace/projects/{project_id}/world", json=payload)
     assert saved.status_code == 200
-    assert saved.json()["objects"] == 1
-    assert saved.json()["seed"] == 55
+    assert saved.json()["saved"] is True
+    assert saved.json()["save_result"]["revision"] >= 1
+    assert saved.json()["document"]["seed"] == 55
+    assert len(saved.json()["document"]["objects"]) == 1
 
     restored = client.get(f"/api/v1/workspace/projects/{project_id}/world")
     assert restored.status_code == 200
