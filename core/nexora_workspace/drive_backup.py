@@ -342,7 +342,15 @@ def _drive_upload_resumable(archive: Path, owner: str, project_id: str, snapshot
                 stalled_responses = 0
             offset = next_offset
 
-    raise HTTPException(502, "Google Drive did not confirm completion of the full backup archive.")
+    # A lost final response can leave the last 308 acknowledgement in flight.
+    # Ask the session for its final state rather than treating all bytes sent
+    # as proof that Drive committed the file.
+    final_offset, completed = query_server_offset()
+    if completed:
+        return completed
+    if final_offset != size:
+        raise HTTPException(502, "Google Drive upload stopped before the complete archive was received.")
+    raise HTTPException(502, "Google Drive received all bytes but did not confirm the completed backup file.")
 
 def _drive_download(file_id: str, destination: Path, owner: str, _retried: bool = False) -> int:
     token = _access_token(owner)
