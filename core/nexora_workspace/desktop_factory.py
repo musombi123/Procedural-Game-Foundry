@@ -136,6 +136,29 @@ def _editor_root(folder: Path) -> Path:
     return game
 
 
+def _ensure_starter_godot_project(folder: Path, project_name: str) -> Path:
+    """Create a minimal editable Godot 4 project before the first generated build."""
+    game = folder / "game"
+    game.mkdir(parents=True, exist_ok=True)
+    project_file = game / "project.godot"
+    if not project_file.is_file():
+        safe_name = json.dumps(str(project_name or "Untitled Game")[:80], ensure_ascii=False)
+        project_file.write_text(
+            "config_version=5\n\n"
+            "[application]\n"
+            f"config/name={safe_name}\n\n"
+            "[display]\n"
+            "window/size/viewport_width=1280\n"
+            "window/size/viewport_height=720\n\n"
+            "[rendering]\n"
+            "renderer/rendering_method=\"gl_compatibility\"\n",
+            encoding="utf-8",
+        )
+    for name in ("scenes", "scripts", "assets", "audio", "addons", "tests"):
+        (game / name).mkdir(exist_ok=True)
+    return game
+
+
 def _manifest(folder: Path, owner: str, name: str | None = None) -> dict[str, Any]:
     nexora = folder / ".nexora"
     nexora.mkdir(parents=True, exist_ok=True)
@@ -563,13 +586,12 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     def initialize_project(pid: str, request: Request):
         folder = _project_folder(manager, pid, request)
         definition = manager.load(pid)
+        game = _ensure_starter_godot_project(folder, definition.project.name)
         manifest = _manifest(folder, _owner_id(request), definition.project.name)
         profile = collect_system_profile(manager.root)
         lock = _project_lock(folder, profile)
-        game = _editor_root(folder)
-        if game.is_dir():
-            _manifest(game, _owner_id(request), definition.project.name)
-            _atomic_json(game / ".nexora" / "toolchain.lock.json", lock)
+        _manifest(game, _owner_id(request), definition.project.name)
+        _atomic_json(game / ".nexora" / "toolchain.lock.json", lock)
         return {"initialized": True, "manifest": manifest, "toolchain_lock": lock}
 
     @router.post("/projects/import")
