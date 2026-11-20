@@ -397,15 +397,22 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         total_bytes = 0
         file_count = 0
         for current, dirs, files in os.walk(source):
-            for name in dirs + files:
-                item = Path(current) / name
+            current_path = Path(current)
+            for directory in list(dirs):
+                item = current_path / directory
                 if item.is_symlink():
                     raise HTTPException(422, "Project imports containing symbolic links are not supported.")
-                if item.is_file():
-                    file_count += 1
-                    total_bytes += item.stat().st_size
-                    if total_bytes > MAX_BACKUP_BYTES or file_count > 30000:
-                        raise HTTPException(413, "The existing Godot project exceeds the 2 GiB / 30,000-file import limit.")
+            dirs[:] = [directory for directory in dirs if directory not in EXCLUDED_DIRS]
+            for filename in files:
+                item = current_path / filename
+                if item.is_symlink():
+                    raise HTTPException(422, "Project imports containing symbolic links are not supported.")
+                if filename == ".DS_Store" or filename.endswith(".tmp"):
+                    continue
+                file_count += 1
+                total_bytes += item.stat().st_size
+                if total_bytes > MAX_BACKUP_BYTES or file_count > 30000:
+                    raise HTTPException(413, "The existing Godot project exceeds the 2 GiB / 30,000-file import limit.")
         name = (payload.name or source.name or "Imported Godot Game").strip()[:80]
         if not name:
             raise HTTPException(422, "Enter a project name.")
