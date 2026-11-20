@@ -30,13 +30,27 @@ class PolyHavenError(ValueError):
     pass
 
 
+class _SameHostRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        original = urllib.parse.urlparse(req.full_url)
+        target = urllib.parse.urlparse(newurl)
+        if target.scheme != "https" or target.hostname != original.hostname:
+            raise PolyHavenError("Rejected a cross-host or insecure provider redirect.")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open_same_host(request: urllib.request.Request, timeout: int):
+    opener = urllib.request.build_opener(_SameHostRedirectHandler())
+    return opener.open(request, timeout=timeout)
+
+
 def _request_json(url: str) -> Any:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https" or parsed.hostname != API_HOST:
         raise PolyHavenError("Rejected non-Poly Haven API URL.")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=25) as response:
+        with _open_same_host(request, timeout=25) as response:
             if urllib.parse.urlparse(response.geturl()).hostname != API_HOST:
                 raise PolyHavenError("Poly Haven API redirected to an untrusted host.")
             return json.loads(response.read(40 * 1024 * 1024).decode("utf-8"))
@@ -147,7 +161,7 @@ def _download_verified(url: str, target: Path, expected_size: int, expected_md5:
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(target.name + ".nexora-download")
     try:
-        with urllib.request.urlopen(request, timeout=60) as response, temp.open("wb") as output:
+        with _open_same_host(request, timeout=60) as response, temp.open("wb") as output:
             if urllib.parse.urlparse(response.geturl()).hostname != DOWNLOAD_HOST:
                 raise PolyHavenError("Asset download redirected to an untrusted host.")
             while True:
