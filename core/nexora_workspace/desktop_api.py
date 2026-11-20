@@ -46,7 +46,7 @@ MAX_EDIT_BYTES = 2 * 1024 * 1024
 WINGET_PACKAGES = {
     "godot": "GodotEngine.GodotEngine",
     "blender": "BlenderFoundation.Blender",
-    "ffmpeg": "Gyan.FFmpeg.Shared",
+    "ffmpeg": "Gyan.FFmpeg",
     "java17": "EclipseAdoptium.Temurin.17.JDK",
 }
 SNAPSHOT_SCHEMA = 1
