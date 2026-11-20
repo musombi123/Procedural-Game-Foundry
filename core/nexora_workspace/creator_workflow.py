@@ -709,7 +709,11 @@ def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_rol
             jobs.update(job_id,progress=12,message="Reconstructing a 3D mesh from the creator-owned image with TripoSR")
             output_dir=work/"triposr"
             output_dir.mkdir(parents=True,exist_ok=True)
-            command=[sys.executable,str(runner),str(source),"--output-dir",str(output_dir),"--bake-texture"]
+            triposr_python = os.environ.get("NEXORA_TRIPOSR_PYTHON", "").strip() or sys.executable
+            python_executable = shutil.which(triposr_python) if not Path(triposr_python).expanduser().is_file() else str(Path(triposr_python).expanduser())
+            if not python_executable:
+                raise RuntimeError("The configured NEXORA_TRIPOSR_PYTHON interpreter was not found.")
+            command=[python_executable,str(runner),str(source),"--output-dir",str(output_dir),"--bake-texture"]
             try:
                 result=subprocess.run(command,cwd=str(root),capture_output=True,text=True,timeout=1800,check=True)
             except (subprocess.TimeoutExpired,subprocess.CalledProcessError) as exc:
