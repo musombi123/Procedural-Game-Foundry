@@ -290,6 +290,13 @@ class PublishPrepareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     platform: str = Field(pattern=r"^(android|web|windows|linux)$")
     artifact_id: str = Field(min_length=1, max_length=100)
+    rights_confirmed: bool = False
+
+
+class ToolchainLockRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: str | None = None
+    targets: list[str] = Field(default_factory=lambda: ["web", "android", "windows"])
 
 
 def register_desktop_factory_routes(app: Any, manager: Any) -> None:
@@ -492,7 +499,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
                 try: lock = json.loads(lock_path.read_text(encoding="utf-8"))
                 except (OSError, ValueError): lock = None
         return {
-            "machine": machine,
+            "machine": {**machine, "system": machine.get("os")},
             "tools": {**tools, "android_sdk": {"available": bool(android.get("sdk_root") and android.get("build_tools_installed")), "path": android.get("sdk_root"), "version": None}},
             "android": android,
             "catalog": catalog,
@@ -537,6 +544,35 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "message": "Installer windows have been started. Complete each installer, accept vendor licences yourself, then return and select Detect tools. Installation is not marked complete until detection succeeds."
         }
 
+    @router.post("/api/v1/desktop/toolchains/lock")
+    def pin_toolchain_versions(payload: ToolchainLockRequest, request: FastAPIRequest):
+        owner_id = _owner(request)
+        allowed_targets = {"web", "android", "windows", "linux", "macos", "ios"}
+        if not payload.targets or any(item not in allowed_targets for item in payload.targets):
+            raise HTTPException(422, "Select one or more supported export targets.")
+        profile = collect_system_profile(manager.root)
+        lock = {
+            "schema_version": 1,
+            "owner_id": owner_id,
+            "locked_at": _utc(),
+            "host": {
+                "os": profile.get("machine", {}).get("os"),
+                "architecture": profile.get("machine", {}).get("architecture"),
+            },
+            "tools": profile.get("tools", {}),
+            "android": profile.get("android", {}),
+            "gpu": profile.get("gpu", {}),
+            "targets": sorted(set(payload.targets)),
+        }
+        if payload.project_id:
+            folder, definition, _ = _project(manager, payload.project_id, request)
+            _ensure_project_layout(folder, definition, owner_id)
+            destination = folder / ".nexora" / "toolchain.lock.json"
+        else:
+            destination = Path(manager.root) / ".nexora" / "toolchain.lock.json"
+        _atomic_json(destination, lock)
+        return {"saved": True, "lock": lock, "path": str(destination)}
+
     @router.get("/api/v1/desktop/publish/readiness")
     def publisher_readiness(request: FastAPIRequest):
         _owner(request)
@@ -567,6 +603,8 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     @router.post("/api/v1/desktop/projects/{pid}/publish/prepare")
     def prepare_project_publish(pid: str, payload: PublishPrepareRequest, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
+        if not payload.rights_confirmed:
+            raise HTTPException(403, "Confirm that you own or have distribution rights to the game and every included asset before preparing a release.")
         job_root = folder / "workspace_jobs"
         matched = None
         job_id = None
@@ -605,7 +643,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "schema_version": 1, "id": release_id, "project_id": pid, "owner_id": owner_id,
             "project_name": definition.project.name, "provider_status": "prepared_not_submitted",
             "target": target, "version": "1.0.0", "release_notes": "",
-            "created_at": _utc(), "rights_confirmed": False,
+            "created_at": _utc(), "rights_confirmed": True,
             "job_id": job_id,
             "artifacts": [{
                 "id": payload.artifact_id, "filename": artifact_path.name,
