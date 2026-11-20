@@ -205,16 +205,21 @@ def _restore_archive(manager: Any, folder: Path, definition: Any, owner_id: str,
         replacement_owner = replacement / "nexora_owner.json"
         shutil.copy2(current_owner, replacement_owner, follow_symlinks=False)
 
+        original_moved = False
         try:
             folder.rename(rollback)
+            original_moved = True
             replacement.rename(folder)
             manager.load(definition.id)
         except Exception as exc:
-            # Restore the prior project if promotion or final validation fails.
-            if folder.exists():
-                shutil.rmtree(folder, ignore_errors=True)
-            if rollback.exists():
-                rollback.rename(folder)
+            # Never delete the live folder unless the original has definitely
+            # been moved to the rollback path. A failed first rename leaves it
+            # untouched and this branch must not remove it.
+            if original_moved:
+                if folder.exists():
+                    shutil.rmtree(folder, ignore_errors=True)
+                if rollback.exists() and not folder.exists():
+                    rollback.rename(folder)
             raise HTTPException(500, "Project restore failed validation; the previous project was restored unchanged.") from exc
 
         shutil.rmtree(rollback, ignore_errors=True)
