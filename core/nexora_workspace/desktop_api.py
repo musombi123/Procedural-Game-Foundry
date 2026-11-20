@@ -461,8 +461,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         project_root = (folder / "game").resolve()
         if folder.resolve() not in project_root.parents:
             raise HTTPException(403, "Invalid Godot project directory.")
-        if not project_root.is_dir() or not (project_root / "project.godot").is_file():
-            raise HTTPException(409, "Initialize or import a Godot project before installing default assets.")
+        project_root.mkdir(parents=True, exist_ok=True)
         try:
             result = install_default_asset_pack(
                 project_root, payload.pack_id, overwrite=payload.overwrite_existing
