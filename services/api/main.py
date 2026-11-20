@@ -114,7 +114,8 @@ def health():
         "product": "Procedural Game Foundry",
         "model_free": True,
         "staged_movie_pipeline": True,
-        "local_model_workers_ready": LOCAL_AGENT_MODE,
+        "local_model_workers_ready": False,
+        "local_compute_agent": LOCAL_AGENT_MODE,
         "execution_location": "creator_device" if LOCAL_AGENT_MODE else "artifact_hosting_only",
         "cloud_compute_enabled": False,
     }
