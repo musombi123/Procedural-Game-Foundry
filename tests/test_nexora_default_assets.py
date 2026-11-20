@@ -1,0 +1,34 @@
+from __future__ import annotations
+
+import json
+import wave
+
+from core.nexora_workspace.default_assets import catalog, install_pack
+
+
+def test_catalog_exposes_offline_original_asset_packs():
+    result = catalog()
+    assert {item["id"] for item in result["packs"]} == {"adventure", "fantasy", "sci_fi", "modern"}
+    assert all(item["offline"] and item["license"] == "CC0-1.0" for item in result["packs"])
+
+
+def test_installs_complete_original_asset_pack(tmp_path):
+    result = install_pack(tmp_path, "adventure")
+    assert result["asset_count"] >= 12
+    root = tmp_path / "assets" / "nexora-defaults"
+    manifest = json.loads((root / "asset-pack.json").read_text(encoding="utf-8"))
+    assert manifest["license"] == "CC0-1.0"
+    assert (root / "characters" / "player_idle.svg").is_file()
+    assert (root / "environment" / "ground_tile.svg").is_file()
+    with wave.open(str(root / "audio" / "jump.wav"), "rb") as sound:
+        assert sound.getnframes() > 0
+        assert sound.getframerate() == 22050
+
+
+def test_install_is_safe_and_preserves_existing_creator_files(tmp_path):
+    first = install_pack(tmp_path, "fantasy")
+    custom = tmp_path / "assets" / "nexora-defaults" / "creator-note.txt"
+    custom.write_text("keep me", encoding="utf-8")
+    second = install_pack(tmp_path, "fantasy", overwrite=False)
+    assert custom.read_text(encoding="utf-8") == "keep me"
+    assert second["asset_count"] == first["asset_count"]
