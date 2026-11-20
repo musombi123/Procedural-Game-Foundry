@@ -58,6 +58,57 @@ def _memory_total_bytes() -> int | None:
     return None
 
 
+def _memory_available_bytes() -> int | None:
+    system = platform.system().lower()
+    if system == "windows":
+        try:
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = MEMORYSTATUSEX()
+            status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.ullAvailPhys)
+        except Exception:
+            return None
+    if system == "linux":
+        try:
+            values = {}
+            for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+                key, _, value = line.partition(":")
+                if key in {"MemAvailable", "MemFree"}:
+                    values[key] = int(value.strip().split()[0]) * 1024
+            return values.get("MemAvailable", values.get("MemFree"))
+        except (OSError, ValueError, IndexError):
+            return None
+    if system == "darwin":
+        output = _run_text(["vm_stat"], timeout=3)
+        page_size = 4096
+        match = re.search(r"page size of (\d+) bytes", output)
+        if match:
+            page_size = int(match.group(1))
+        page_counts = {}
+        for label in ("Pages free", "Pages inactive", "Pages speculative"):
+            found = re.search(rf"{re.escape(label)}:\s+(\d+)", output)
+            if found:
+                page_counts[label] = int(found.group(1))
+        if page_counts:
+            return sum(page_counts.values()) * page_size
+    return None
+
+
 def _cpu_model() -> str | None:
     candidates: list[str] = []
     if platform.system().lower() == "windows":
@@ -183,6 +234,7 @@ def collect_system_profile(data_root: str | Path | None = None) -> dict[str, Any
     """Return a bounded, privacy-conscious resource and toolchain inventory."""
     cpu_count = os.cpu_count() or 1
     ram_bytes = _memory_total_bytes()
+    ram_available_bytes = _memory_available_bytes()
     root = Path(data_root or os.environ.get("PGF_DATA_DIR") or Path.home()).expanduser()
     try:
         root.mkdir(parents=True, exist_ok=True)
@@ -230,6 +282,8 @@ def collect_system_profile(data_root: str | Path | None = None) -> dict[str, Any
             "logical_cpu_count": int(cpu_count),
             "ram_total_bytes": ram_bytes,
             "ram_total_gib": round(ram_bytes / GIB, 2) if ram_bytes else None,
+            "ram_available_bytes": ram_available_bytes,
+            "ram_available_gib": round(ram_available_bytes / GIB, 2) if ram_available_bytes is not None else None,
             "disk_root": str(root.resolve()),
             "disk_total_bytes": disk_total,
             "disk_free_bytes": disk_free,
@@ -263,6 +317,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         "label": "2D and lightweight projects",
         "min_cpu_cores": 2,
         "min_ram_gib": 8,
+        "min_available_ram_gib": 2,
         "min_disk_gib": 10,
         "required_tools": (),
         "recommended_tools": ("godot",),
@@ -273,6 +328,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         "label": "Procedural 3D production",
         "min_cpu_cores": 4,
         "min_ram_gib": 16,
+        "min_available_ram_gib": 4,
         "min_disk_gib": 30,
         "required_tools": ("blender", "godot"),
         "recommended_tools": ("ffmpeg", "ffprobe"),
@@ -283,6 +339,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         "label": "Movie and video processing",
         "min_cpu_cores": 4,
         "min_ram_gib": 8,
+        "min_available_ram_gib": 2.5,
         "min_disk_gib": 20,
         "required_tools": ("ffmpeg", "ffprobe"),
         "recommended_tools": ("blender", "godot"),
@@ -293,16 +350,19 @@ PROFILES: dict[str, dict[str, Any]] = {
         "label": "AI image-to-3D reconstruction (TripoSR baseline)",
         "min_cpu_cores": 6,
         "min_ram_gib": 16,
+        "min_available_ram_gib": 6,
         "min_disk_gib": 40,
         "required_tools": ("blender", "python"),
         "recommended_tools": ("godot",),
         "gpu_vram_gib": 6,
+        "gpu_free_vram_gib": 4,
         "requires_nvidia": True,
     },
     "android_export": {
         "label": "Android build and device testing",
         "min_cpu_cores": 4,
         "min_ram_gib": 16,
+        "min_available_ram_gib": 4,
         "min_disk_gib": 25,
         "required_tools": ("godot", "java", "adb"),
         "recommended_tools": ("ffmpeg",),
@@ -333,7 +393,18 @@ def check_requirements(profile_id: str, profile: dict[str, Any]) -> dict[str, An
     cpu = int(machine.get("logical_cpu_count") or 0)
     add("CPU", cpu >= requirements["min_cpu_cores"], f"{cpu} logical cores detected; {requirements['min_cpu_cores']} recommended minimum.")
     ram = float(machine.get("ram_total_gib") or 0)
-    add("Memory", ram >= requirements["min_ram_gib"], f"{ram:g} GiB detected; {requirements['min_ram_gib']} GiB required.")
+    add("Memory", ram >= requirements["min_ram_gib"], f"{ram:g} GiB installed; {requirements['min_ram_gib']} GiB required.")
+    available_ram = machine.get("ram_available_gib")
+    if available_ram is None:
+        add("Available RAM", False, "Current free memory could not be measured on this operating system.", required=False)
+    else:
+        available_ram = float(available_ram)
+        minimum_available = float(requirements.get("min_available_ram_gib", 0))
+        add(
+            "Available RAM",
+            available_ram >= minimum_available,
+            f"{available_ram:g} GiB currently available; {minimum_available:g} GiB recommended for this workload.",
+        )
     disk = float(machine.get("disk_free_gib") or 0)
     add("Free storage", disk >= requirements["min_disk_gib"], f"{disk:g} GiB free; {requirements['min_disk_gib']} GiB required.")
 
@@ -363,8 +434,10 @@ def check_requirements(profile_id: str, profile: dict[str, Any]) -> dict[str, An
         primary = gpu.get("primary") or {}
         is_nvidia = bool(primary.get("vendor") == "NVIDIA")
         vram = (float(primary.get("memory_total_bytes") or 0) / GIB)
+        free_vram = (float(primary.get("memory_free_bytes") or 0) / GIB)
         add("CUDA GPU", is_nvidia, "NVIDIA CUDA-capable GPU detected." if is_nvidia else "This image-to-3D worker currently requires a supported NVIDIA CUDA GPU.")
-        add("GPU memory", vram >= requirements["gpu_vram_gib"], f"{vram:g} GiB VRAM detected; {requirements['gpu_vram_gib']} GiB minimum for the current TripoSR profile.")
+        add("GPU memory", vram >= requirements["gpu_vram_gib"], f"{vram:g} GiB total VRAM detected; {requirements['gpu_vram_gib']} GiB minimum for the current TripoSR profile.")
+        add("Available GPU memory", free_vram >= requirements["gpu_free_vram_gib"], f"{free_vram:g} GiB free VRAM detected; {requirements['gpu_free_vram_gib']} GiB must be free before starting TripoSR.")
     ready = all(item["status"] != "fail" for item in checks)
     return {
         "profile": profile_id,
