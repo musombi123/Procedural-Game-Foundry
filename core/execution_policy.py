@@ -12,6 +12,7 @@ _LOCAL_COMPUTE_PATTERNS = tuple(
     re.compile(pattern)
     for pattern in (
         r"^/api/projects/[^/]+/generate$",
+        r"^/api/projects/[^/]+/assets$",
         r"^/api/projects/[^/]+/godot-check$",
         r"^/api/projects/[^/]+/movie-pipeline/source/(?:photo|video)$",
         r"^/api/projects/[^/]+/movie-pipeline/stages/analysis/run$",
