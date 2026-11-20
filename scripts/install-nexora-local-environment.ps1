@@ -49,6 +49,7 @@ $env:NEXORA_LOCAL_AGENT = "true"
 $env:NEXORA_AUTH_REQUIRED = "true"
 $env:NEXORA_ENV = "local"
 $env:NEXORA_LOCAL_ALLOWED_ORIGINS = "https://revelacode.co.ke,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5173,http://127.0.0.1:5173,tauri://localhost"
+$env:NEXORA_CORS_ORIGINS = $env:NEXORA_LOCAL_ALLOWED_ORIGINS
 
 Write-Host ""
 Write-Host "Local environment installed." -ForegroundColor Green
