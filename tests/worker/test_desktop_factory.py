@@ -100,3 +100,61 @@ def test_local_desktop_factory_is_not_a_cloud_generation_api(tmp_path):
     response = client.get("/api/v1/desktop/status")
     assert response.status_code == 200
     assert response.json()["agent"]["execution_location"] == "creator_device"
+
+
+def test_toolchain_catalog_reports_manual_tools_and_android_sdk_install(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("ANDROID_HOME", raising=False)
+    monkeypatch.delenv("ANDROID_SDK_ROOT", raising=False)
+    client = make_client(tmp_path)
+    result = client.get("/api/v1/desktop/toolchains")
+    assert result.status_code == 200
+    payload = result.json()
+    by_id = {item["id"]: item for item in payload["catalog"]}
+    assert by_id["android_sdk"]["installable"] is True
+    assert by_id["godot4"]["installable"] is False
+    assert payload["android_export_ready"] is False
+    assert payload["tools"]["godot4"]["available"] is False
+
+
+def test_toolchain_install_requires_consent_and_fixed_android_selection(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "")
+    client = make_client(tmp_path)
+    denied = client.post(
+        "/api/v1/desktop/toolchains/install",
+        json={"tools": ["android_sdk"], "confirm_install": False},
+    )
+    assert denied.status_code == 403
+    unsupported = client.post(
+        "/api/v1/desktop/toolchains/install",
+        json={"tools": ["godot4"], "confirm_install": True},
+    )
+    assert unsupported.status_code == 422
+
+
+def test_godot_build_requires_real_export_preset_and_local_engine(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "")
+    client = make_client(tmp_path)
+    workspace = tmp_path / "creator-projects"
+    client.put("/api/v1/desktop/workspace", json={"path": str(workspace)})
+    source = tmp_path / "source-game"
+    source.mkdir()
+    (source / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    (source / "export_presets.cfg").write_text(
+        '[preset.0]\nname="Windows Desktop"\nplatform="Windows Desktop"\n',
+        encoding="utf-8",
+    )
+    created = client.post("/api/v1/desktop/projects/import", json={"path": str(source)})
+    project_id = created.json()["project"]["id"]
+
+    invalid = client.post(
+        f"/api/v1/desktop/projects/{project_id}/build",
+        json={"preset": "Made Up Preset", "output_name": "game.exe", "mode": "release"},
+    )
+    assert invalid.status_code == 422
+
+    valid_but_no_engine = client.post(
+        f"/api/v1/desktop/projects/{project_id}/build",
+        json={"preset": "Windows Desktop", "output_name": "game.exe", "mode": "release"},
+    )
+    assert valid_but_no_engine.status_code == 409
