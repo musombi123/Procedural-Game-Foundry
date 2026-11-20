@@ -15,6 +15,7 @@ _LOCAL_ONLY_API_PREFIXES = (
     "/api/v1/workspace/jobs",
     "/api/v1/studio/",
     "/api/v1/workspace/assets/",
+    "/api/v1/factory/",
 )
 
 _LOCAL_ONLY_API_EXACT = frozenset({
