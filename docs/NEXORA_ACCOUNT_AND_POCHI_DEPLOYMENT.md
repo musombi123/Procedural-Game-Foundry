@@ -53,7 +53,7 @@ In AdMob, set the ad unit reward to amount `1`, item `nexora_basic_tool_credit`,
 
 The Android build also needs the public Vite variable `VITE_ADMOB_NEXORA_REWARDED_AD_UNIT_ID` set to the same full ad unit ID. It is an ad placement identifier, not a secret. No rewarded ad ID is assumed or invented in source. Test ads do not credit real users because Google test inventory does not call production SSV.
 
-The server stores pending reward intents and credits in Neon, verifies signatures using Google's current public keys (cached for less than 24 hours), rejects unknown/replayed transactions, and only then credits a tool use. Local production workers consume a credit through the cloud API before queueing a Basic environment or actors/props job. If that job fails, the credit is returned to the account.
+The server stores pending reward intents and credits in Neon, verifies signatures using Google's current public keys (cached for less than 24 hours), rejects unknown/replayed transactions, and only then credits a tool use. A credit is consumed when the matching local production job is accepted into the queue. A failed generation attempt does not automatically return the credit; the next attempt requires another verified rewarded ad. Creators should confirm the required local worker tools are installed before spending a credit.
 
 **Ad revenue is paid by Google to the publisher's AdMob payment profile, not to the Pochi number.** Pochi remains the merchant destination for customer Creator Flow plan payments. Complete AdMob publisher identity, tax and payout setup separately in AdMob; actual ad fill and payouts depend on Google's app review, traffic quality and payout rules.
 
