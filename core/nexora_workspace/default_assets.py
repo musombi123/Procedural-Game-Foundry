@@ -36,7 +36,8 @@ def _svg(width: int, height: int, body: str) -> str:
 def _write_svg(root: Path, relative: str, width: int, height: int, body: str) -> dict[str, str]:
     target = root / relative
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_svg(width, height, body), encoding="utf-8")
+    if not target.exists():
+        target.write_text(_svg(width, height, body), encoding="utf-8")
     return {"path": relative.replace("\\", "/"), "type": "image/svg+xml", "role": Path(relative).stem}
 
 def _character(color: str, dark: str, pose: str) -> str:
@@ -51,6 +52,8 @@ def _character(color: str, dark: str, pose: str) -> str:
 
 def _make_wav(path: Path, frequency: float, duration: float, kind: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        return
     rate = 22050
     frames = int(rate * duration)
     with wave.open(str(path), "wb") as output:
@@ -69,6 +72,17 @@ def _make_wav(path: Path, frequency: float, duration: float, kind: str) -> None:
             data.extend(struct.pack("<h", int(max(-1, min(1, sample * envelope * .28)) * 32767)))
         output.writeframes(data)
 
+def infer_pack(text: str) -> str:
+    value = str(text or "").lower()
+    if any(word in value for word in ("sci-fi", "sci fi", "space", "robot", "cyber", "alien", "futur")):
+        return "sci_fi"
+    if any(word in value for word in ("fantasy", "magic", "wizard", "dragon", "castle", "enchanted")):
+        return "fantasy"
+    if any(word in value for word in ("city", "urban", "modern", "street", "police", "racing", "school")):
+        return "modern"
+    return "adventure"
+
+
 def install_pack(project_root: Path, pack_id: str, overwrite: bool = False) -> dict[str, Any]:
     if pack_id not in PACKS:
         raise ValueError("Unknown default asset pack.")
@@ -76,6 +90,14 @@ def install_pack(project_root: Path, pack_id: str, overwrite: bool = False) -> d
     project = project_root.resolve()
     if project not in root.parents:
         raise ValueError("Asset destination escapes the Godot project.")
+    existing_manifest = root / "asset-pack.json"
+    if existing_manifest.is_file() and not overwrite:
+        try:
+            previous_pack = json.loads(existing_manifest.read_text(encoding="utf-8")).get("pack_id")
+        except (OSError, ValueError):
+            previous_pack = None
+        if previous_pack and previous_pack != pack_id:
+            raise ValueError("A different default pack is already installed. Confirm overwrite to replace it.")
     if root.exists() and overwrite:
         shutil.rmtree(root)
     root.mkdir(parents=True, exist_ok=True)
