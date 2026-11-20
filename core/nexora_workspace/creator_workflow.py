@@ -716,7 +716,6 @@ def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_rol
         jobs.update(job_id,state=JobState.COMPLETED,progress=100,message="A validated GLB game asset is ready for preview and scene placement",error=None)
     except Exception as exc:
         jobs.update(job_id,state=JobState.FAILED,progress=100,message="Asset conversion failed",error=str(exc))
-\n
 def _execute_creator_step(job_id: str, project_id: str, owner_id: str, step: str, manager: Any, jobs: Any) -> None:
     from core.orchestration.jobs import JobState
     try:
