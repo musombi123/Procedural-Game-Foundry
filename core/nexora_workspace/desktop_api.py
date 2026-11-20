@@ -512,6 +512,27 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "owner_id": owner_id,
         }
 
+    @router.get("/api/v1/desktop/projects/{pid}/assets/3d/{asset_id}/file")
+    def serve_downloaded_3d_model(pid: str, asset_id: str, request: FastAPIRequest):
+        folder, definition, owner_id = _project(manager, pid, request)
+        if not re.fullmatch(r"[a-z0-9_]{2,100}", asset_id):
+            raise HTTPException(422, "Invalid Poly Haven asset identifier.")
+        project_root = (folder / "game").resolve()
+        asset_root = (project_root / "assets" / "3d" / "polyhaven" / asset_id).resolve()
+        if project_root not in asset_root.parents:
+            raise HTTPException(403, "Invalid 3D asset directory.")
+        if not asset_root.is_dir():
+            raise HTTPException(404, "Downloaded 3D model was not found in this project.")
+        models = sorted(asset_root.glob("*.glb"))
+        if not models:
+            raise HTTPException(415, "This asset is available as glTF with dependencies. Open it from the Godot FileSystem dock.")
+        return FileResponse(
+            models[0],
+            media_type="model/gltf-binary",
+            filename=models[0].name,
+            headers={"Cache-Control": "no-store", "X-NEXORA-Asset-Provider": "Poly Haven"},
+        )
+
     @router.post("/api/v1/desktop/projects/import", status_code=201)
     def import_godot_folder(payload: DesktopImportRequest, request: FastAPIRequest):
         owner_id = _owner(request)
