@@ -1,0 +1,34 @@
+name: NEXORA standalone frontend build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/nexora-frontend/**"
+      - ".github/workflows/nexora-frontend-build.yml"
+  pull_request:
+    paths:
+      - "apps/nexora-frontend/**"
+      - ".github/workflows/nexora-frontend-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/nexora-frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build standalone NEXORA frontend
+        run: npm run build
