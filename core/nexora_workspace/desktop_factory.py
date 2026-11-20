@@ -448,44 +448,33 @@ def _safe_restore_archive(
             if not isinstance(manifest_rows, list):
                 raise HTTPException(422, "Backup file manifest is invalid.")
             expected_files: set[str] = set()
+            checksums: dict[str, tuple[int, str]] = {}
             for row in manifest_rows:
                 if not isinstance(row, dict):
                     raise HTTPException(422, "Backup file manifest contains an invalid entry.")
                 relative = str(row.get("path") or "").replace("\\", "/")
                 pure = PurePosixPath(relative)
                 digest = str(row.get("sha256") or "")
+                size_bytes = row.get("size_bytes")
                 if (
                     not relative
                     or pure.is_absolute()
                     or ":" in relative
                     or any(part in {"", ".", ".."} for part in pure.parts)
                     or any(part.lower() in IGNORED_DIRECTORY_NAMES for part in pure.parts)
+                    or not isinstance(size_bytes, int)
+                    or size_bytes < 0
                     or not re.fullmatch(r"[a-fA-F0-9]{64}", digest)
+                    or pure.as_posix() in expected_files
                 ):
-                    raise HTTPException(422, "Backup file manifest contains an unsafe path or checksum.")
-                expected_files.add(pure.as_posix())
-                staged_file = extracted.joinpath(*pure.parts)
-                if not staged_file.is_file() or staged_file.is_symlink():
-                    raise HTTPException(422, "Backup is missing a manifest-listed project file.")
-                if staged_file.stat().st_size != int(row.get("size_bytes", -1)):
-                    raise HTTPException(409, "A restored project file does not match its manifest size.")
-                if _sha256_file(staged_file).lower() != digest.lower():
-                    raise HTTPException(409, "A restored project file failed its SHA-256 check.")
+                    raise HTTPException(422, "Backup file manifest contains an unsafe, duplicate or invalid entry.")
+                normalized_path = pure.as_posix()
+                expected_files.add(normalized_path)
+                checksums[normalized_path] = (size_bytes, digest.lower())
             if expected_files != archive_files:
                 raise HTTPException(422, "Backup archive contents do not match its file manifest.")
 
-            owner_record = extracted / "nexora_owner.json"
-            if expected_owner is not None:
-                if not owner_record.is_file():
-                    raise HTTPException(403, "Backup has no NEXORA project owner record.")
-                try:
-                    archived_owner = json.loads(owner_record.read_text(encoding="utf-8")).get("user_id")
-                except (OSError, ValueError, TypeError) as exc:
-                    raise HTTPException(422, "Backup owner record is unreadable.") from exc
-                if str(archived_owner) != str(expected_owner):
-                    raise HTTPException(403, "Backup belongs to a different NEXORA account.")
-
-            # Extract only after every archive path, owner, size and digest passed.
+            # Extract only after every archive path and manifest entry has passed.
             for entry, relative in safe_entries:
                 target = extracted.joinpath(*relative.parts)
                 if entry.is_dir() or str(entry.filename).endswith(("/", "\\")):
@@ -498,35 +487,67 @@ def _safe_restore_archive(
                 except FileExistsError as exc:
                     raise HTTPException(400, "Backup contains duplicate file paths.") from exc
 
+        for relative, (expected_size, expected_digest) in checksums.items():
+            staged_file = extracted.joinpath(*PurePosixPath(relative).parts)
+            if not staged_file.is_file() or staged_file.is_symlink():
+                raise HTTPException(422, "Backup is missing a manifest-listed project file.")
+            if staged_file.stat().st_size != expected_size:
+                raise HTTPException(409, "A restored project file does not match its manifest size.")
+            if _sha256_file(staged_file).lower() != expected_digest:
+                raise HTTPException(409, "A restored project file failed its SHA-256 check.")
+
         if not (extracted / "game" / "project.godot").is_file():
             raise HTTPException(422, "This backup does not contain a restorable Godot project.")
+        owner_record = extracted / "nexora_owner.json"
+        if expected_owner is not None:
+            if not owner_record.is_file():
+                raise HTTPException(403, "Backup has no NEXORA project owner record.")
+            try:
+                archived_owner = json.loads(owner_record.read_text(encoding="utf-8")).get("user_id")
+            except (OSError, ValueError, TypeError) as exc:
+                raise HTTPException(422, "Backup owner record is unreadable.") from exc
+            if str(archived_owner) != str(expected_owner):
+                raise HTTPException(403, "Backup belongs to a different NEXORA account.")
 
-        # Preserve the live account owner and all local/remote backup history.
-        # Replace all other project-root entries as one rollback-capable operation.
+        # Preserve the live owner marker and all backup history. Replace the
+        # rest of the managed project root as a rollback-capable transaction.
         retired.mkdir(parents=True, exist_ok=False)
-        for child in list(folder.iterdir()):
-            if child.name.lower() in keep_names:
-                continue
-            child.replace(retired / child.name)
-            moved_current.append(child.name)
-
         try:
+            for child in list(folder.iterdir()):
+                if child.name.lower() in keep_names:
+                    continue
+                child.replace(retired / child.name)
+                moved_current.append(child.name)
+
             for child in list(extracted.iterdir()):
                 if child.name == "nexora_owner.json":
                     continue
                 child.replace(folder / child.name)
                 moved_restored.append(child.name)
-        except OSError:
+        except OSError as restore_error:
+            rollback_errors = []
             for name in reversed(moved_restored):
                 current = folder / name
-                if current.is_dir() and not current.is_symlink():
-                    shutil.rmtree(current, ignore_errors=True)
-                else:
-                    current.unlink(missing_ok=True)
+                try:
+                    if current.is_dir() and not current.is_symlink():
+                        shutil.rmtree(current)
+                    else:
+                        current.unlink(missing_ok=True)
+                except OSError as exc:
+                    rollback_errors.append(str(exc))
             for name in reversed(moved_current):
                 old = retired / name
-                if old.exists() or old.is_symlink():
-                    old.replace(folder / name)
+                try:
+                    if old.exists() or old.is_symlink():
+                        old.replace(folder / name)
+                except OSError as exc:
+                    rollback_errors.append(str(exc))
+            if rollback_errors:
+                raise HTTPException(
+                    500,
+                    "Project restore failed and rollback was incomplete. Recovery files were retained at "
+                    + str(retired) + ". Contact NEXORA support before retrying.",
+                ) from restore_error
             raise
 
         shutil.rmtree(retired, ignore_errors=True)
@@ -540,10 +561,6 @@ def _safe_restore_archive(
         }
     finally:
         shutil.rmtree(stage, ignore_errors=True)
-        if retired.exists():
-            # If rollback completed, this directory is empty; if an unexpected
-            # error occurred, keep no stale source fragments in the project.
-            shutil.rmtree(retired, ignore_errors=True)
 
 def _publisher_readiness(profile: dict[str, Any]) -> list[dict[str, Any]]:
     tools = _toolchain_summary(profile)
