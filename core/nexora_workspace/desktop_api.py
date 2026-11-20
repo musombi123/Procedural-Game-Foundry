@@ -534,6 +534,38 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         machine = profile.get("machine", {})
         tools = profile.get("tools", {})
         android = profile.get("android", {})
+        godot = tools.get("godot") or {}
+        godot_version = str(godot.get("version") or "")
+        version_match = __import__("re").search(r"(\\d+\\.\\d+\\.\\d+)\\.stable", godot_version)
+        template_roots = []
+        if os.name == "nt" and os.environ.get("APPDATA"):
+            template_roots.append(Path(os.environ["APPDATA"]) / "Godot" / "export_templates")
+        elif __import__("platform").system() == "Darwin":
+            template_roots.append(Path.home() / "Library" / "Application Support" / "Godot" / "export_templates")
+        else:
+            template_roots.extend([
+                Path.home() / ".local" / "share" / "godot" / "export_templates",
+                Path.home() / ".var" / "app" / "org.godotengine.Godot" / "data" / "godot" / "export_templates",
+            ])
+        template_match = None
+        if version_match:
+            version_prefix = version_match.group(1) + ".stable"
+            for root in template_roots:
+                if root.is_dir():
+                    template_match = next(
+                        (item for item in root.iterdir() if item.is_dir() and item.name.startswith(version_prefix)),
+                        None,
+                    )
+                    if template_match:
+                        break
+        toolchain_tools = {
+            **tools,
+            "godot_templates": {
+                "available": bool(template_match),
+                "path": str(template_match.resolve()) if template_match else None,
+                "version": template_match.name if template_match else None,
+            },
+        }
         catalog = [
             {"id":"godot","label":"Godot Engine 4.x","purpose":"Engine, editor, runtime and platform export.","url":"https://godotengine.org/download/","winget_id":WINGET_PACKAGES["godot"]},
             {"id":"godot_templates","label":"Godot Export Templates","purpose":"Templates matching your exact Godot version. Install from Godot Editor > Manage Export Templates.","url":"https://docs.godotengine.org/en/stable/tutorials/export/exporting_projects.html","winget_id":None},
@@ -551,7 +583,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
                 except (OSError, ValueError): lock = None
         return {
             "machine": {**machine, "system": machine.get("os")},
-            "tools": {**tools, "android_sdk": {"available": bool(android.get("sdk_root") and android.get("build_tools_installed")), "path": android.get("sdk_root"), "version": None}},
+            "tools": {**toolchain_tools, "android_sdk": {"available": bool(android.get("sdk_root") and android.get("build_tools_installed")), "path": android.get("sdk_root"), "version": None}},
             "android": android,
             "catalog": catalog,
             "lock": lock,
