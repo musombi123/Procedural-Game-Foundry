@@ -243,13 +243,15 @@ def auto_install_from_prompt(
                 continue
             registry_id = f"polyhaven_{asset_id}"
             if registry_id in existing:
-                selected.append({
-                    "asset_id": asset_id, "asset_registry_id": registry_id,
-                    "name": match["name"], "already_installed": True,
-                    "total_bytes": 0, "model_path": existing[registry_id].get("path"),
-                })
-                selected_ids.add(asset_id)
-                break
+                existing_path = (registry.root / str(existing[registry_id].get("path") or "")).resolve()
+                if registry.root in existing_path.parents and existing_path.is_file():
+                    selected.append({
+                        "asset_id": asset_id, "asset_registry_id": registry_id,
+                        "name": match["name"], "already_installed": True,
+                        "total_bytes": 0, "model_path": existing[registry_id].get("path"),
+                    })
+                    selected_ids.add(asset_id)
+                    break
             try:
                 file_tree = _request_json(f"{API_ROOT}/files/{urllib.parse.quote(asset_id, safe='')}")
                 files = _choose_model_files(file_tree, resolution)
