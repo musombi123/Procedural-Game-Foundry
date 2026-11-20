@@ -530,14 +530,15 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             raise HTTPException(422, "The projects directory must be an absolute path.")
         try:
             resolved = selected.resolve()
-            protected = [Path(resolved.anchor), Path.home().resolve()]
+            protected = [Path(resolved.anchor)]
             for key in ("WINDIR", "SystemRoot", "ProgramFiles", "ProgramFiles(x86)"):
                 value = os.environ.get(key)
                 if value:
                     protected.append(Path(value).resolve())
             if platform.system().lower() != "windows":
                 protected.extend(Path(item) for item in ("/etc", "/usr", "/bin", "/sbin", "/var", "/System", "/Library"))
-            if any(resolved == item or item in resolved.parents for item in protected):
+            home = Path.home().resolve()
+            if resolved == home or any(resolved == item or item in resolved.parents for item in protected):
                 raise HTTPException(403, "Choose a dedicated NEXORA projects folder, not a system, program, drive-root or home directory.")
             resolved.mkdir(parents=True, exist_ok=True)
             if not resolved.is_dir():
