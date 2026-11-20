@@ -67,6 +67,13 @@ def _make_wav(path: Path, frequency: float, duration: float, kind: str) -> None:
                 sample = math.sin(i * 12.9898) * math.sin(i * .173)
             elif kind == "coin":
                 sample = math.sin(2 * math.pi * (frequency + 500 * t) * t)
+            elif kind == "music":
+                sample = (
+                    math.sin(2 * math.pi * 261.63 * t)
+                    + 0.65 * math.sin(2 * math.pi * 329.63 * t)
+                    + 0.5 * math.sin(2 * math.pi * 392.00 * t)
+                    + 0.25 * math.sin(2 * math.pi * 523.25 * t)
+                ) / 2.4
             else:
                 sample = math.sin(2 * math.pi * frequency * t)
             data.extend(struct.pack("<h", int(max(-1, min(1, sample * envelope * .28)) * 32767)))
@@ -126,11 +133,20 @@ def install_pack(project_root: Path, pack_id: str, overwrite: bool = False) -> d
         '<path d="M20 34S2 22 2 12C2 -1 17 -2 20 9 25 -2 39 -1 38 12 38 22 20 34 20 34Z" fill="#e85d75" stroke="#66283b" stroke-width="3"/>'))
     assets.append(_write_svg(root, "ui/panel.svg", 320, 100,
         f'<rect x="3" y="3" width="314" height="94" rx="16" fill="{palette["dark"]}" fill-opacity=".92" stroke="{palette["accent"]}" stroke-width="6"/>'))
+    assets.append(_write_svg(root, "ui/button_primary.svg", 240, 72,
+        f'<rect x="3" y="3" width="234" height="66" rx="18" fill="{palette["accent"]}" stroke="{palette["dark"]}" stroke-width="6"/>'))
+    assets.append(_write_svg(root, "ui/button_secondary.svg", 240, 72,
+        f'<rect x="3" y="3" width="234" height="66" rx="18" fill="{palette["dark"]}" stroke="{palette["accent"]}" stroke-width="5"/>'))
+    assets.append(_write_svg(root, "ui/icon_play.svg", 64, 64,
+        f'<circle cx="32" cy="32" r="29" fill="{palette["dark"]}" stroke="{palette["accent"]}" stroke-width="4"/><path d="M25 17L49 32L25 47Z" fill="{palette["accent"]}"/>'))
+    assets.append(_write_svg(root, "ui/icon_pause.svg", 64, 64,
+        f'<circle cx="32" cy="32" r="29" fill="{palette["dark"]}" stroke="{palette["accent"]}" stroke-width="4"/><path d="M21 18h8v28h-8zm14 0h8v28h-8z" fill="{palette["accent"]}"/>'))
     # Short, original synthesized cues: jump, collect, hit and loopable ambience.
     audio = []
     for name, freq, duration, kind in (
         ("jump", 520, .18, "tone"), ("collect", 880, .24, "coin"),
         ("hit", 130, .20, "noise"), ("ambience", 110, 2.0, "tone"),
+        ("background_music", 262, 8.0, "music"),
     ):
         rel = f"audio/{name}.wav"
         _make_wav(root / rel, freq, duration, kind)
@@ -147,6 +163,33 @@ def install_pack(project_root: Path, pack_id: str, overwrite: bool = False) -> d
     }
     manifest_path = root / "asset-pack.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    helper = project_root / "scripts" / "nexora_default_assets.gd"
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper_source = """extends RefCounted
+class_name NexoraDefaultAssets
+
+const ROOT := "res://assets/nexora-defaults/"
+
+static func player_texture(pose: String = "idle") -> Texture2D:
+    var safe_pose := pose if pose in ["idle", "run", "jump"] else "idle"
+    return load(ROOT + "characters/player_" + safe_pose + ".svg") as Texture2D
+
+static func environment_texture(name: String) -> Texture2D:
+    var safe_name := name if name in ["ground_tile", "sky_background", "platform"] else "ground_tile"
+    return load(ROOT + "environment/" + safe_name + ".svg") as Texture2D
+
+static func ui_texture(name: String) -> Texture2D:
+    var safe_name := name if name in ["heart", "panel", "button_primary", "button_secondary", "icon_play", "icon_pause"] else "panel"
+    return load(ROOT + "ui/" + safe_name + ".svg") as Texture2D
+
+static func play_audio(player: AudioStreamPlayer, cue: String) -> void:
+    if cue not in ["jump", "collect", "hit", "ambience", "background_music"]:
+        return
+    player.stream = load(ROOT + "audio/" + cue + ".wav") as AudioStream
+    player.play()
+"""
+    if not helper.exists():
+        helper.write_text(helper_source, encoding="utf-8")
     return {"installed": True, "pack": pack_id, "asset_count": len(assets),
             "directory": "assets/nexora-defaults", "manifest": "assets/nexora-defaults/asset-pack.json",
             "assets": assets, "license": "CC0-1.0", "offline": True}
