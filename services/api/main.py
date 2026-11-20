@@ -41,7 +41,12 @@ os.environ["NEXORA_AUTH_REQUIRED"] = "true" if AUTH_REQUIRED else "false"
 _origins = [item.strip() for item in os.environ.get("NEXORA_CORS_ORIGINS", "https://revelacode.co.ke,http://localhost:5174,http://127.0.0.1:5174,tauri://localhost").split(",") if item.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","Accept","X-Revela-License","X-Nexora-Payment-Secret"])
 
-_PUBLIC_AUTH_PATHS = {"/api/v1/auth/register", "/api/v1/auth/login"}
+_PUBLIC_AUTH_PATHS = {
+    "/api/v1/auth/register",
+    "/api/v1/auth/login",
+    # Google AdMob SSV is authenticated by its signed ECDSA query, not a user JWT.
+    "/api/v1/creator-flow/rewards/admob/ssv",
+}
 
 def _local_device_profile_for_request(path: str) -> tuple[str, str | None] | None:
     """Map local production routes to the workload preflight they must pass."""
