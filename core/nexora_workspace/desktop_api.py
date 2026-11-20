@@ -279,6 +279,13 @@ def _drive_upload_file(user_id: str, source: Path, metadata: dict) -> dict:
     if not location:
         raise HTTPException(502, "Google Drive did not return a resumable upload URL.")
     parsed = urlsplit(location)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in {"www.googleapis.com", "upload.googleapis.com"}
+        or parsed.username
+        or parsed.password
+    ):
+        raise HTTPException(502, "Google Drive returned an untrusted resumable-upload endpoint.")
     connection = HTTPSConnection(parsed.hostname, parsed.port or 443, timeout=120)
     chunk_size = 8 * 1024 * 1024  # Multiple of Google's 256 KiB resumable-upload granularity.
     sent = 0
@@ -874,7 +881,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     @router.post("/api/v1/desktop/drive/projects/{pid}/backups/{file_id}/restore")
     def restore_google_drive_backup(pid: str, file_id: str, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
-        if not file_id or len(file_id) > 256 or any(ch in file_id for ch in "/\\"):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", file_id or ""):
             raise HTTPException(400, "Invalid Drive file identifier.")
         # Confirm file ownership and project metadata before downloading.
         files = _drive_list_project_backups(owner_id, pid)
