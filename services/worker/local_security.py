@@ -21,6 +21,7 @@ ACCESS_TOKEN_TTL_SECONDS = 12 * 60 * 60
 class LocalPrincipal:
     user_id: str
     expires_at: float
+    cloud_access_token: str | None = None
 
 
 class PairingAuthority:
@@ -38,7 +39,12 @@ class PairingAuthority:
     def pairing_expires_at(self) -> float:
         return self._pairing_expires_at
 
-    def exchange(self, supplied_code: str, user_id: str = "local-owner") -> tuple[str, int]:
+    def exchange(
+        self,
+        supplied_code: str,
+        user_id: str = "local-owner",
+        cloud_access_token: str | None = None,
+    ) -> tuple[str, int]:
         supplied = str(supplied_code or "")
         with self._lock:
             if not self._pairing_code or time.time() > self._pairing_expires_at:
@@ -49,7 +55,9 @@ class PairingAuthority:
             token = secrets.token_urlsafe(40)
             expires_at = time.time() + ACCESS_TOKEN_TTL_SECONDS
             self._tokens[self._digest(token)] = LocalPrincipal(
-                user_id=str(user_id), expires_at=expires_at
+                user_id=str(user_id),
+                expires_at=expires_at,
+                cloud_access_token=cloud_access_token,
             )
             return token, int(expires_at)
 
@@ -86,3 +94,12 @@ def get_pairing_authority() -> PairingAuthority:
 
 def verify_local_access_token(token: str) -> LocalPrincipal | None:
     return _authority.resolve(token)
+
+
+def get_cloud_access_token(user_id: str) -> str | None:
+    """Return the paired account credential from memory only."""
+    with _authority._lock:
+        for principal in _authority._tokens.values():
+            if principal.user_id == str(user_id) and principal.expires_at > time.time():
+                return principal.cloud_access_token
+    return None
