@@ -8,9 +8,11 @@ The local Foundry build worker installs one of four original procedural 2D packs
 
 ## Real 3D library — direct to NEXORA
 
-The Asset Factory includes a Poly Haven search and download workflow. The creator searches real models, selects 1K, 2K or 4K, and clicks **Download to NEXORA**. The paired desktop Foundry downloads the model files directly into the selected project's local Godot workspace:
+The Asset Factory includes a Poly Haven search and download workflow. The creator searches real models, selects 1K, 2K or 4K, and clicks **Download to NEXORA**. The paired desktop Foundry downloads the model files directly into the selected NEXORA project's local asset library:
 
-`game/assets/3d/polyhaven/{asset_id}/`
+`assets/3d/polyhaven/{asset_id}/`
+
+Each main GLB/glTF is also registered in the existing `AssetRegistry`. The Godot assembler copies registered assets into `game/assets/` and resolves the model through the existing `model_asset_id` scene contract, so a downloaded model can be added to the 3D scene and included in the next build.
 
 The implementation uses the official Poly Haven public API:
 - `GET https://api.polyhaven.com/assets` — model metadata, names, tags, categories and thumbnails
@@ -36,7 +38,7 @@ Example request:
 }
 ```
 
-The endpoint is owner-scoped and writes only under the project's Godot directory. It is executed by the paired desktop engine, not the cloud control plane. No asset binaries pass through Render or NEXORA cloud storage.
+The endpoints are owner-scoped and write only under the selected project workspace. Downloaded models are registered for scene assembly. They are executed by the paired desktop engine, not the cloud control plane. No asset binaries pass through Render or NEXORA cloud storage.
 
 ## License and provenance
 
