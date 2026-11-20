@@ -894,7 +894,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             raise HTTPException(500, "Snapshot metadata is unavailable.") from exc
         if _sha256_file(archive) != metadata.get("sha256"):
             raise HTTPException(409, "Snapshot integrity check failed. The archive was changed or damaged.")
-        return _safe_restore_archive(archive, folder)
+        return _safe_restore_archive(archive, folder, expected_owner=_owner_id(request))
 
     @router.get("/toolchains")
     def toolchains(request: Request, project_id: str | None = None):
