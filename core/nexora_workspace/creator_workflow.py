@@ -1001,9 +1001,8 @@ def _run_asset_conversion(folder: Path, asset_id: str, owner_id: str, target_rol
         jobs.update(job_id,state=JobState.COMPLETED,progress=100,message="A validated GLB game asset is ready for preview and scene placement",error=None)
     except Exception as exc:
         jobs.update(job_id,state=JobState.FAILED,progress=100,message="Asset conversion failed",error=str(exc))
-def _execute_creator_step(job_id: str, project_id: str, owner_id: str, step: str, manager: Any, jobs: Any, reward_credit_id: str | None = None) -> None:
+def _execute_creator_step(job_id: str, project_id: str, owner_id: str, step: str, manager: Any, jobs: Any) -> None:
     from core.orchestration.jobs import JobState
-    consumed_for = "creator-step:" + job_id
     try:
         folder=manager.path_for(project_id)
         owner_file=folder/"nexora_owner.json"
@@ -1071,15 +1070,13 @@ def _queue_creator_step(pid: str, folder: Path, owner_id: str, step: str, backgr
     entitlement=_assert_entitled(manager,owner_id,workflow.plan)
     _validate_plan(workflow)
     job=Job.create(pid)
-    reward_credit_id=None
-    consumed_for="creator-step:"+job.id
     if entitlement.get("plan") == "basic" and step in REWARDED_BASIC_TOOLS:
-        reward_credit_id=_consume_reward_credit(manager,owner_id,step,consumed_for)
+        _consume_reward_credit(manager,owner_id,step,"creator-step:"+job.id)
     job=jobs.add(job)
     job_root=folder/"workspace_jobs"
     job_root.mkdir(exist_ok=True)
     (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner_id},indent=2),encoding="utf-8")
-    background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs,reward_credit_id)
+    background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs)
     return {**job.as_dict(),"state":job.state.value.lower(),"kind":"creator."+step,"message":"Queued Creator Flow stage: "+step}
 
 def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
