@@ -72,7 +72,7 @@ def test_restore_rejects_zip_path_traversal(tmp_path: Path):
     project.mkdir()
     archive = project / "unsafe.zip"
     with ZipFile(archive, "w", compression=ZIP_DEFLATED) as output:
-        output.writestr("../escaped.txt", "must not escape")
+        output.writestr("..\\escaped.txt", "Windows path traversal must not escape")
         output.writestr("game/project.godot", "config_version=5\n")
     with pytest.raises(HTTPException):
         _safe_restore_archive(archive, project)
@@ -100,3 +100,14 @@ def test_starter_project_is_created_and_existing_project_is_preserved(tmp_path: 
     _ensure_starter_godot_project(folder, "Renamed Game")
     assert script.read_text(encoding="utf-8") == "extends Node\\n"
     assert "Starter Game" in project_file.read_text(encoding="utf-8")
+
+
+def test_google_desktop_oauth_redirect_is_loopback_root_only(monkeypatch):
+    from core.nexora_workspace.drive_backup import _redirect_uri
+
+    monkeypatch.delenv("NEXORA_GOOGLE_DRIVE_REDIRECT_URI", raising=False)
+    assert _redirect_uri() == "http://127.0.0.1:8765"
+    monkeypatch.setenv("NEXORA_GOOGLE_DRIVE_REDIRECT_URI", "http://127.0.0.1:8765/engine/callback")
+    with pytest.raises(HTTPException) as error:
+        _redirect_uri()
+    assert error.value.status_code == 503
