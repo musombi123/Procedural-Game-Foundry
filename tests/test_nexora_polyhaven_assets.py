@@ -51,11 +51,14 @@ def test_direct_download_verifies_provider_file_and_writes_project_manifest(tmp_
     result = assets.download_model(tmp_path, "dirty_football", "2k")
     model = tmp_path / "assets/3d/polyhaven/dirty_football/dirty_football.glb"
     manifest = json.loads((model.parent / "nexora-asset-manifest.json").read_text())
+    registry = json.loads((tmp_path / "assets" / "assets.json").read_text())
     assert result["downloaded"] is True
     assert model.read_bytes() == b"real-model!!"
     assert manifest["provider"] == "Poly Haven"
     assert manifest["license"] == "CC0-1.0"
     assert manifest["integrity"].startswith("Provider MD5")
+    assert registry["assets"][0]["asset_id"] == "polyhaven_dirty_football"
+    assert registry["assets"][0]["path"] == "3d/polyhaven/dirty_football/dirty_football.glb"
 
 
 def test_rejects_invalid_asset_ids_and_resolution(tmp_path):
