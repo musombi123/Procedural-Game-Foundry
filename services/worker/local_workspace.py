@@ -28,7 +28,11 @@ def load_workspace_root(agent_data: str | Path) -> Path | None:
         candidate = Path(str(value)).expanduser()
         if not candidate.is_absolute():
             return None
-        return candidate.resolve()
+        resolved = candidate.resolve()
+        # A removable drive may be disconnected when the agent starts. Fall
+        # back to the installer default so the agent can still be paired and
+        # the creator can select another workspace from Studio.
+        return resolved if resolved.is_dir() else None
     except (OSError, ValueError, TypeError):
         return None
 
