@@ -485,7 +485,10 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
             ])
             # Real 3D model discovery/download runs locally. If the provider is
             # unavailable, the procedural build still proceeds with its 2D kit.
-            auto_3d_assets = auto_install_from_prompt(folder, prompt_context, resolution="1k", limit=3)
+            if getattr(definition.project, "dimension", "3d") == "3d":
+                auto_3d_assets = auto_install_from_prompt(folder, prompt_context, resolution="1k", limit=3)
+            else:
+                auto_3d_assets = {"provider": "Poly Haven", "resolution": "1k", "assets": [], "warnings": []}
             existing_model_ids = {item.model_asset_id for item in world.objects if item.model_asset_id}
             placements = [(-8.0, -5.0), (8.0, -5.0), (0.0, -13.0)]
             for index, asset in enumerate(auto_3d_assets.get("assets", [])):
