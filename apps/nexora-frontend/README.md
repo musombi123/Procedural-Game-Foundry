@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Set `VITE_NEXORA_API_URL` to the NEXORA API origin. The workspace defaults to `https://nexora-foundry-api.onrender.com`.
+Set `VITE_NEXORA_API_URL` to the NEXORA API origin. The workspace defaults to `https://nexora-foundry-api.onrender.com`. With the production base path, open the local app at `http://localhost:5173/dev_nexora/`.
 
 The production Vite base path is `/dev_nexora/`, matching the public entry URL. This is intentional: assets are requested below the same path and forwarded to this standalone static site by the RevelaCode Render rewrite.
 
