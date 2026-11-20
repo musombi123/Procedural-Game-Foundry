@@ -223,13 +223,20 @@ def _safe_members(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, PureP
     if len(entries) > MAX_ARCHIVE_FILES:
         raise HTTPException(413, "Archive contains too many entries.")
     total = 0
+    seen_paths: set[str] = set()
     validated: list[tuple[zipfile.ZipInfo, PurePosixPath]] = []
     for info in entries:
         raw = info.filename.replace("\\", "/")
         path = PurePosixPath(raw)
         mode = (info.external_attr >> 16) & 0xFFFF
-        if path.is_absolute() or ".." in path.parts or re.match(r"^[A-Za-z]:", raw) or "\x00" in raw:
+        normalized = path.as_posix().casefold()
+        if not raw or path == PurePosixPath(".") or path.is_absolute() or ".." in path.parts or re.match(r"^[A-Za-z]:", raw) or "\x00" in raw:
             raise HTTPException(400, "Archive contains an unsafe file path.")
+        if os.name == "nt" and any(":" in part for part in path.parts):
+            raise HTTPException(400, "Archive contains a Windows alternate-stream path.")
+        if normalized in seen_paths:
+            raise HTTPException(400, "Archive contains duplicate file paths.")
+        seen_paths.add(normalized)
         if stat.S_ISLNK(mode):
             raise HTTPException(400, "Archive symbolic links are not accepted.")
         if info.file_size > MAX_SINGLE_FILE_BYTES:
@@ -438,6 +445,8 @@ def register_local_factory_routes(app: Any) -> None:
         uploaded = staging / (uuid.uuid4().hex + ".zip")
         extracted = Path(tempfile.mkdtemp(prefix="nexora-import-", dir=staging))
         total = 0
+        created_folder: Path | None = None
+        import_succeeded = False
         try:
             with uploaded.open("wb") as target:
                 while True:
@@ -468,6 +477,7 @@ def register_local_factory_routes(app: Any) -> None:
             manager = _manager()
             definition = manager.create(ProjectCreate(name=display_name, description="Imported Godot project. Source files remain locally owned.", dimension="3d"))
             folder = manager.path_for(definition.id)
+            created_folder = folder
             source_destination = folder / "source"
             shutil.copytree(
                 source_root,
@@ -485,6 +495,7 @@ def register_local_factory_routes(app: Any) -> None:
                 "project_format": "godot",
             })
             _atomic_json(folder / ".nexora" / "project.json", metadata)
+            import_succeeded = True
             return {
                 "imported": True,
                 "project_id": definition.id,
@@ -498,6 +509,8 @@ def register_local_factory_routes(app: Any) -> None:
         except (OSError, ValueError, zipfile.BadZipFile) as exc:
             raise HTTPException(400, f"Godot project import failed: {exc}") from exc
         finally:
+            if created_folder and not import_succeeded:
+                shutil.rmtree(created_folder, ignore_errors=True)
             uploaded.unlink(missing_ok=True)
             shutil.rmtree(extracted, ignore_errors=True)
             await file.close()
