@@ -5,6 +5,7 @@ from services.worker.system_profile import check_requirements
 
 def test_cloud_compute_routes_are_local_only():
     assert is_local_compute_only_request("POST", "/api/projects/demo/generate")
+    assert is_local_compute_only_request("POST", "/api/projects/demo/assets")
     assert is_local_compute_only_request("POST", "/api/v1/workspace/projects/demo/jobs")
     assert is_local_compute_only_request(
         "POST", "/api/v1/workspace/projects/demo/assets/asset-1/convert"
@@ -85,6 +86,7 @@ def test_image_to_3d_profile_requires_cuda_vram():
             }
         },
         "tools": {"blender": {"available": True}, "python": {"available": True}},
+        "workers": {"triposr": {"available": True}},
     }
     result = check_requirements("image_to_3d", profile)
     assert result["ready"] is True
