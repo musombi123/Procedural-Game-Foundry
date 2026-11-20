@@ -13,7 +13,7 @@ Configure these on the NEXORA API service (not on the RevelaCode backend):
 | `NEXORA_POCHI_MERCHANT_NUMBER` | `0742466828` — the NEXORA Pochi la Biashara receiving number supplied by the owner. |
 | `NEXORA_PLAN_PRICES_KES` | JSON object with the owner-approved KES prices for each plan. |
 | `NEXORA_PAYMENT_VERIFICATION_SECRET` | High-entropy secret held only by the NEXORA server/operator. |
-| `NEXORA_CORS_ORIGINS` | Comma-separated allowed frontend origins, including the production RevelaCode origin used to open the NEXORA workspace. |
+| `NEXORA_CORS_ORIGINS` | Comma-separated NEXORA frontend origins only. Production: `https://nexora.revelacode.co.ke`; local development: `http://localhost:5173,http://127.0.0.1:5173`. |
 | `NEXORA_SESSION_DAYS` | Optional session lifetime (default 30 days, capped at 90). |
 
 Use the Neon connection string in a private Render environment variable. Never put credentials, merchant secrets or the connection string in Vite's `.env.production`, frontend source, a public repository, or the browser.
@@ -69,3 +69,33 @@ Cloud projects created before the NEXORA account boundary may contain legacy Rev
 - [ ] Confirm CORS includes the exact production NEXORA entry origin.
 - [ ] Register a test NEXORA account, sign in/out, and verify that a second account cannot see the first account's projects.
 - [ ] Test a low-value incoming Pochi payment, reconcile the real statement entry, and verify the entitlement only after matching the receipt.
+
+
+## Standalone frontend boundary
+
+NEXORA Studio Pro is deployed as a separate Vite/React static site from
+`apps/nexora-frontend` in the `Procedural-Game-Foundry` repository.
+
+Render Static Site configuration:
+- Repository: `musombi123/Procedural-Game-Foundry`
+- Branch: `main`
+- Root directory: `apps/nexora-frontend`
+- Build command: `npm install && npm run build`
+- Publish directory: `dist`
+- Public build variable: `VITE_NEXORA_API_URL=https://nexora-foundry-api.onrender.com`
+- Custom domain: `nexora.revelacode.co.ke`
+
+The NEXORA frontend owns its entry point, registration/login UI, local session
+storage, workspace and deployment. It does not import or mount RevelaCode's
+`App`, `AuthProvider`, `StartModal`, navigation shell or preferences.
+
+RevelaCode keeps only a legacy-entry redirect: requests to
+`https://revelacode.co.ke/dev_nexora` are redirected to
+`https://nexora.revelacode.co.ke/` before RevelaCode React providers are
+mounted. There is no NEXORA component or NEXORA API base variable in the
+RevelaCode frontend build.
+
+Set the NEXORA API's `NEXORA_CORS_ORIGINS` to the NEXORA frontend origin and
+local NEXORA development origins only. Do not include the RevelaCode website
+origin. CORS is an origin policy, not an authentication boundary; NEXORA
+account authorization remains enforced by its own bearer sessions and API.
