@@ -13,7 +13,7 @@ Configure these on the NEXORA API service (not on the RevelaCode backend):
 | `NEXORA_POCHI_MERCHANT_NUMBER` | `+254742466828` — the NEXORA Pochi la Biashara receiving number supplied by the owner. |
 | `NEXORA_PLAN_PRICES_KES` | JSON object with the owner-approved KES prices for each plan. |
 | `NEXORA_PAYMENT_VERIFICATION_SECRET` | High-entropy secret held only by the NEXORA server/operator. |
-| `NEXORA_CORS_ORIGINS` | Comma-separated NEXORA frontend origins only. Production: `https://revelacode.co.ke`; local development: `http://localhost:5174,http://127.0.0.1:5174`. |
+| `NEXORA_CORS_ORIGINS` | Comma-separated NEXORA frontend origins only. Production web: `https://revelacode.co.ke`; Capacitor Android WebView: `https://localhost` (and `capacitor://localhost` if using that scheme); local development: `http://localhost:5174,http://127.0.0.1:5174`. |
 | `NEXORA_SESSION_DAYS` | Optional session lifetime (default 30 days, capped at 90). |
 
 Use the Neon connection string in a private Render environment variable. Never put credentials, merchant secrets or the connection string in Vite's `.env.production`, frontend source, a public repository, or the browser.
@@ -127,7 +127,7 @@ under `/dev_nexora/assets/` are served directly from the published
 directory when present.
 
 Set the NEXORA API's `NEXORA_CORS_ORIGINS` to
-`https://revelacode.co.ke` plus the local NEXORA development origins.
+`https://revelacode.co.ke,https://localhost,capacitor://localhost` plus the local NEXORA development origins. Capacitor Android defaults to the `https://localhost` WebView origin; omitting it blocks authenticated calls such as rewarded-ad intent creation even though the API is reachable.
 The API continues to use its own bearer sessions, Neon database, payment
 reconciliation and entitlements. CORS is an origin policy, not an
 authentication boundary; account authorization remains enforced by NEXORA.
