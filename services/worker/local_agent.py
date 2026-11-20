@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field
 
 from services.worker.local_security import PairingAuthority, get_pairing_authority
 from services.worker.system_profile import check_requirements, collect_system_profile
+from services.worker.local_workspace import load_workspace_root, register_local_workspace_routes
 
 VERSION = "1.0.0"
 PORT = 8765
@@ -57,6 +58,14 @@ ORIGINS = {
     if item.strip()
 }
 DATA_ROOT = Path(os.environ.get("NEXORA_LOCAL_AGENT_DATA", str(Path.home() / ".nexora-local-agent"))).expanduser().resolve()
+
+# Restore the creator-selected projects folder before the Foundry engine is imported.
+_SAVED_WORKSPACE_ROOT = load_workspace_root(DATA_ROOT)
+if _SAVED_WORKSPACE_ROOT:
+    # Keep runtime state outside the creator's source projects. The shared
+    # ProjectManager root is reassigned to the selected workspace after import.
+    os.environ["PGF_DATA_DIR"] = str(_SAVED_WORKSPACE_ROOT / ".nexora-runtime")
+
 STAGING_ROOT = DATA_ROOT / "device-staging"
 STAGING_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -451,9 +460,14 @@ def short_capabilities(user_id: str = Depends(_require_paired)):
 # generation endpoints are blocked on the cloud host by execution_policy.py.
 # The agent process runs with NEXORA_LOCAL_AGENT=true, so those operations run
 # on this machine's CPU/GPU and write to this machine's project directory.
-from services.api.main import app as foundry_app
+from services.api import main as foundry_main
+foundry_app = foundry_main.app
+if _SAVED_WORKSPACE_ROOT:
+    foundry_main.manager.root = _SAVED_WORKSPACE_ROOT
+    foundry_main.manager.root.mkdir(parents=True, exist_ok=True)
 
 app.mount("/engine", foundry_app)
+register_local_workspace_routes(app, foundry_main.manager, DATA_ROOT, _require_paired)
 
 # Google Desktop OAuth redirects must target a bare loopback IP:port URI.
 # The outer Local Agent therefore receives the callback at http://127.0.0.1:8765,
