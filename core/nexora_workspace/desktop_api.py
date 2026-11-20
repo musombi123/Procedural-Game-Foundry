@@ -56,6 +56,14 @@ def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _owner(request: FastAPIRequest) -> str:
     value = getattr(request.state, "nexora_user_id", None)
     if not value:
@@ -351,10 +359,18 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             raise HTTPException(422, "Choose the folder that contains the Godot project.godot file.")
         if source == Path(source.anchor) or any(part in EXCLUDED_DIRS for part in source.parts):
             raise HTTPException(403, "The selected folder cannot be imported.")
+        total_bytes = 0
+        file_count = 0
         for current, dirs, files in os.walk(source):
             for name in dirs + files:
-                if (Path(current) / name).is_symlink():
+                item = Path(current) / name
+                if item.is_symlink():
                     raise HTTPException(422, "Project imports containing symbolic links are not supported.")
+                if item.is_file():
+                    file_count += 1
+                    total_bytes += item.stat().st_size
+                    if total_bytes > MAX_BACKUP_BYTES or file_count > 30000:
+                        raise HTTPException(413, "The existing Godot project exceeds the 2 GiB / 30,000-file import limit.")
         name = (payload.name or source.name or "Imported Godot Game").strip()[:80]
         if not name:
             raise HTTPException(422, "Enter a project name.")
@@ -470,7 +486,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         archive = root / f"{snapshot_id}.zip"
         if not archive.is_file():
             raise HTTPException(404, "Snapshot archive is missing.")
-        actual = hashlib.sha256(archive.read_bytes()).hexdigest()
+        actual = _sha256_path(archive)
         if actual != snapshot.get("sha256"):
             raise HTTPException(409, "Snapshot integrity check failed. The archive may have changed.")
         result = _restore_archive(manager, folder, definition, owner_id, archive)
@@ -576,26 +592,39 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     @router.get("/api/v1/desktop/publish/readiness")
     def publisher_readiness(request: FastAPIRequest):
         _owner(request)
-        is_mac = __import__("platform").system() == "Darwin"
+        import platform
+        is_mac = platform.system() == "Darwin"
         play_file = os.environ.get("NEXORA_PLAY_SERVICE_ACCOUNT_FILE", "").strip()
+        play_package = os.environ.get("NEXORA_PLAY_PACKAGE_NAME", "").strip()
         apple_key = os.environ.get("NEXORA_APPLE_API_KEY_PATH", "").strip()
-        microsoft = bool(os.environ.get("NEXORA_MS_STORE_APP_ID") and os.environ.get("NEXORA_MS_STORE_CLIENT_ID"))
+        apple_bundle = os.environ.get("NEXORA_APPLE_BUNDLE_ID", "").strip()
+        apple_ready = bool(
+            is_mac and shutil.which("xcodebuild") and apple_key and Path(apple_key).is_file()
+            and os.environ.get("NEXORA_APPLE_ISSUER_ID") and os.environ.get("NEXORA_APPLE_KEY_ID")
+            and apple_bundle
+        )
+        microsoft_msix = os.environ.get("NEXORA_MS_STORE_MSIX_PATH", "").strip()
+        microsoft_ready = bool(
+            os.environ.get("NEXORA_MS_STORE_APP_ID")
+            and os.environ.get("NEXORA_MS_STORE_ACCESS_TOKEN")
+            and microsoft_msix and Path(microsoft_msix).is_file()
+        )
         providers = [
-            {"id":"google_play","name":"Google Play Console","ready":bool(play_file and Path(play_file).is_file()),"missing":[item for item,ok in [
-                ("Existing Play Console app record and creator-owned developer account", True),
-                ("NEXORA_PLAY_SERVICE_ACCOUNT_FILE pointing to a least-privilege service-account JSON file", bool(play_file and Path(play_file).is_file())),
-                ("A signed Android AAB release build", True),
+            {"id":"google_play","name":"Google Play Console","ready":bool(play_file and Path(play_file).is_file() and play_package), "missing":[item for item,ok in [
+                ("Creator-owned Play Console account and existing app record", bool(play_package)),
+                ("NEXORA_PLAY_SERVICE_ACCOUNT_FILE pointing to a local least-privilege service-account JSON file", bool(play_file and Path(play_file).is_file())),
+                ("Signed Android App Bundle (.aab) generated in NEXORA", True),
             ] if not ok]},
-            {"id":"apple_app_store","name":"Apple App Store Connect","ready":bool(is_mac and apple_key and Path(apple_key).is_file() and os.environ.get("NEXORA_APPLE_ISSUER_ID") and os.environ.get("NEXORA_APPLE_KEY_ID")),"missing":[item for item,ok in [
-                ("A Mac with Xcode and signing certificates", is_mac and bool(shutil.which("xcodebuild"))),
-                ("App Store Connect API key file", bool(apple_key and Path(apple_key).is_file())),
+            {"id":"apple_app_store","name":"Apple App Store Connect","ready":apple_ready,"missing":[item for item,ok in [
+                ("A Mac with Xcode command-line tools", is_mac and bool(shutil.which("xcodebuild"))),
+                ("App Store Connect API key file stored locally", bool(apple_key and Path(apple_key).is_file())),
                 ("App Store Connect issuer ID and key ID", bool(os.environ.get("NEXORA_APPLE_ISSUER_ID") and os.environ.get("NEXORA_APPLE_KEY_ID"))),
-                ("Creator-owned App Store Connect app record", True),
+                ("Creator-owned App Store Connect app record / bundle ID", bool(apple_bundle)),
             ] if not ok]},
-            {"id":"microsoft_store","name":"Microsoft Store / Partner Center","ready":microsoft,"missing":[item for item,ok in [
+            {"id":"microsoft_store","name":"Microsoft Store / Partner Center","ready":microsoft_ready,"missing":[item for item,ok in [
                 ("Creator-owned Partner Center developer account and app identity", bool(os.environ.get("NEXORA_MS_STORE_APP_ID"))),
-                ("Authorized Microsoft submission connection", bool(os.environ.get("NEXORA_MS_STORE_CLIENT_ID"))),
-                ("Signed MSIX package and upload assets", False),
+                ("Authorized Microsoft Store submission access token", bool(os.environ.get("NEXORA_MS_STORE_ACCESS_TOKEN"))),
+                ("Signed MSIX package path", bool(microsoft_msix and Path(microsoft_msix).is_file())),
             ] if not ok]},
         ]
         return {"providers": providers, "final_submission_requires_creator_confirmation": True}
@@ -634,6 +663,8 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         artifact_path = (folder / relative).resolve()
         if folder.resolve() not in artifact_path.parents or not artifact_path.is_file():
             raise HTTPException(404, "The selected build artifact is missing.")
+        if target == "android" and artifact_path.suffix.lower() != ".aab":
+            raise HTTPException(409, "Google Play release preparation requires a signed Android App Bundle (.aab), not a debug APK.")
         digest = hashlib.sha256()
         with artifact_path.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -695,7 +726,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         if record.get("owner_id") != owner_id:
             raise HTTPException(404, "Snapshot not found.")
         archive = root / f"{snapshot_id}.zip"
-        if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != record.get("sha256"):
+        if not archive.is_file() or _sha256_path(archive) != record.get("sha256"):
             raise HTTPException(409, "Snapshot archive failed its integrity check.")
         metadata = {
             "name": f"NEXORA-{definition.project.name}-{snapshot_id}.zip",
