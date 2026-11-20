@@ -8,6 +8,21 @@ from __future__ import annotations
 
 import re
 
+_LOCAL_ONLY_API_PREFIXES = (
+    "/api/projects",
+    "/api/jobs",
+    "/api/v1/workspace/projects",
+    "/api/v1/workspace/jobs",
+    "/api/v1/studio/",
+    "/api/v1/workspace/assets/",
+)
+
+_LOCAL_ONLY_API_EXACT = frozenset({
+    "/api/projects",
+    "/api/jobs",
+    "/api/v1/workspace/projects",
+})
+
 _LOCAL_COMPUTE_PATTERNS = tuple(
     re.compile(pattern)
     for pattern in (
@@ -29,10 +44,14 @@ _LOCAL_COMPUTE_METHODS = frozenset({"POST", "PUT", "PATCH"})
 
 
 def is_local_compute_only_request(method: str, path: str) -> bool:
-    """Return True for request paths that must never execute on cloud hosts."""
+    """Return True for project/workspace paths that must never run on cloud."""
+    normalized_path = path.split("?", 1)[0]
+    if normalized_path in _LOCAL_ONLY_API_EXACT:
+        return True
+    if normalized_path.startswith(_LOCAL_ONLY_API_PREFIXES):
+        return True
     if method.upper() not in _LOCAL_COMPUTE_METHODS:
         return False
-    normalized_path = path.split("?", 1)[0]
     return any(pattern.fullmatch(normalized_path) for pattern in _LOCAL_COMPUTE_PATTERNS)
 
 
