@@ -738,6 +738,10 @@ register_asset_routes(app, lambda: manager)
 from core.nexora_workspace.api import register_nexora_workspace_routes
 register_nexora_workspace_routes(app, manager, jobs)
 
+# Local-only manifests, toolchain lockfiles, backup/import and release preparation.
+from core.nexora_workspace.local_factory import register_local_factory_routes
+register_local_factory_routes(app, manager)
+
 
 # Episode-driven Creator Flow, asset conversion workers and Pochi plan reconciliation.
 from core.nexora_workspace.creator_workflow import register_creator_workflow_routes
