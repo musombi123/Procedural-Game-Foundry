@@ -13,6 +13,8 @@ import platform
 import shutil
 import stat
 import subprocess
+import re
+import configparser
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -74,6 +76,16 @@ class PublishRequest(BaseModel):
     platform: str = Field(pattern=r"^(web|android|windows|linux)$")
     artifact_id: str = Field(min_length=1, max_length=180)
     confirm_distribution_rights: bool = False
+
+
+class ToolchainLockRequest(BaseModel):
+    tools: list[str] = Field(default_factory=list, max_length=12)
+
+
+class GodotBuildRequest(BaseModel):
+    preset: str = Field(min_length=1, max_length=100)
+    output_name: str = Field(min_length=1, max_length=120)
+    mode: str = Field(default="debug", pattern=r"^(debug|release)$")
 
 
 def register_desktop_factory_routes(app, require_paired, data_root: Path) -> None:
@@ -390,40 +402,243 @@ def register_desktop_factory_routes(app, require_paired, data_root: Path) -> Non
                 restored += 1
         return {"restored": True, "files_restored": restored, "snapshot_id": snapshot_id}
 
+    def _find_tool(candidates: list[str], env_names: tuple[str, ...] = ()) -> str | None:
+        for env_name in env_names:
+            value = os.environ.get(env_name)
+            if value:
+                candidate = Path(value).expanduser()
+                if candidate.is_file():
+                    return str(candidate.resolve())
+                if candidate.is_dir():
+                    for name in candidates:
+                        for path in candidate.rglob(name):
+                            if path.is_file():
+                                return str(path.resolve())
+        for name in candidates:
+            located = shutil.which(name)
+            if located:
+                return str(Path(located).resolve())
+        return None
+
+    def _probe(path: str | None, args: list[str], timeout: int = 8) -> dict[str, Any]:
+        if not path:
+            return {"available": False, "path": None, "version": None, "error": "not_found"}
+        try:
+            result = subprocess.run([path, *args], capture_output=True, text=True, timeout=timeout, check=False)
+            output = (result.stdout or "") + "\n" + (result.stderr or "")
+            first = next((line.strip() for line in output.splitlines() if line.strip()), "")
+            return {"available": result.returncode == 0, "path": path, "version": first[:240], "exit_code": result.returncode}
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {"available": False, "path": path, "version": None, "error": type(exc).__name__}
+
+    def _tool_inventory() -> dict[str, dict[str, Any]]:
+        sdk_root = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
+        if not sdk_root and os.environ.get("LOCALAPPDATA"):
+            sdk_root = str(Path(os.environ["LOCALAPPDATA"]) / "Android" / "Sdk")
+        sdk = Path(sdk_root).expanduser() if sdk_root else None
+        godot_path = _find_tool(["godot", "godot.exe", "godot4", "godot4.exe"], ("NEXORA_GODOT_PATH",))
+        blender_path = _find_tool(["blender", "blender.exe"], ("NEXORA_BLENDER_PATH",))
+        ffmpeg_path = _find_tool(["ffmpeg", "ffmpeg.exe"], ("NEXORA_FFMPEG_PATH",))
+        java_path = _find_tool(["java", "java.exe"], ("JAVA_HOME",))
+        sdkmanager_candidates = []
+        if sdk:
+            sdkmanager_candidates += [str(sdk / "cmdline-tools" / "latest" / "bin" / name) for name in ("sdkmanager.bat", "sdkmanager")]
+            sdkmanager_candidates += [str(sdk / "tools" / "bin" / name) for name in ("sdkmanager.bat", "sdkmanager")]
+        sdkmanager_path = next((p for p in sdkmanager_candidates if Path(p).is_file()), None) or _find_tool(["sdkmanager", "sdkmanager.bat"])
+        adb_path = str(sdk / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb")) if sdk else None
+        if not adb_path or not Path(adb_path).is_file():
+            adb_path = _find_tool(["adb", "adb.exe"])
+        return {
+            "godot4": _probe(godot_path, ["--version"]),
+            "blender": _probe(blender_path, ["--version"]),
+            "ffmpeg": _probe(ffmpeg_path, ["-version"]),
+            "java": _probe(java_path, ["-version"]),
+            "sdkmanager": _probe(sdkmanager_path, ["--version"]),
+            "adb": _probe(adb_path, ["version"]),
+            "android_sdk": {"available": bool(sdk and sdk.is_dir()), "path": str(sdk.resolve()) if sdk and sdk.is_dir() else None, "version": None},
+        }
+
     @router.get("/toolchains")
     def toolchains(owner: str = Depends(require_paired)):
         catalog = [
-            {"id":"godot4","label":"Godot 4","purpose":"Game engine and export templates"},
-            {"id":"blender","label":"Blender","purpose":"3D asset creation and processing"},
-            {"id":"ffmpeg","label":"FFmpeg","purpose":"Audio/video conversion"},
-            {"id":"java17","label":"Java 17+","purpose":"Android build toolchain"},
+            {"id":"godot4","label":"Godot 4","purpose":"Game engine and matching export templates","required_for":["web","android","windows"]},
+            {"id":"blender","label":"Blender","purpose":"Optional 3D asset creation and processing"},
+            {"id":"ffmpeg","label":"FFmpeg","purpose":"Optional audio/video conversion"},
+            {"id":"java","label":"OpenJDK 17","purpose":"Android export toolchain"},
             {"id":"android_sdk","label":"Android SDK","purpose":"Android APK/AAB export"},
-            {"id":"adb","label":"Android Platform Tools","purpose":"Optional device installation and debugging"},
+            {"id":"adb","label":"Android Platform Tools","purpose":"Optional physical-device testing"},
+            {"id":"sdkmanager","label":"Android SDK Manager","purpose":"Install pinned Android SDK components"},
         ]
-        commands = {"godot4":["godot","godot4","godot.exe"],"blender":["blender","blender.exe"],"ffmpeg":["ffmpeg","ffmpeg.exe"],"java17":["java","java.exe"],"android_sdk":["sdkmanager","sdkmanager.bat"],"adb":["adb","adb.exe"]}
-        tools = {}
-        for key, candidates in commands.items():
-            located = next((shutil.which(item) for item in candidates if shutil.which(item)), None)
-            tools["java" if key == "java17" else key] = {"available": bool(located), "path": located, "version": None}
+        tools = _tool_inventory()
         profile = {}
         try:
             from services.worker.system_profile import collect_system_profile
             profile = collect_system_profile(Path(data_root))
         except Exception:
             pass
-        return {"machine":{"system":platform.system()},"install_provider":None,"catalog":catalog,"tools":tools,"lock":None,"profile":profile}
+        return {"machine":{"system":platform.system()},"install_provider":"android_sdkmanager_only","catalog":catalog,"tools":tools,"lock":None,"profile":profile,
+                "android_export_ready": bool(tools["java"]["available"] and tools["android_sdk"]["available"] and tools["adb"]["available"] and tools["godot4"]["available"])}
 
     @router.post("/toolchains/install")
     def install_toolchains(payload: ToolInstallRequest, owner: str = Depends(require_paired)):
-        allowed = {"godot4","blender","ffmpeg","java17","android_sdk","adb"}
         if not payload.confirm_install:
             raise HTTPException(403, "Explicitly confirm installation on this computer.")
+        if set(payload.tools) != {"android_sdk"}:
+            raise HTTPException(422, "Only Android SDK components can currently be installed by NEXORA. Install Godot, Java, Blender and FFmpeg from their official distributors.")
+        inventory = _tool_inventory()
+        manager = inventory["sdkmanager"]
+        sdk_root = inventory["android_sdk"]["path"] or os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
+        if not manager["available"] or not manager["path"]:
+            raise HTTPException(409, "Android sdkmanager was not found. Install Android command-line tools from the official Android developer site first.")
+        if not sdk_root:
+            raise HTTPException(409, "Set ANDROID_SDK_ROOT or ANDROID_HOME to the SDK directory before installing components.")
+        # Fixed, reviewed package IDs; callers cannot pass arbitrary package names or shell arguments.
+        packages = ["platform-tools", "build-tools;35.0.1", "platforms;android-35", "cmdline-tools;latest", "cmake;3.10.2.4988404", "ndk;28.1.13356709"]
+        command = [manager["path"], "--sdk_root=" + str(Path(sdk_root).resolve()), *packages]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=3600, check=False)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, "Android SDK installation exceeded the one-hour limit.")
+        except OSError as exc:
+            raise HTTPException(500, "Could not start Android SDK Manager: " + type(exc).__name__)
+        output = ((result.stdout or "") + "\n" + (result.stderr or ""))[-5000:]
+        if result.returncode != 0:
+            raise HTTPException(409, "SDK Manager did not complete. Review the local output; Android SDK licence acceptance may be required first. " + output[-1200:])
+        return {"installed":True,"provider":"sdkmanager","sdk_root":str(Path(sdk_root).resolve()),"packages":packages,"output":output}
+    
+    @router.post("/projects/{project_id}/toolchains/lock")
+    def lock_toolchains(project_id: str, payload: ToolchainLockRequest, owner: str = Depends(require_paired)):
+        directory, manifest = _project(owner, project_id)
+        inventory = _tool_inventory()
+        allowed = {"godot4","blender","ffmpeg","java","android_sdk","adb","sdkmanager"}
         unknown = sorted(set(payload.tools) - allowed)
         if unknown:
-            raise HTTPException(422, "Unsupported toolchain selection.")
-        # Intentionally no arbitrary package-manager execution. Tool installation
-        # is enabled only after a reviewed, signed installer catalogue is configured.
-        raise HTTPException(501, "Managed installation is not configured yet. Install from the official vendor, then use Detect tools and Lock versions.")
+            raise HTTPException(422, "Unknown toolchain IDs: " + ", ".join(unknown))
+        missing = [name for name in payload.tools if not inventory.get(name, {}).get("available")]
+        if missing:
+            raise HTTPException(409, "Cannot lock unavailable tools: " + ", ".join(missing))
+        lock = {"schema_version":1,"engine":"godot","locked_at":_now(),"tools":{name:inventory[name] for name in payload.tools}}
+        target = directory / ".nexora" / "toolchain.lock.json"
+        target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text(json.dumps(lock,indent=2,sort_keys=True),encoding="utf-8")
+        manifest["updated_at"] = _now()
+        _write_manifest(directory,manifest)
+        return {"locked":True,"lock":lock}
+    
+    @router.post("/projects/{project_id}/validate")
+    def validate_godot_project(project_id: str, owner: str = Depends(require_paired)):
+        directory, _ = _project(owner, project_id)
+        project_file = directory / "project.godot"
+        if not project_file.is_file():
+            raise HTTPException(422, "project.godot is missing.")
+        godot = _tool_inventory()["godot4"]
+        if not godot["available"] or not godot["path"]:
+            raise HTTPException(409, "Godot 4 editor binary was not detected on this computer.")
+        try:
+            result = subprocess.run([godot["path"], "--headless", "--path", str(directory), "--editor", "--quit"],capture_output=True,text=True,timeout=180,check=False)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, "Godot project validation exceeded 180 seconds.")
+        except OSError as exc:
+            raise HTTPException(500, "Could not start Godot: " + type(exc).__name__)
+        output = ((result.stdout or "") + "\n" + (result.stderr or ""))[-12000:]
+        return {"valid":result.returncode == 0,"exit_code":result.returncode,"engine":godot["version"],"output":output}
+    
+    @router.post("/projects/{project_id}/build")
+    def build_godot_project(project_id: str, payload: GodotBuildRequest, owner: str = Depends(require_paired)):
+        directory, _ = _project(owner, project_id)
+        preset_file = directory / "export_presets.cfg"
+        if not preset_file.is_file():
+            raise HTTPException(409, "Create an export preset in Godot before building with NEXORA.")
+        preset_text = preset_file.read_text(encoding="utf-8",errors="replace")
+        sections = re.findall(r'^\[preset\.\d+\]\s*$([\s\S]*?)(?=^\[|\Z)',preset_text,re.MULTILINE)
+        names = []
+        for section in sections:
+            match = re.search(r'^name="([^"]+)"\s*
+    @router.get("/publish/readiness")
+    def publish_readiness(owner: str = Depends(require_paired)):
+        return {"publishers":[
+            {"id":"google_play","name":"Google Play","ready":False,"missing":["Creator-owned Play Console app and publisher credentials are not connected."]},
+            {"id":"apple","name":"Apple App Store","ready":False,"missing":["A macOS/Xcode build relay and App Store Connect credentials are required."]},
+            {"id":"microsoft","name":"Microsoft Store","ready":False,"missing":["MSIX signing and Partner Center app identity are not configured."]},
+        ]}
+
+    @router.get("/drive/status")
+    def drive_status(owner: str = Depends(require_paired)):
+        return {"connected":False,"configured":False,"credential_vault_ready":False,"provider":"google_drive","scope":"drive.file"}
+
+    @router.post("/drive/authorize")
+    def drive_authorize(owner: str = Depends(require_paired)):
+        raise HTTPException(501, "Google Drive OAuth is not configured. Add a verified desktop OAuth client and OS credential-vault integration first.")
+
+    @router.post("/drive/disconnect")
+    def drive_disconnect(owner: str = Depends(require_paired)):
+        return {"disconnected":True}
+
+    @router.get("/drive/projects/{project_id}/backups")
+    def drive_backups(project_id: str, owner: str = Depends(require_paired)):
+        _project(owner, project_id)
+        return {"files":[]}
+
+    @router.post("/projects/{project_id}/publish/prepare")
+    def prepare_publish(project_id: str, payload: PublishRequest, owner: str = Depends(require_paired)):
+        directory, manifest = _project(owner, project_id)
+        if not payload.confirm_distribution_rights:
+            raise HTTPException(403, "Confirm that you own or have distribution rights for every included asset.")
+        artifact = Path(payload.artifact_id).expanduser()
+        if not artifact.is_absolute():
+            artifact = directory / artifact
+        artifact = artifact.resolve()
+        if not artifact.is_file():
+            raise HTTPException(404, "Build artifact was not found on this computer.")
+        if artifact.stat().st_size <= 0:
+            raise HTTPException(422, "Build artifact is empty.")
+        digest = _digest(artifact)
+        release_root = directory / ".nexora" / "releases"
+        release_root.mkdir(parents=True, exist_ok=True)
+        release_id = str(uuid4())
+        record = {
+            "schema_version":1,"release_id":release_id,"project_id":project_id,
+            "owner_id":str(owner),"platform":payload.platform,"artifact_path":str(artifact),
+            "artifact_size_bytes":artifact.stat().st_size,"sha256":digest,
+            "project_name":manifest["name"],"distribution_rights_confirmed":True,
+            "created_at":_now(),"status":"prepared_not_uploaded",
+        }
+        (release_root / (release_id + ".json")).write_text(json.dumps(record,indent=2),encoding="utf-8")
+        return {"prepared":True,"release":record,"uploaded":False,"submitted":False}
+
+    app.include_router(router)
+,section,re.MULTILINE)
+            if match:
+                names.append(match.group(1))
+        if payload.preset not in names:
+            raise HTTPException(422, "Requested export preset does not exist in export_presets.cfg.")
+        godot = _tool_inventory()["godot4"]
+        if not godot["available"] or not godot["path"]:
+            raise HTTPException(409, "Godot 4 editor binary was not detected on this computer.")
+        if Path(payload.output_name).name != payload.output_name or payload.output_name in {".",".."}:
+            raise HTTPException(422, "Output name must be a filename, not a path.")
+        ext = {"Windows Desktop":".exe","Windows":".exe","Android":".apk","Web":".zip","Linux/X11":".x86_64"}
+        suffix = Path(payload.output_name).suffix.lower()
+        if not suffix:
+            suffix = ext.get(payload.preset,".bin")
+        if payload.preset == "Android" and suffix not in {".apk",".aab"}:
+            raise HTTPException(422, "Android output must be .apk or .aab.")
+        if payload.preset == "Web" and suffix != ".zip":
+            raise HTTPException(422, "Web export output must be a .zip bundle.")
+        output_root = directory / "exports" / re.sub(r'[^a-z0-9_-]+','-',payload.preset.lower()).strip("-")
+        output_root.mkdir(parents=True,exist_ok=True)
+        output = output_root / (payload.output_name if Path(payload.output_name).suffix else payload.output_name + suffix)
+        command = [godot["path"],"--headless","--path",str(directory),"--export-debug" if payload.mode == "debug" else "--export-release",payload.preset,str(output)]
+        try:
+            result = subprocess.run(command,capture_output=True,text=True,timeout=1800,check=False)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, "Godot export exceeded the 30-minute limit.")
+        except OSError as exc:
+            raise HTTPException(500, "Could not start Godot export: " + type(exc).__name__)
+        output_text = ((result.stdout or "") + "\n" + (result.stderr or ""))[-16000:]
+        if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
+            return {"built":False,"exit_code":result.returncode,"output":output_text,"artifact":None}
+        return {"built":True,"exit_code":0,"output":output_text,"artifact":{"path":str(output),"size_bytes":output.stat().st_size,"sha256":_digest(output),"platform_preset":payload.preset,"mode":payload.mode}}
 
     @router.get("/publish/readiness")
     def publish_readiness(owner: str = Depends(require_paired)):
