@@ -35,7 +35,7 @@ if not os.environ.get("PGF_DATA_DIR"):
         os.environ["PGF_DATA_DIR"] = str(Path.home() / ".local" / "share" / "nexora" / "foundry")
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -97,7 +97,12 @@ async def loopback_and_origin_guard(request: Request, call_next):
     if host and host not in allowed_hosts:
         return JSONResponse({"detail": "Invalid local agent Host header."}, status_code=403)
     origin = request.headers.get("origin")
-    if origin and origin not in ORIGINS:
+    # Google returns the PKCE authorization response as a top-level browser
+    # navigation. Its cross-site Origin must not be treated as an API CORS
+    # request; the loopback Host guard plus one-time PKCE state/code verifier
+    # protect this exact callback. All other cross-origin requests stay blocked.
+    oauth_callback = request.method.upper() == "GET" and request.url.path == "/drive/oauth/callback"
+    if origin and origin not in ORIGINS and not oauth_callback:
         return JSONResponse({"detail": "This website is not allowed to connect to NEXORA Local Agent."}, status_code=403)
     return await call_next(request)
 
@@ -456,13 +461,6 @@ def short_capabilities(user_id: str = Depends(_require_paired)):
     }
 
 
-# Desktop factory APIs are mounted only inside this loopback agent. They are
-# deliberately absent from the hosted cloud application.
-from services.worker.desktop_factory import register_desktop_factory_routes
-
-register_desktop_factory_routes(app, _require_paired, DATA_ROOT)
-
-
 # The complete Foundry application is available locally under /engine. Its
 # generation endpoints are blocked on the cloud host by execution_policy.py.
 # The agent process runs with NEXORA_LOCAL_AGENT=true, so those operations run
@@ -476,15 +474,43 @@ if _SAVED_WORKSPACE_ROOT:
 app.mount("/engine", foundry_app)
 register_local_workspace_routes(app, foundry_main.manager, DATA_ROOT, _require_paired)
 
-# Google Desktop OAuth redirects must target a bare loopback IP:port URI.
-# The outer Local Agent therefore receives the callback at http://127.0.0.1:8765,
-# while all authenticated NEXORA factory APIs remain mounted under /engine.
-from core.nexora_workspace.drive_backup import handle_drive_callback
+@app.get("/drive/oauth/callback")
+def google_drive_desktop_oauth_callback(request: Request):
+    # The desktop API's PKCE flow redirects here. Its state token binds the
+    # callback to the NEXORA account that initiated authorization.
+    from core.nexora_workspace.drive_oauth import finish_drive_oauth
+    from html import escape
 
-
-@app.get("/")
-def google_drive_oauth_callback(request: Request):
-    return handle_drive_callback(request)
+    error = request.query_params.get("error")
+    if error:
+        message = "Google Drive authorization was cancelled or denied."
+        status = 400
+    else:
+        code = request.query_params.get("code", "")
+        state = request.query_params.get("state", "")
+        if not code or not state:
+            message = "Google did not return the required authorization code and state."
+            status = 400
+        else:
+            try:
+                result = finish_drive_oauth(code, state)
+                message = "NEXORA is connected to Google Drive. You can close this window and return to NEXORA."
+                status = 200
+            except Exception as exc:
+                message = str(exc)[:500]
+                status = 400
+    safe_message = escape(message)
+    page = (
+        "<!doctype html><html lang='en'><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>NEXORA Google Drive</title>"
+        "<body style='font:16px system-ui;background:#08111e;color:#e8f3ff;"
+        "display:grid;place-items:center;min-height:100vh;margin:0'>"
+        "<main style='max-width:560px;padding:32px;border:1px solid #29415f;"
+        "border-radius:16px;background:#101d2d'><h1>NEXORA · Google Drive</h1>"
+        f"<p>{safe_message}</p><p>You may close this browser tab.</p></main></body></html>"
+    )
+    return HTMLResponse(page, status_code=status)
 
 
 

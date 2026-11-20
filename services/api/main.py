@@ -754,8 +754,5 @@ register_creator_workflow_routes(app, manager, jobs)
 # NEXORA has its own registration, login and revocable account sessions.
 register_nexora_auth_routes(app)
 
-# Desktop project filesystem, toolchain, backup and release routes are mounted
-# only inside the paired local agent; the hosted Render control plane stays inert.
-if LOCAL_AGENT_MODE:
-    from core.nexora_workspace.desktop_factory import register_desktop_factory_routes
-    register_desktop_factory_routes(app, manager)
+# Desktop project, toolchain, Drive and release routes are registered once
+# above by core.nexora_workspace.desktop_api.
