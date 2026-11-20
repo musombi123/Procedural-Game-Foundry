@@ -536,7 +536,12 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         android = profile.get("android", {})
         godot = tools.get("godot") or {}
         godot_version = str(godot.get("version") or "")
-        version_match = __import__("re").search(r"(\\d+\\.\\d+\\.\\d+)\\.stable", godot_version)
+        version_parts = godot_version.split(".")
+        version_prefix = (
+            ".".join(version_parts[:3]) + ".stable"
+            if len(version_parts) >= 4 and version_parts[3] == "stable"
+            else ""
+        )
         template_roots = []
         if os.name == "nt" and os.environ.get("APPDATA"):
             template_roots.append(Path(os.environ["APPDATA"]) / "Godot" / "export_templates")
@@ -548,8 +553,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
                 Path.home() / ".var" / "app" / "org.godotengine.Godot" / "data" / "godot" / "export_templates",
             ])
         template_match = None
-        if version_match:
-            version_prefix = version_match.group(1) + ".stable"
+        if version_prefix:
             for root in template_roots:
                 if root.is_dir():
                     template_match = next(
