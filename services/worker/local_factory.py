@@ -59,6 +59,7 @@ class WorkspaceRootRequest(BaseModel):
 
 
 class ReleasePrepareRequest(BaseModel):
+    project_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9_-]+$")
     provider: Literal["google_play", "apple_app_store", "microsoft_store"]
     artifact_path: str = Field(min_length=1, max_length=1024)
     package_id: str = Field(default="", max_length=255)
@@ -629,6 +630,7 @@ def register_local_factory_routes(app: Any) -> None:
         staging_root = Path(os.environ.get("NEXORA_LOCAL_AGENT_DATA", str(Path.home() / ".nexora-local-agent"))) / "restore"
         staging_root.mkdir(parents=True, exist_ok=True)
         extracted = Path(tempfile.mkdtemp(prefix="nexora-restore-", dir=staging_root))
+        keep: Path | None = None
         try:
             with zipfile.ZipFile(archive, "r") as source:
                 _safe_members(source)
@@ -657,7 +659,7 @@ def register_local_factory_routes(app: Any) -> None:
             return {"restored": True, "snapshot_id": snapshot_id, "safety_snapshot_id": safety_snapshot["id"], "message": "Project files restored. A separate safety snapshot was retained before the restore."}
         finally:
             shutil.rmtree(extracted, ignore_errors=True)
-            if keep.exists():
+            if keep and keep.exists():
                 shutil.rmtree(keep, ignore_errors=True)
 
     @app.get("/publishing/status")
