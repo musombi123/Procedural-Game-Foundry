@@ -63,7 +63,7 @@ def search_models(query: str = "", limit: int = 40) -> dict[str, Any]:
     if len(query) > 120:
         raise PolyHavenError("Search text is too long.")
     limit = max(1, min(int(limit), 80))
-    payload = _request_json(f"{API_ROOT}/assets")
+    payload = _request_json(f"{API_ROOT}/assets?t=models")
     results = []
     for asset_id, item in payload.items():
         if not isinstance(item, dict) or item.get("type") != 2:
@@ -189,7 +189,7 @@ def download_model(project_root: Path, asset_id: str, resolution: str = "2k") ->
         raise PolyHavenError("Invalid Poly Haven asset identifier.")
     if resolution not in RESOLUTIONS:
         raise PolyHavenError("Resolution must be 1k, 2k or 4k.")
-    metadata = _request_json(f"{API_ROOT}/assets")
+    metadata = _request_json(f"{API_ROOT}/assets?t=models")
     asset = metadata.get(asset_id)
     if not isinstance(asset, dict) or asset.get("type") != 2:
         raise PolyHavenError("The requested Poly Haven asset is not a 3D model.")
