@@ -15,6 +15,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from core.asset_registry.registry import AssetRegistry
+
 API_ROOT = "https://api.polyhaven.com"
 API_HOST = "api.polyhaven.com"
 DOWNLOAD_HOST = "dl.polyhaven.org"
@@ -179,8 +181,11 @@ def download_model(project_root: Path, asset_id: str, resolution: str = "2k") ->
         raise PolyHavenError("The requested Poly Haven asset is not a 3D model.")
     files = _request_json(f"{API_ROOT}/files/{urllib.parse.quote(asset_id, safe='')}")
     selected = _choose_model_files(files, resolution)
+    # project_root is the NEXORA workspace root. AssetRegistry reads from
+    # workspace/assets and the Godot assembler copies this library into game/assets.
     project = project_root.resolve()
-    destination = (project / "assets" / "3d" / "polyhaven" / asset_id).resolve()
+    library_root = (project / "assets").resolve()
+    destination = (library_root / "3d" / "polyhaven" / asset_id).resolve()
     if project not in destination.parents:
         raise PolyHavenError("Asset destination escapes the selected Godot project.")
     destination.mkdir(parents=True, exist_ok=True)
@@ -218,7 +223,29 @@ def download_model(project_root: Path, asset_id: str, resolution: str = "2k") ->
     }
     manifest_path = destination / "nexora-asset-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return {"downloaded": True, "asset_id": asset_id, "name": manifest["name"],
+    model_files = [item for item in downloaded if item["path"].lower().endswith((".glb", ".gltf"))]
+    if not model_files:
+        raise PolyHavenError("Provider download did not contain a GLB or glTF model file.")
+    model_file = next((item for item in model_files if item["path"].lower().endswith(".glb")), model_files[0])
+    relative_model_path = Path(model_file["path"]).relative_to("assets").as_posix()
+    registry = AssetRegistry(library_root)
+    registry_id = f"polyhaven_{asset_id}"
+    registered = next((item for item in registry.list() if item.get("asset_id") == registry_id), None)
+    if registered:
+        if registered.get("path") != relative_model_path or registered.get("license") != "CC0-1.0":
+            raise PolyHavenError("A conflicting asset registry entry already uses this Poly Haven ID.")
+    else:
+        registry.register(
+            asset_id=registry_id,
+            relative_path=relative_model_path,
+            kind="3d_model",
+            license_name="CC0-1.0",
+            source="Poly Haven",
+            author="Poly Haven contributors",
+            metadata={"provider_asset_id": asset_id, "resolution": resolution, "source_url": manifest["source_url"]},
+        )
+    return {"downloaded": True, "asset_id": asset_id, "asset_registry_id": registry_id,
+            "model_path": model_file["path"], "name": manifest["name"],
             "directory": str(destination.relative_to(project)).replace("\\", "/"),
             "files": downloaded, "total_bytes": total, "license": "CC0-1.0",
             "provider": "Poly Haven", "manifest": str(manifest_path.relative_to(project)).replace("\\", "/")}
