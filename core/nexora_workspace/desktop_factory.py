@@ -904,3 +904,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         return {"prepared": True, "manifest": manifest, "manifest_path": str(output)}
 
     app.include_router(router)
+
+    # Google Drive OAuth and resumable backup are local-agent-only extensions.
+    from core.nexora_workspace.drive_backup import register_drive_backup_routes
+    register_drive_backup_routes(app, manager)
