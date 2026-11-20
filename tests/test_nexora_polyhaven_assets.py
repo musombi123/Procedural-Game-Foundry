@@ -68,3 +68,14 @@ def test_rejects_invalid_asset_ids_and_resolution(tmp_path):
 def test_rejects_untrusted_provider_download_hosts():
     with pytest.raises(assets.PolyHavenError):
         assets._download_verified("https://example.com/model.glb", Path("model.glb"), 12, "")
+
+
+
+def test_refuses_download_when_provider_checksum_is_missing(tmp_path):
+    with pytest.raises(assets.PolyHavenError, match="valid MD5 checksum"):
+        assets._download_verified(
+            "https://dl.polyhaven.org/file/ph-assets/model.glb",
+            tmp_path / "model.glb",
+            12,
+            "",
+        )
