@@ -150,7 +150,7 @@ async def nexora_identity_and_project_scope(request: Request, call_next):
 
     match = re.match(r"^/api/(?:projects|v1/workspace/projects)/([A-Za-z0-9_-]+)(?:/|$)", path)
     is_project_collection_create = path in {"/api/projects", "/api/v1/workspace/projects"} and request.method.upper() == "POST"
-    if match and not is_project_collection_create:
+    if match and not is_project_collection_create and path != "/api/v1/workspace/projects/import":
         project_id = match.group(1)
         try:
             project_folder = manager.path_for(project_id)
@@ -741,6 +741,10 @@ register_nexora_workspace_routes(app, manager, jobs)
 # Local-only manifests, toolchain lockfiles, backup/import and release preparation.
 from core.nexora_workspace.local_factory import register_local_factory_routes
 register_local_factory_routes(app, manager)
+
+# Desktop IDE, file explorer, local snapshots, toolchain setup and publisher readiness.
+from core.nexora_workspace.desktop_api import register_desktop_factory_routes
+register_desktop_factory_routes(app, manager)
 
 
 # Episode-driven Creator Flow, asset conversion workers and Pochi plan reconciliation.
