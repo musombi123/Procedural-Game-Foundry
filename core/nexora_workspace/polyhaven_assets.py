@@ -137,6 +137,8 @@ def _download_verified(url: str, target: Path, expected_size: int, expected_md5:
         raise PolyHavenError("Rejected untrusted asset download URL.")
     if expected_size <= 0 or expected_size > MAX_ASSET_BYTES:
         raise PolyHavenError("Asset file exceeds the 250 MB per-file download limit.")
+    if not re.fullmatch(r"[a-fA-F0-9]{32}", str(expected_md5 or "")):
+        raise PolyHavenError("Provider did not supply a valid MD5 checksum; refusing an unverified download.")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.md5()
     written = 0
