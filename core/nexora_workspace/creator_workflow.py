@@ -1106,14 +1106,24 @@ def _queue_creator_step(pid: str, folder: Path, owner_id: str, step: str, backgr
     workflow=_load_workflow(folder)
     entitlement=_assert_entitled(manager,owner_id,workflow.plan)
     _validate_plan(workflow)
-    job=jobs.add(Job.create(pid))
+    job=Job.create(pid)
     reward_credit_id=None
+    consumed_for="creator-step:"+job.id
     if entitlement.get("plan") == "basic" and step in REWARDED_BASIC_TOOLS:
-        reward_credit_id=_consume_reward_credit(manager,owner_id,step,"creator-step:"+job.id)
-    job_root=folder/"workspace_jobs"
-    job_root.mkdir(exist_ok=True)
-    (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner_id},indent=2),encoding="utf-8")
-    background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs,reward_credit_id)
+        reward_credit_id=_consume_reward_credit(manager,owner_id,step,consumed_for)
+    try:
+        job=jobs.add(job)
+        job_root=folder/"workspace_jobs"
+        job_root.mkdir(exist_ok=True)
+        (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner_id},indent=2),encoding="utf-8")
+        background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs,reward_credit_id)
+    except Exception:
+        if reward_credit_id:
+            try:
+                _refund_reward_credit(manager,owner_id,reward_credit_id,consumed_for)
+            except Exception:
+                pass
+        raise
     return {**job.as_dict(),"state":job.state.value.lower(),"kind":"creator."+step,"message":"Queued Creator Flow stage: "+step}
 
 def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
