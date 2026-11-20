@@ -411,9 +411,13 @@ def register_desktop_factory_routes(app, require_paired, data_root: Path) -> Non
                     return str(candidate.resolve())
                 if candidate.is_dir():
                     for name in candidates:
-                        for path in candidate.rglob(name):
-                            if path.is_file():
-                                return str(path.resolve())
+                        direct = candidate / "bin" / name
+                        if direct.is_file():
+                            return str(direct.resolve())
+                    for name in candidates:
+                        direct = candidate / name
+                        if direct.is_file():
+                            return str(direct.resolve())
         for name in candidates:
             located = shutil.which(name)
             if located:
@@ -477,7 +481,7 @@ def register_desktop_factory_routes(app, require_paired, data_root: Path) -> Non
         except Exception:
             pass
         return {"machine":{"system":platform.system()},"install_provider":"android_sdkmanager_only","catalog":catalog,"tools":tools,"lock":None,"profile":profile,
-                "android_export_ready": bool(tools["java"]["available"] and tools["android_sdk"]["available"] and tools["adb"]["available"] and tools["godot4"]["available"])}
+                "android_export_ready": bool(tools["java"]["available"] and tools["android_sdk"]["available"] and tools["godot4"]["available"])}
 
     @router.post("/toolchains/install")
     def install_toolchains(payload: ToolInstallRequest, owner: str = Depends(require_paired)):
@@ -550,7 +554,7 @@ def register_desktop_factory_routes(app, require_paired, data_root: Path) -> Non
         if not preset_file.is_file():
             raise HTTPException(409, "Create an export preset in Godot before building with NEXORA.")
         preset_text = preset_file.read_text(encoding="utf-8",errors="replace")
-        sections = re.findall(r'^\[preset\.\d+\]\s*$([\s\S]*?)(?=^\[|\Z)',preset_text,re.MULTILINE)
+        sections = re.findall(r'^\[preset\.\d+\]\s*\n([\s\S]*?)(?=^\[|\Z)',preset_text,re.MULTILINE)
         names = []
         for section in sections:
             match = re.search(r'^name="([^"]+)"\s*
