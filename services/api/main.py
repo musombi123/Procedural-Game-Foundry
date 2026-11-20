@@ -23,6 +23,7 @@ from core.nexora_workspace.identity import (
 )
 from core.execution_policy import is_local_compute_only_request, local_compute_block_payload
 from services.worker.local_security import verify_local_access_token
+from services.worker.workload_guard import require_device_profile
 
 LOCAL_AGENT_MODE = os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}
 
@@ -38,6 +39,63 @@ _origins = [item.strip() for item in os.environ.get("NEXORA_CORS_ORIGINS", "http
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","Accept","X-Revela-License","X-Nexora-Payment-Secret"])
 
 _PUBLIC_AUTH_PATHS = {"/api/v1/auth/register", "/api/v1/auth/login"}
+
+def _local_device_profile_for_request(path: str) -> tuple[str, str | None] | None:
+    """Map local production routes to the workload preflight they must pass."""
+    video_patterns = (
+        r"^/api/projects/[^/]+/movie-pipeline/source/video$",
+        r"^/api/projects/[^/]+/movie-pipeline/stages/analysis/run$",
+        r"^/api/v1/workspace/projects/[^/]+/video-intake$",
+    )
+    if any(re.fullmatch(pattern, path) for pattern in video_patterns):
+        return ("movie_processing", None)
+
+    conversion = re.fullmatch(
+        r"^/api/v1/workspace/projects/([A-Za-z0-9_-]+)/assets/([A-Za-z0-9_-]+)/convert$",
+        path,
+    )
+    if conversion:
+        project_id, asset_id = conversion.groups()
+        try:
+            folder = manager.path_for(project_id)
+            index = folder / "assets" / "assets.json"
+            if index.is_file():
+                rows = json.loads(index.read_text(encoding="utf-8")).get("assets", [])
+                record = next((item for item in rows if item.get("asset_id") == asset_id), None)
+                if record:
+                    suffix = Path(record.get("path", "")).suffix.lower()
+                    if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+                        return ("image_to_3d", None)
+        except (OSError, ValueError, TypeError):
+            pass
+
+    project_match = re.match(
+        r"^/api/(?:projects|v1/workspace/projects)/([A-Za-z0-9_-]+)(?:/|$)",
+        path,
+    )
+    if not project_match:
+        return None
+    project_id = project_match.group(1)
+    try:
+        definition = manager.load(project_id)
+        dimension = str(getattr(definition.project, "dimension", "3d")).lower()
+    except Exception:
+        dimension = "3d"
+    project_profile = "editor_2d" if dimension == "2d" else "procedural_3d"
+
+    if path.endswith("/jobs"):
+        return (project_profile, project_id)
+    if path.endswith("/generate") or path.endswith("/godot-check"):
+        return (project_profile, project_id)
+    if re.search(r"/movie-pipeline/(?:source/photo|player/build|environment/build)$", path):
+        return ("procedural_3d", project_id)
+    if re.search(
+        r"/creator-workflow/(?:player/build|environment/build|actors-props/build|gameplay/compile|assembly/build)$",
+        path,
+    ):
+        return (project_profile, project_id)
+    return None
+
 
 @app.middleware("http")
 async def nexora_identity_and_project_scope(request: Request, call_next):
@@ -104,6 +162,19 @@ async def nexora_identity_and_project_scope(request: Request, call_next):
             return JSONResponse({"detail": "This legacy project has no NEXORA account owner record. Contact NEXORA support for a verified ownership migration."}, status_code=403)
         else:
             owner_file.write_text(json.dumps({"user_id": identity["id"]}, indent=2), encoding="utf-8")
+
+    if LOCAL_AGENT_MODE and request.method.upper() in {"POST", "PUT", "PATCH"}:
+        profile_request = _local_device_profile_for_request(path)
+        if profile_request:
+            profile_id, project_id = profile_request
+            if profile_id == "editor_2d" and project_id:
+                # Scene authoring does not consume the full export profile.
+                # Job creation is checked here; Android export is checked in
+                # its endpoint before the export worker is queued.
+                if not path.endswith("/jobs"):
+                    profile_id = ""
+            if profile_id:
+                require_device_profile(profile_id)
 
     return await call_next(request)
 
