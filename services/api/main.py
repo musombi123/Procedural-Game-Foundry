@@ -66,6 +66,7 @@ def _local_device_profile_for_request(path: str) -> tuple[str, str | None] | Non
                     suffix = Path(record.get("path", "")).suffix.lower()
                     if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
                         return ("image_to_3d", None)
+                    return ("procedural_3d", project_id)
         except (OSError, ValueError, TypeError):
             pass
 
