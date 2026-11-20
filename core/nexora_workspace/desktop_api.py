@@ -212,6 +212,8 @@ def _drive_list_project_backups(user_id: str, pid: str) -> list[dict]:
 def _drive_upload_file(user_id: str, source: Path, metadata: dict) -> dict:
     token = drive_access_token(user_id)
     size = source.stat().st_size
+    if size <= 0 or size > MAX_BACKUP_BYTES:
+        raise HTTPException(413, "Google Drive accepts non-empty project backups up to 2 GiB.")
     start_url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable"
     headers = {
         "Authorization": "Bearer " + token,
@@ -229,20 +231,52 @@ def _drive_upload_file(user_id: str, source: Path, metadata: dict) -> dict:
         raise HTTPException(502, "Google Drive did not return a resumable upload URL.")
     parsed = urlsplit(location)
     connection = HTTPSConnection(parsed.hostname, parsed.port or 443, timeout=120)
+    chunk_size = 8 * 1024 * 1024  # Multiple of Google's 256 KiB resumable-upload granularity.
+    sent = 0
+    retries_without_progress = 0
     try:
-        connection.putrequest("PUT", parsed.path + (("?" + parsed.query) if parsed.query else ""))
-        connection.putheader("Authorization", "Bearer " + token)
-        connection.putheader("Content-Type", "application/zip")
-        connection.putheader("Content-Length", str(size))
-        connection.endheaders()
         with source.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            while sent < size:
+                stream.seek(sent)
+                chunk = stream.read(min(chunk_size, size - sent))
+                if not chunk:
+                    raise HTTPException(500, "Local backup ended before the expected upload size.")
+                start_byte = sent
+                end_byte = sent + len(chunk) - 1
+                connection.putrequest("PUT", parsed.path + (("?" + parsed.query) if parsed.query else ""))
+                connection.putheader("Authorization", "Bearer " + token)
+                connection.putheader("Content-Type", "application/zip")
+                connection.putheader("Content-Length", str(len(chunk)))
+                connection.putheader("Content-Range", f"bytes {start_byte}-{end_byte}/{size}")
+                connection.endheaders()
                 connection.send(chunk)
-        response = connection.getresponse()
-        raw = response.read(1024 * 1024)
-        if response.status not in {200, 201}:
-            raise HTTPException(502, "Google Drive upload did not complete: " + raw.decode("utf-8", "replace")[:800])
-        return json.loads(raw.decode("utf-8")) if raw else {}
+                response = connection.getresponse()
+                raw = response.read(1024 * 1024)
+                if response.status in {200, 201}:
+                    try:
+                        return json.loads(raw.decode("utf-8")) if raw else {}
+                    except ValueError as exc:
+                        raise HTTPException(502, "Google Drive returned an invalid upload response.") from exc
+                if response.status != 308:
+                    raise HTTPException(502, "Google Drive resumable upload failed: " + raw.decode("utf-8", "replace")[:800])
+                acknowledged = response.getheader("Range")
+                if acknowledged:
+                    match = re.fullmatch(r"bytes=0-(\\d+)", acknowledged.strip())
+                    if not match:
+                        raise HTTPException(502, "Google Drive returned an invalid resumable-upload Range header.")
+                    next_sent = int(match.group(1)) + 1
+                else:
+                    next_sent = 0
+                if next_sent <= sent:
+                    retries_without_progress += 1
+                    if retries_without_progress > 3:
+                        raise HTTPException(503, "Google Drive upload made no forward progress after three retries.")
+                else:
+                    retries_without_progress = 0
+                if next_sent > size:
+                    raise HTTPException(502, "Google Drive acknowledged bytes beyond the local backup size.")
+                sent = next_sent
+        raise HTTPException(502, "Google Drive ended the resumable session without completing the backup.")
     except OSError as exc:
         raise HTTPException(503, "The Google Drive upload connection was interrupted.") from exc
     finally:
