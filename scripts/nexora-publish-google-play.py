@@ -30,7 +30,6 @@ def main() -> int:
     parser.add_argument("--track", default="internal", choices=("internal", "alpha", "beta", "production"))
     parser.add_argument("--status", default="draft", choices=("draft", "completed"))
     parser.add_argument("--language", default="en-US")
-    parser.add_argument("--yes", action="store_true", help="Skip the interactive confirmation. Use only in your own controlled release workflow.")
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest).expanduser().resolve()
@@ -96,7 +95,7 @@ def main() -> int:
         print(f"SHA-256:  {artifact['sha256']}")
         print("This requires an existing app and a service account authorized in Play Console.")
         confirmation = "PUBLISH" if args.status == "completed" else "UPLOAD"
-        if not args.yes and input(f"Type {confirmation} to create a Play edit and upload this AAB: ").strip() != confirmation:
+        if input(f"Type {confirmation} to create a Play edit and upload this AAB: ").strip() != confirmation:
             print("Cancelled. No Play Console edit was created.")
             return 1
 
