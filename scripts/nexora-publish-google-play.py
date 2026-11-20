@@ -63,8 +63,8 @@ def main() -> int:
     if not artifact:
         print("The selected release manifest does not contain an Android App Bundle (.aab).", file=sys.stderr)
         return 2
-    if artifact.get("artifact_format") != "aab":
-        print("The release manifest does not identify this artifact as a release AAB.", file=sys.stderr)
+    if artifact.get("artifact_format") != "aab" or artifact.get("build_type") != "release":
+        print("The release manifest does not identify this artifact as a signed release AAB.", file=sys.stderr)
         return 2
     if not artifact.get("package_id") or artifact.get("package_id") != package_name:
         print(
