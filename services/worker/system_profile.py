@@ -113,7 +113,7 @@ def _tool_version(path: str | None, args: tuple[str, ...] = ("--version",)) -> s
 
 
 def _gpu_adapters() -> list[dict[str, Any]]:
-    executable = shutil.which("nvidia-smi")
+    executable = _find_tool("NEXORA_NVIDIA_SMI_PATH", ("nvidia-smi", "nvidia-smi.exe"))
     if not executable:
         return []
     output = _run_text(
