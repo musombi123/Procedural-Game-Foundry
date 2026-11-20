@@ -343,16 +343,33 @@ def _asset_rows(folder: Path) -> list[dict]:
         })
     return output
 
-def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android: dict | None = None) -> None:
-    sections = []
+def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android: dict | None = None, preserve_existing: bool = False) -> dict[str, str]:
     android = android or {}
-    for index, (preset, platform, suffix) in enumerate(targets):
+    preset_file = game / "export_presets.cfg"
+    existing_text = preset_file.read_text(encoding="utf-8") if preserve_existing and preset_file.is_file() else ""
+    existing_indices = [int(value) for value in re.findall(r"(?m)^\\[preset\\.(\\d+)\\]$", existing_text)]
+    index = max(existing_indices, default=-1) + 1
+    existing_names = set(re.findall(r'(?m)^name="([^"]+)"$', existing_text))
+    sections: list[str] = []
+    preset_names: dict[str, str] = {}
+    for preset, platform, suffix in targets:
         out_dir = game.parent / "artifacts" / platform
         out_dir.mkdir(parents=True, exist_ok=True)
         extension = "index.html" if platform == "web" else f"{game.parent.name}{suffix}"
         export_path = out_dir / extension
+        actual_name = preset
+        if actual_name in existing_names:
+            actual_name = f"NEXORA {preset}"
+        counter = 2
+        while actual_name in existing_names:
+            actual_name = f"NEXORA {preset} {counter}"
+            counter += 1
+        existing_names.add(actual_name)
+        preset_names[platform] = actual_name
+        current_index = index
+        index += 1
         lines = [
-            f"[preset.{index}]", f'name="{preset}"', f'platform="{platform_label(platform)}"',
+            f"[preset.{current_index}]", f'name="{actual_name}"', f'platform="{platform_label(platform)}"',
             "runnable=true", "dedicated_server=false", 'custom_features=""',
             'export_filter="all_resources"', 'include_filter=""', 'exclude_filter=""',
             f'export_path="{export_path.as_posix()}"', 'encryption_include_filters=""',
@@ -367,7 +384,7 @@ def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android
             options = {"variant/extensions_support":"false","vram_texture_compression/for_desktop":"true"}
         elif platform == "android":
             package_id = str(android.get("package_id") or "com.nexora.game").strip().lower()
-            if not re.fullmatch(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,}", package_id):
+            if not re.fullmatch(r"[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*){1,}", package_id):
                 raise RuntimeError("Android package ID must use reverse-DNS format, for example com.studio.mygame.")
             artifact_format = str(android.get("artifact_format") or "apk").lower()
             build_type = str(android.get("build_type") or "debug").lower()
@@ -404,7 +421,7 @@ def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android
         sections.extend(lines)
         if options:
             sections.append("")
-            sections.append(f"[preset.{index}.options]")
+            sections.append(f"[preset.{current_index}.options]")
             for key, value in options.items():
                 if isinstance(value, bool):
                     serialized = "true" if value else "false"
@@ -414,8 +431,11 @@ def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android
                     serialized = json.dumps(str(value))
                 sections.append(f"{key}={serialized}")
         sections.append("")
-    (game / "export_presets.cfg").write_text("\n".join(sections), encoding="utf-8")
-
+    combined = (existing_text.rstrip() + "\n\n" if existing_text.strip() else "") + "\n".join(sections)
+    temporary = preset_file.with_suffix(".cfg.tmp")
+    temporary.write_text(combined, encoding="utf-8")
+    temporary.replace(preset_file)
+    return preset_names
 
 def _apply_android_orientation(game: Path, android: dict | None) -> None:
     if not android:
@@ -446,19 +466,30 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
         jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.RUNNING, progress=5, message="Preparing NEXORA production project")
         definition = manager.load(project_id)
         folder = manager.path_for(project_id)
-        state = _load_state(folder, definition)
-        world = _sync_editor_scene_to_world(folder, definition, state)
-        jobs.update(job_id, progress=20, message="Synchronised scene, 3D assets and world data")
-        game = assemble_godot_project(definition, folder / "game", world.model_dump(mode="json"))
-        report = validate_project(folder)
-        if not report.get("valid"):
-            raise RuntimeError("Generated Godot project validation failed: " + "; ".join(report.get("errors",[])))
-        if kind == "scene.generate":
-            jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message="Godot scene generated and structurally validated", error=None)
-            return
+        imported_source = folder / "source"
+        imported_project = (imported_source / "project.godot").is_file()
+        if imported_project:
+            game = imported_source
+            jobs.update(job_id, progress=20, message="Using the imported Godot project source without regenerating or replacing it")
+        else:
+            state = _load_state(folder, definition)
+            world = _sync_editor_scene_to_world(folder, definition, state)
+            jobs.update(job_id, progress=20, message="Synchronised scene, 3D assets and world data")
+            game = assemble_godot_project(definition, folder / "game", world.model_dump(mode="json"))
+            report = validate_project(folder)
+            if not report.get("valid"):
+                raise RuntimeError("Generated Godot project validation failed: " + "; ".join(report.get("errors",[])))
         exe = godot_executable()
         if not exe:
             raise RuntimeError("Godot 4 is not installed on this worker. Install Godot 4 and export templates to execute game builds.")
+        if imported_project:
+            probe = subprocess.run([exe,"--headless","--path",str(game),"--editor","--quit"],capture_output=True,text=True,timeout=180)
+            if probe.returncode != 0:
+                raise RuntimeError("Imported Godot project failed the headless editor validation: " + (probe.stderr or probe.stdout)[-3000:])
+        if kind == "scene.generate":
+            message = "Imported Godot project passed native validation" if imported_project else "Godot scene generated and structurally validated"
+            jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message=message, error=None)
+            return
         if kind == "playtest":
             jobs.update(job_id, progress=65, message="Running headless Godot gameplay smoke test")
             result = subprocess.run([exe,"--headless","--path",str(game),"--quit-after","120"],capture_output=True,text=True,timeout=180)
@@ -499,7 +530,7 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
                 selected = [("Android","android",".aab")]
             else:
                 selected = [("Android","android",".apk")]
-        _write_export_presets(game, selected, android)
+        preset_names = _write_export_presets(game, selected, android, preserve_existing=imported_project)
         if target == "android":
             _apply_android_orientation(game, android)
         output_records = []
@@ -514,7 +545,8 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
             filename = "index.html" if platform == "web" else f"{definition.project.name.replace(' ','_')}{suffix}"
             target_file = output / filename
             export_flag = "--export-debug" if target == "android" and str((android or {}).get("build_type") or "debug").lower() == "debug" else "--export-release"
-            result = subprocess.run([exe,"--headless","--path",str(game),export_flag,preset,str(target_file)],capture_output=True,text=True,timeout=1800)
+            actual_preset = preset_names.get(platform, preset)
+            result = subprocess.run([exe,"--headless","--path",str(game),export_flag,actual_preset,str(target_file)],capture_output=True,text=True,timeout=1800)
             if result.returncode != 0 or not target_file.exists():
                 detail = (result.stderr or result.stdout or "Godot did not produce an export file")[-3500:]
                 raise RuntimeError(f"{platform} export failed. Check that the Godot {platform} export template and platform SDK are installed. {detail}")
