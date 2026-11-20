@@ -498,6 +498,15 @@ def _safe_restore_archive(
 
         if not (extracted / "game" / "project.godot").is_file():
             raise HTTPException(422, "This backup does not contain a restorable Godot project.")
+        definition_file = extracted / "pgf.json"
+        if not definition_file.is_file():
+            raise HTTPException(422, "Backup is missing the Foundry project definition.")
+        try:
+            definition_id = json.loads(definition_file.read_text(encoding="utf-8")).get("id")
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(422, "Backup Foundry project definition is unreadable.") from exc
+        if str(definition_id or "") != folder.name:
+            raise HTTPException(403, "Backup Foundry project ID does not match the target project.")
         owner_record = extracted / "nexora_owner.json"
         if expected_owner is not None:
             if not owner_record.is_file():
