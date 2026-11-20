@@ -63,6 +63,19 @@ def main() -> int:
     if not artifact:
         print("The selected release manifest does not contain an Android App Bundle (.aab).", file=sys.stderr)
         return 2
+    if artifact.get("artifact_format") != "aab":
+        print("The release manifest does not identify this artifact as a release AAB.", file=sys.stderr)
+        return 2
+    if not artifact.get("package_id") or artifact.get("package_id") != package_name:
+        print(
+            "AAB package identity mismatch. Build package ID is "
+            + repr(artifact.get("package_id"))
+            + " but NEXORA_PLAY_PACKAGE_NAME is "
+            + repr(package_name)
+            + ". Refusing upload.",
+            file=sys.stderr,
+        )
+        return 2
     relative = Path(str(artifact.get("path") or ""))
     artifact_path = (project_root / relative).resolve()
     if relative.is_absolute() or ".." in relative.parts or project_root not in artifact_path.parents or not artifact_path.is_file():
