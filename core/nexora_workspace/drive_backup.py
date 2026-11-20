@@ -387,14 +387,20 @@ def register_drive_backup_routes(app: Any, manager: Any) -> None:
             raise HTTPException(401, "Sign in to your NEXORA account.")
         configured = bool(os.environ.get("NEXORA_GOOGLE_OAUTH_CLIENT_ID", "").strip())
         connected = False
+        credential_vault_ready = False
+        credential_vault_error = None
         if configured:
             try:
+                _keyring()
+                credential_vault_ready = True
                 connected = bool(_get_refresh_token(str(owner)))
-            except HTTPException:
-                connected = False
+            except HTTPException as exc:
+                credential_vault_error = str(exc.detail)
         return {
             "configured": configured,
             "connected": connected,
+            "credential_vault_ready": credential_vault_ready,
+            "credential_vault_error": credential_vault_error,
             "scope": DRIVE_SCOPE,
             "credential_storage": "operating_system_credential_vault",
             "owner_account_id": str(owner),
