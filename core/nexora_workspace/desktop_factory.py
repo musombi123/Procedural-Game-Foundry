@@ -391,23 +391,51 @@ def _safe_restore_archive(archive: Path, folder: Path) -> dict[str, Any]:
             entries = source.infolist()
             if len(entries) > BACKUP_FILE_LIMIT + 1:
                 raise HTTPException(413, "Backup archive contains too many entries.")
+            safe_entries: list[tuple[zipfile.ZipInfo, PurePosixPath]] = []
             for entry in entries:
-                path = PurePosixPath(entry.filename)
+                raw_name = str(entry.filename or "")
+                normalized = raw_name.replace("\\", "/")
+                path = PurePosixPath(normalized)
                 mode = (entry.external_attr >> 16) & 0o170000
-                if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+                if (
+                    not normalized
+                    or "\x00" in normalized
+                    or path.is_absolute()
+                    or ":" in normalized
+                    or any(part in {"", ".", ".."} for part in path.parts)
+                ):
                     raise HTTPException(400, "Backup contains an unsafe path.")
                 if mode == 0o120000:
                     raise HTTPException(400, "Backup contains a symbolic link.")
-                if entry.filename == "NEXORA_BACKUP_MANIFEST.json":
+                if mode not in {0, 0o040000, 0o100000}:
+                    raise HTTPException(400, "Backup contains an unsupported special file.")
+                if normalized == "NEXORA_BACKUP_MANIFEST.json":
                     continue
                 count += 1
                 total += int(entry.file_size)
+                if count > BACKUP_FILE_LIMIT:
+                    raise HTTPException(413, "Backup archive contains too many files.")
                 if total > BACKUP_TOTAL_LIMIT:
                     raise HTTPException(413, "Backup expands beyond the 10 GiB restore limit.")
                 target = stage.joinpath(*path.parts).resolve()
                 if stage.resolve() not in target.parents:
                     raise HTTPException(400, "Backup extraction escaped its staging directory.")
-            source.extractall(stage)
+                safe_entries.append((entry, path))
+
+            # Extract entries manually after the complete path and size audit.
+            # This avoids platform-specific ZIP path normalization surprises.
+            for entry, relative in safe_entries:
+                target = stage.joinpath(*relative.parts)
+                if entry.is_dir() or str(entry.filename).endswith(("/", "\\")):
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    with source.open(entry, "r") as input_stream, target.open("xb") as output_stream:
+                        shutil.copyfileobj(input_stream, output_stream, length=1024 * 1024)
+                except FileExistsError as exc:
+                    raise HTTPException(400, "Backup contains duplicate file paths.") from exc
+
         replacement = stage / "game"
         if not (replacement / "project.godot").is_file():
             raise HTTPException(422, "This backup does not contain a restorable Godot project.")
@@ -415,13 +443,17 @@ def _safe_restore_archive(archive: Path, folder: Path) -> dict[str, Any]:
         retired = folder / f".game-before-restore-{uuid.uuid4().hex[:8]}"
         if live_game.exists():
             live_game.replace(retired)
-        replacement.replace(live_game)
+        try:
+            replacement.replace(live_game)
+        except OSError:
+            if retired.exists() and not live_game.exists():
+                retired.replace(live_game)
+            raise
         if retired.exists():
             shutil.rmtree(retired, ignore_errors=True)
         return {"restored": True, "files": count, "size_bytes": total}
     finally:
         shutil.rmtree(stage.parent, ignore_errors=True)
-
 
 def _publisher_readiness(profile: dict[str, Any]) -> list[dict[str, Any]]:
     tools = _toolchain_summary(profile)
