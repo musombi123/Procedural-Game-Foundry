@@ -733,15 +733,12 @@ def register_local_factory_routes(app: Any) -> None:
         if not payload.confirm_prepare:
             raise HTTPException(403, "Confirm preparation of this release handoff package.")
         manager = _manager()
-        # Find and verify ownership through the project ID embedded in an artifact path.
+        project_id = payload.project_id
         artifact_rel = PurePosixPath(payload.artifact_path.replace("\\", "/"))
-        if artifact_rel.is_absolute() or ".." in artifact_rel.parts:
+        if artifact_rel.is_absolute() or ".." in artifact_rel.parts or not artifact_rel.parts:
             raise HTTPException(422, "Artifact path must remain inside the selected project.")
-        if len(artifact_rel.parts) < 2:
-            raise HTTPException(422, "Select an artifact inside a project folder.")
-        project_id = artifact_rel.parts[0]
         folder = _project_folder(manager, project_id, owner_id)
-        artifact = (folder / Path(*artifact_rel.parts[1:])).resolve()
+        artifact = (folder / Path(*artifact_rel.parts)).resolve()
         if folder.resolve() not in artifact.parents or not artifact.is_file():
             raise HTTPException(404, "Release artifact not found in this project.")
         expected_suffix = {
@@ -785,6 +782,7 @@ def register_local_factory_routes(app: Any) -> None:
             package.write(artifact, artifact.name)
             package.write(release_root / "release-manifest.json", "release-manifest.json")
         manifest["handoff_archive"] = str(handoff.relative_to(folder).as_posix())
+        manifest["download_url"] = f"/publishing/projects/{project_id}/releases/{release_id}/download"
         _atomic_json(release_root / "release-manifest.json", manifest)
         return {
             "prepared": True,
