@@ -21,6 +21,10 @@ from core.nexora_workspace.identity import (
     register_nexora_auth_routes,
     verify_access_token,
 )
+from core.execution_policy import is_local_compute_only_request, local_compute_block_payload
+from services.worker.local_security import verify_local_access_token
+
+LOCAL_AGENT_MODE = os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}
 
 DATA = Path(os.environ.get("PGF_DATA_DIR", ".pgf-data")).resolve()
 manager = ProjectManager(DATA / "projects")
@@ -38,26 +42,44 @@ _PUBLIC_AUTH_PATHS = {"/api/v1/auth/register", "/api/v1/auth/login"}
 @app.middleware("http")
 async def nexora_identity_and_project_scope(request: Request, call_next):
     path = request.url.path
-    if request.method.upper() == "OPTIONS" or not path.startswith("/api/") or path in {"/api/capabilities"}:
+    if request.method.upper() == "OPTIONS":
+        return await call_next(request)
+
+    # The hosted API is a control plane and finished-artifact host. All source
+    # ingestion, media processing, generation, conversion and game exports are
+    # rejected here unless this exact process is the creator's loopback agent.
+    if not LOCAL_AGENT_MODE and is_local_compute_only_request(request.method, path):
+        return JSONResponse(local_compute_block_payload(), status_code=409)
+
+    if not path.startswith("/api/") or path in {"/api/capabilities"}:
         return await call_next(request)
     if path in _PUBLIC_AUTH_PATHS:
         return await call_next(request)
 
-    identity = {"id": "local", "profile": {"id": "local"}}
     authorization = request.headers.get("authorization", "").strip()
     supplied_token = authorization.partition(" ")[2].strip() if authorization.lower().startswith("bearer ") else ""
-    if supplied_token:
-        try:
-            profile = await asyncio.to_thread(verify_access_token, supplied_token)
-        except NexoraIdentityUnavailable as exc:
-            return JSONResponse({"detail": str(exc)}, status_code=503)
-        except Exception:
-            return JSONResponse({"detail": "Could not verify the NEXORA account session."}, status_code=503)
-        if not profile:
-            return JSONResponse({"detail": "Your NEXORA session is invalid or has expired. Sign in again."}, status_code=401)
-        identity = {"id": str(profile["id"]), "profile": profile}
-    elif AUTH_REQUIRED:
-        return JSONResponse({"detail": "Sign in to your NEXORA account."}, status_code=401)
+    if LOCAL_AGENT_MODE:
+        principal = verify_local_access_token(supplied_token)
+        if not principal:
+            return JSONResponse({"detail": "Pair this browser with the local NEXORA agent before using the Foundry engine."}, status_code=401)
+        identity = {
+            "id": principal.user_id,
+            "profile": {"id": principal.user_id, "display_name": "Local creator"},
+        }
+    else:
+        identity = {"id": "local", "profile": {"id": "local"}}
+        if supplied_token:
+            try:
+                profile = await asyncio.to_thread(verify_access_token, supplied_token)
+            except NexoraIdentityUnavailable as exc:
+                return JSONResponse({"detail": str(exc)}, status_code=503)
+            except Exception:
+                return JSONResponse({"detail": "Could not verify the NEXORA account session."}, status_code=503)
+            if not profile:
+                return JSONResponse({"detail": "Your NEXORA session is invalid or has expired. Sign in again."}, status_code=401)
+            identity = {"id": str(profile["id"]), "profile": profile}
+        elif AUTH_REQUIRED:
+            return JSONResponse({"detail": "Sign in to your NEXORA account."}, status_code=401)
 
     request.state.nexora_user_id = identity["id"]
     request.state.nexora_user = identity["profile"]
@@ -87,13 +109,32 @@ async def nexora_identity_and_project_scope(request: Request, call_next):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "product": "Procedural Game Foundry", "model_free": True, "staged_movie_pipeline": True, "local_model_workers_ready": False}
+    return {
+        "status": "ok",
+        "product": "Procedural Game Foundry",
+        "model_free": True,
+        "staged_movie_pipeline": True,
+        "local_model_workers_ready": LOCAL_AGENT_MODE,
+        "execution_location": "creator_device" if LOCAL_AGENT_MODE else "artifact_hosting_only",
+        "cloud_compute_enabled": False,
+    }
 
 @app.get("/api/capabilities")
 def capabilities():
-    return {"project_creation": True, "procedural_terrain": True, "scene_editing": True, "scene_persistence": True, "godot_assembly": True,
-            "godot_installed": bool(shutil.which("godot") or shutil.which("godot4")), "blender_installed": bool(shutil.which("blender")),
-            "genres": ["science-fiction", "fantasy", "modern", "survival", "adventure"], "dimensions": ["2d", "3d"], "export_targets": ["windows", "linux", "web", "android"]}
+    return {
+        "project_creation": True,
+        "procedural_terrain": True,
+        "scene_editing": True,
+        "scene_persistence": True,
+        "godot_assembly": LOCAL_AGENT_MODE,
+        "godot_installed": bool(LOCAL_AGENT_MODE and (shutil.which("godot") or shutil.which("godot4"))),
+        "blender_installed": bool(LOCAL_AGENT_MODE and shutil.which("blender")),
+        "execution_location": "creator_device",
+        "cloud_compute_enabled": False,
+        "genres": ["science-fiction", "fantasy", "modern", "survival", "adventure"],
+        "dimensions": ["2d", "3d"],
+        "export_targets": ["windows", "linux", "web", "android"],
+    }
 
 @app.get("/api/projects")
 def list_projects(request: Request):
