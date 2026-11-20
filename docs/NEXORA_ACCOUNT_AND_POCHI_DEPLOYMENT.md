@@ -13,7 +13,7 @@ Configure these on the NEXORA API service (not on the RevelaCode backend):
 | `NEXORA_POCHI_MERCHANT_NUMBER` | `0742466828` — the NEXORA Pochi la Biashara receiving number supplied by the owner. |
 | `NEXORA_PLAN_PRICES_KES` | JSON object with the owner-approved KES prices for each plan. |
 | `NEXORA_PAYMENT_VERIFICATION_SECRET` | High-entropy secret held only by the NEXORA server/operator. |
-| `NEXORA_CORS_ORIGINS` | Comma-separated NEXORA frontend origins only. Production: `https://revelacode.co.ke`; local development: `http://localhost:5173,http://127.0.0.1:5173`. |
+| `NEXORA_CORS_ORIGINS` | Comma-separated NEXORA frontend origins only. Production: `https://revelacode.co.ke`; local development: `http://localhost:5174,http://127.0.0.1:5174`. |
 | `NEXORA_SESSION_DAYS` | Optional session lifetime (default 30 days, capped at 90). |
 
 Use the Neon connection string in a private Render environment variable. Never put credentials, merchant secrets or the connection string in Vite's `.env.production`, frontend source, a public repository, or the browser.
