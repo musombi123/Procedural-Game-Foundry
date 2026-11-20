@@ -204,6 +204,12 @@ def _android_sdk() -> dict[str, Any]:
         os.environ.get("ANDROID_SDK_ROOT", ""),
         os.environ.get("ANDROID_HOME", ""),
     ]
+    if platform.system().lower() == "windows" and os.environ.get("LOCALAPPDATA"):
+        roots.append(str(Path(os.environ["LOCALAPPDATA"]) / "Android" / "Sdk"))
+    elif platform.system().lower() == "darwin":
+        roots.append(str(Path.home() / "Library" / "Android" / "sdk"))
+    else:
+        roots.append(str(Path.home() / "Android" / "Sdk"))
     root = next((Path(item).expanduser() for item in roots if item and Path(item).expanduser().is_dir()), None)
     adb_candidates = [
         str(root / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb")) if root else "",
@@ -353,6 +359,12 @@ def collect_system_profile(data_root: str | Path | None = None) -> dict[str, Any
 
     gpu_adapters = _gpu_adapters()
     android = _android_sdk()
+    if android.get("adb") and not tools.get("adb", {}).get("available"):
+        tools["adb"] = {
+            "path": android["adb"],
+            "available": True,
+            "version": _tool_version(android["adb"], ("version",)),
+        }
     return {
         "schema_version": "1.0",
         "machine": {
