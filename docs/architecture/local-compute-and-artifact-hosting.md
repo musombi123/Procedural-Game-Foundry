@@ -28,7 +28,7 @@ These are conservative preflight baselines, not guarantees of performance. Large
 | 2D / lightweight projects | 2 CPU logical cores, 8 GiB RAM, 10 GiB free disk | Not required |
 | Procedural 3D | 4 CPU logical cores, 16 GiB RAM, 30 GiB free disk, Blender and Godot 4 | Recommended, not mandatory for deterministic procedural generation |
 | Movie processing | 4 CPU logical cores, 8 GiB RAM, 20 GiB free disk, FFmpeg and FFprobe | Optional for model-assisted analysis |
-| Image-to-3D using the current TripoSR profile | 6 CPU logical cores, 16 GiB RAM, 40 GiB free disk, Blender, Python and configured TripoSR worker | NVIDIA CUDA GPU with at least 6 GiB VRAM |
+| Image-to-3D using the current TripoSR profile | 6 CPU logical cores, 16 GiB installed RAM, 6 GiB available RAM, 40 GiB free disk, Blender, Python, configured TripoSR worker and a working PyTorch CUDA runtime | NVIDIA CUDA GPU with at least 6 GiB total and 4 GiB free VRAM |
 | Android export and device test | 4 CPU logical cores, 16 GiB RAM, 25 GiB free disk, Godot 4, Java, Android SDK/build-tools, APK inspector and ADB | Not required for export |
 
 No-GPU creators can still use the supported 2D and deterministic procedural workflows. AI image-to-3D must fail closed when the required CUDA GPU or TripoSR installation is missing.
@@ -44,7 +44,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 The installer creates an isolated Python 3.11 environment, installs the local Foundry runtime, and starts the agent. By default project data is stored under %LOCALAPPDATA%\NEXORA\Foundry and agent staging files under %LOCALAPPDATA%\NEXORA\Agent.
 
-The installer does not silently install GPU drivers, CUDA, Blender, Godot, FFmpeg, Java, Android SDK or AI models. Install the tools required by the selected workload, then restart the agent. Optional executable paths can be configured with NEXORA_BLENDER_PATH, NEXORA_GODOT_PATH, NEXORA_FFMPEG_PATH, NEXORA_FFPROBE_PATH, NEXORA_ADB_PATH, NEXORA_JAVA_PATH, NEXORA_APKANALYZER_PATH and NEXORA_AAPT_PATH. Set NEXORA_TRIPOSR_ROOT to the local TripoSR checkout when that worker is installed.
+The installer does not silently install GPU drivers, CUDA, Blender, Godot, FFmpeg, Java, Android SDK or AI models. Install the tools required by the selected workload, then restart the agent. Optional executable paths can be configured with NEXORA_BLENDER_PATH, NEXORA_GODOT_PATH, NEXORA_FFMPEG_PATH, NEXORA_FFPROBE_PATH, NEXORA_ADB_PATH, NEXORA_JAVA_PATH, NEXORA_APKANALYZER_PATH, NEXORA_AAPT_PATH and NEXORA_NVIDIA_SMI_PATH. Set NEXORA_TRIPOSR_ROOT to the local TripoSR checkout and optionally NEXORA_TRIPOSR_PYTHON to its Python interpreter. The local preflight imports PyTorch in that interpreter and requires torch.cuda.is_available() to be true before it allows image-to-3D generation.
 
 ## Hosted API configuration
 
@@ -61,7 +61,8 @@ For Web output, publish the complete Godot Web export directory as a static arti
 - Cloud project, workspace, media, conversion and generation routes return 409 LOCAL_COMPUTE_REQUIRED.
 - Local agent binds only to loopback; invalid Host/Origin is rejected; one-time pairing and expiry/restart revocation work.
 - Hardware preflight reports the real computer resources and installed tools.
-- The 2D profile works without a dedicated GPU; image-to-3D is blocked without CUDA and a configured TripoSR worker.
+- Every queued production job passes the same backend hardware gate as the UI preflight; insufficient available RAM, disk, CPU, tools or free GPU memory returns DEVICE_REQUIREMENTS_NOT_MET before a job is queued.
+- The 2D profile works without a dedicated GPU; image-to-3D is blocked without a configured TripoSR worker and a working PyTorch CUDA runtime.
 - Story/movie intake, Blender processing, asset conversion, Godot assembly, smoke test and platform exports run in the local user's data directory.
 - Android package identity is verified before install; USB and private-LAN wireless ADB testing succeeds on a physical device.
 - Final APK/Web/desktop artifacts upload to durable object storage, retain owner/platform/version/hash metadata, and survive Render restarts.
