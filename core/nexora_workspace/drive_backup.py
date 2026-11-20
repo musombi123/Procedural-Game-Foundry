@@ -172,6 +172,7 @@ def _google_request_json(method: str, url: str, owner: str, payload: dict[str, A
 
 
 def _drive_upload_resumable(archive: Path, owner: str, project_id: str, snapshot_id: str) -> dict[str, Any]:
+    """Upload a verified local archive and honor Drive's server-confirmed Range."""
     size = archive.stat().st_size
     digest = _sha256_file(archive)
     metadata = {
@@ -186,9 +187,8 @@ def _drive_upload_resumable(archive: Path, owner: str, project_id: str, snapshot
         },
     }
     token = _access_token(owner)
-    url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,modifiedTime,webViewLink,appProperties"
-    request = UrlRequest(
-        url,
+    initiate = UrlRequest(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,modifiedTime,webViewLink,appProperties",
         data=json.dumps(metadata).encode("utf-8"),
         headers={
             "Authorization": "Bearer " + token,
@@ -199,7 +199,7 @@ def _drive_upload_resumable(archive: Path, owner: str, project_id: str, snapshot
         method="POST",
     )
     try:
-        with urlopen(request, timeout=45) as response:
+        with urlopen(initiate, timeout=45) as response:
             upload_url = response.headers.get("Location")
     except HTTPError as exc:
         if exc.code == 401:
@@ -211,20 +211,65 @@ def _drive_upload_resumable(archive: Path, owner: str, project_id: str, snapshot
         raise HTTPException(502, "Could not start the Google Drive resumable upload.") from exc
     if not upload_url:
         raise HTTPException(502, "Google Drive did not return a resumable upload URL.")
+
     parsed = urlparse(upload_url)
     if parsed.scheme != "https" or parsed.hostname not in {"www.googleapis.com", "content.googleapis.com"}:
         raise HTTPException(502, "Google Drive returned an unexpected upload host.")
-
-    connection = http.client.HTTPSConnection(parsed.netloc, timeout=180)
     request_path = parsed.path + (("?" + parsed.query) if parsed.query else "")
+
+    def query_server_offset() -> tuple[int, dict[str, Any] | None]:
+        """Ask Drive which bytes it has persisted after a timeout or 5xx."""
+        connection = http.client.HTTPSConnection(parsed.netloc, timeout=60)
+        try:
+            connection.request(
+                "PUT",
+                request_path,
+                body=b"",
+                headers={
+                    "Authorization": "Bearer " + _access_token(owner),
+                    "Content-Length": "0",
+                    "Content-Range": "bytes */" + str(size),
+                },
+            )
+            response = connection.getresponse()
+            body = response.read(1024 * 1024)
+            if response.status in {200, 201}:
+                return size, json.loads(body.decode("utf-8"))
+            if response.status == 308:
+                received = response.getheader("Range") or ""
+                if not received:
+                    return 0, None
+                match = __import__("re").fullmatch(r"bytes=0-(\d+)", received.strip())
+                if not match:
+                    raise HTTPException(502, "Google Drive returned an invalid upload Range header.")
+                offset = int(match.group(1)) + 1
+                if offset < 0 or offset > size:
+                    raise HTTPException(502, "Google Drive returned an out-of-range upload offset.")
+                return offset, None
+            if response.status == 401:
+                _access_token(owner, force_refresh=True)
+                raise HTTPException(502, "Google Drive authorization expired while checking upload progress. Retry the backup.")
+            if response.status == 404:
+                raise HTTPException(409, "Google Drive's resumable upload session expired. Start the backup again.")
+            raise HTTPException(502, "Google Drive upload-status check failed with HTTP " + str(response.status) + ".")
+        except HTTPException:
+            raise
+        except (OSError, http.client.HTTPException, ValueError) as exc:
+            raise HTTPException(502, "Could not query the Google Drive resumable upload status.") from exc
+        finally:
+            connection.close()
+
     offset = 0
-    try:
-        with archive.open("rb") as stream:
-            while offset < size:
-                chunk = stream.read(min(DRIVE_UPLOAD_CHUNK, size - offset))
-                if not chunk:
-                    raise HTTPException(500, "The local backup archive ended before the expected byte count.")
-                end = offset + len(chunk) - 1
+    stalled_responses = 0
+    with archive.open("rb") as stream:
+        while offset < size:
+            stream.seek(offset)
+            chunk = stream.read(min(DRIVE_UPLOAD_CHUNK, size - offset))
+            if not chunk:
+                raise HTTPException(500, "The local backup archive ended before the expected byte count.")
+            end = offset + len(chunk) - 1
+            connection = http.client.HTTPSConnection(parsed.netloc, timeout=180)
+            try:
                 connection.request(
                     "PUT",
                     request_path,
@@ -233,29 +278,63 @@ def _drive_upload_resumable(archive: Path, owner: str, project_id: str, snapshot
                         "Authorization": "Bearer " + _access_token(owner),
                         "Content-Type": "application/zip",
                         "Content-Length": str(len(chunk)),
-                        "Content-Range": f"bytes {offset}-{end}/{size}",
+                        "Content-Range": "bytes " + str(offset) + "-" + str(end) + "/" + str(size),
                     },
                 )
                 response = connection.getresponse()
                 response_body = response.read(1024 * 1024)
-                if response.status == 308:
-                    offset = end + 1
-                    continue
-                if response.status in {200, 201} and end + 1 == size:
+                status = response.status
+                if status in {200, 201}:
                     result = json.loads(response_body.decode("utf-8"))
+                    if end + 1 != size:
+                        raise HTTPException(502, "Google Drive completed the upload before the full archive was sent.")
                     return result
-                if response.status == 401:
+                if status == 308:
+                    received = response.getheader("Range") or ""
+                    if received:
+                        match = __import__("re").fullmatch(r"bytes=0-(\d+)", received.strip())
+                        if not match:
+                            raise HTTPException(502, "Google Drive returned an invalid upload Range header.")
+                        next_offset = int(match.group(1)) + 1
+                    else:
+                        next_offset = 0
+                elif status == 401:
                     _access_token(owner, force_refresh=True)
-                    raise HTTPException(502, "Google Drive access expired during upload. Retry the upload; the incomplete Drive upload was not recorded as a completed backup.")
-                raise HTTPException(502, f"Google Drive resumable upload stopped with HTTP {response.status}: {response_body.decode('utf-8', errors='replace')[:500]}")
-    except HTTPException:
-        raise
-    except (OSError, http.client.HTTPException, ValueError) as exc:
-        raise HTTPException(502, "The Google Drive resumable upload was interrupted. The local snapshot remains intact.") from exc
-    finally:
-        connection.close()
-    raise HTTPException(502, "Google Drive did not confirm completion of the full backup archive.")
+                    next_offset, completed = query_server_offset()
+                    if completed:
+                        return completed
+                elif status >= 500:
+                    next_offset, completed = query_server_offset()
+                    if completed:
+                        return completed
+                elif status == 404:
+                    raise HTTPException(409, "Google Drive's resumable upload session expired. Start the backup again.")
+                else:
+                    raise HTTPException(
+                        502,
+                        "Google Drive resumable upload stopped with HTTP " + str(status) + ": "
+                        + response_body.decode("utf-8", errors="replace")[:500],
+                    )
+            except HTTPException:
+                raise
+            except (OSError, http.client.HTTPException, TimeoutError) as exc:
+                next_offset, completed = query_server_offset()
+                if completed:
+                    return completed
+            finally:
+                connection.close()
 
+            if next_offset < 0 or next_offset > size:
+                raise HTTPException(502, "Google Drive returned an invalid resumable upload offset.")
+            if next_offset == offset:
+                stalled_responses += 1
+                if stalled_responses >= 5:
+                    raise HTTPException(502, "Google Drive did not advance the resumable upload after five attempts. The local snapshot is intact; retry later.")
+            else:
+                stalled_responses = 0
+            offset = next_offset
+
+    raise HTTPException(502, "Google Drive did not confirm completion of the full backup archive.")
 
 def _drive_download(file_id: str, destination: Path, owner: str) -> int:
     token = _access_token(owner)
