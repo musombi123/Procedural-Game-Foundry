@@ -692,9 +692,12 @@ def register_local_factory_routes(app: Any) -> None:
     def publishing_status(owner_id: str = Depends(_paired_user)):
         system = platform.system()
         apple_ready = system == "Darwin" and bool(shutil.which("xcodebuild"))
-        google_configured = bool(os.environ.get("NEXORA_GOOGLE_PLAY_SERVICE_ACCOUNT_FILE"))
-        apple_configured = bool(os.environ.get("NEXORA_APP_STORE_CONNECT_KEY_ID") and os.environ.get("NEXORA_APP_STORE_CONNECT_ISSUER_ID") and os.environ.get("NEXORA_APP_STORE_CONNECT_PRIVATE_KEY_FILE"))
-        microsoft_configured = bool(os.environ.get("NEXORA_MICROSOFT_STORE_CLIENT_ID") and os.environ.get("NEXORA_MICROSOFT_STORE_APP_ID"))
+        google_key_file = Path(os.environ.get("NEXORA_GOOGLE_PLAY_SERVICE_ACCOUNT_FILE", "")).expanduser()
+        apple_key_file = Path(os.environ.get("NEXORA_APP_STORE_CONNECT_PRIVATE_KEY_FILE", "")).expanduser()
+        microsoft_secret_file = Path(os.environ.get("NEXORA_MICROSOFT_STORE_CLIENT_SECRET_FILE", "")).expanduser()
+        google_configured = bool(google_key_file.is_file())
+        apple_configured = bool(os.environ.get("NEXORA_APP_STORE_CONNECT_KEY_ID") and os.environ.get("NEXORA_APP_STORE_CONNECT_ISSUER_ID") and apple_key_file.is_file())
+        microsoft_configured = bool(os.environ.get("NEXORA_MICROSOFT_STORE_CLIENT_ID") and os.environ.get("NEXORA_MICROSOFT_STORE_APP_ID") and microsoft_secret_file.is_file())
         return {
             "execution_location": "creator_device",
             "publish_actions_require_explicit_confirmation": True,
@@ -765,6 +768,8 @@ def register_local_factory_routes(app: Any) -> None:
             raise HTTPException(422, "Google Play package ID must use reverse-DNS format.")
         if payload.provider == "apple_app_store" and platform.system() != "Darwin":
             raise HTTPException(409, "Apple signing and final export require a Mac with Xcode. This handoff cannot be prepared as an IPA on the current operating system.")
+        if payload.provider == "microsoft_store" and platform.system() != "Windows":
+            raise HTTPException(409, "Microsoft Store packaging and Partner Center submission require a Windows desktop environment.")
         release_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
         release_root = folder / ".nexora" / "releases" / release_id
         release_root.mkdir(parents=True, exist_ok=False)
@@ -789,14 +794,13 @@ def register_local_factory_routes(app: Any) -> None:
             "creator_confirmation_required_before_upload": True,
             "store_approval_not_guaranteed": True,
         }
-        _atomic_json(release_root / "release-manifest.json", manifest)
         handoff = release_root / "nexora-release-handoff.zip"
-        with zipfile.ZipFile(handoff, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as package:
-            package.write(artifact, artifact.name)
-            package.write(release_root / "release-manifest.json", "release-manifest.json")
         manifest["handoff_archive"] = str(handoff.relative_to(folder).as_posix())
         manifest["download_url"] = f"/publishing/projects/{project_id}/releases/{release_id}/download"
         _atomic_json(release_root / "release-manifest.json", manifest)
+        with zipfile.ZipFile(handoff, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as package:
+            package.write(artifact, artifact.name)
+            package.write(release_root / "release-manifest.json", "release-manifest.json")
         return {
             "prepared": True,
             "publication_status": "prepared_not_submitted",
