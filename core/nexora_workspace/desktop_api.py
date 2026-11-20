@@ -523,7 +523,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             raise HTTPException(403, "Invalid 3D asset directory.")
         if not asset_root.is_dir():
             raise HTTPException(404, "Downloaded 3D model was not found in this project.")
-        models = sorted(asset_root.glob("*.glb"))
+        models = sorted(asset_root.rglob("*.glb"))
         if not models:
             raise HTTPException(415, "This asset is available as glTF with dependencies. Open it from the Godot FileSystem dock.")
         return FileResponse(
