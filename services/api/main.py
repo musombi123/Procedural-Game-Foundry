@@ -91,9 +91,11 @@ def _local_device_profile_for_request(path: str) -> tuple[str, str | None] | Non
     if re.search(r"/movie-pipeline/(?:source/photo|player/build|environment/build)$", path):
         return ("procedural_3d", project_id)
     if re.search(
-        r"/creator-workflow/(?:player/build|environment/build|actors-props/build|gameplay/compile|assembly/build)$",
+        r"/creator-workflow/(?:player/build|environment/build|actors-props/build)$",
         path,
     ):
+        return ("procedural_3d", project_id)
+    if re.search(r"/creator-workflow/(?:gameplay/compile|assembly/build)$", path):
         return (project_profile, project_id)
     return None
 
