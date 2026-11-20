@@ -261,7 +261,7 @@ def _drive_upload_file(user_id: str, source: Path, metadata: dict) -> dict:
                     raise HTTPException(502, "Google Drive resumable upload failed: " + raw.decode("utf-8", "replace")[:800])
                 acknowledged = response.getheader("Range")
                 if acknowledged:
-                    match = re.fullmatch(r"bytes=0-(\\d+)", acknowledged.strip())
+                    match = re.fullmatch(r"bytes=0-(\d+)", acknowledged.strip())
                     if not match:
                         raise HTTPException(502, "Google Drive returned an invalid resumable-upload Range header.")
                     next_sent = int(match.group(1)) + 1
