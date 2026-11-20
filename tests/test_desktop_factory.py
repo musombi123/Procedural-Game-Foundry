@@ -72,7 +72,7 @@ def test_restore_rejects_zip_path_traversal(tmp_path: Path):
     project.mkdir()
     archive = project / "unsafe.zip"
     with ZipFile(archive, "w", compression=ZIP_DEFLATED) as output:
-        output.writestr("..\\escaped.txt", "Windows path traversal must not escape")
+        output.writestr(r"..\escaped.txt", "Windows path traversal must not escape")
         output.writestr("game/project.godot", "config_version=5\n")
     with pytest.raises(HTTPException):
         _safe_restore_archive(archive, project)
