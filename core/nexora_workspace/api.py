@@ -506,15 +506,39 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
         for index,(preset,platform,suffix) in enumerate(selected):
             jobs.update(job_id, progress=65 + int(25*index/len(selected)), message=f"Exporting {platform} game with Godot")
             output = game.parent / "artifacts" / platform
-            output.mkdir(parents=True,exist_ok=True)
-            filename = "index.html" if platform == "web" else f"{definition.project.name.replace(' ','_')}{suffix}"
+            if output.exists():
+                shutil.rmtree(output)
+            output.mkdir(parents=True, exist_ok=True)
+            safe_project_name = re.sub(r"[^A-Za-z0-9._-]+", "_", definition.project.name).strip("._") or "NEXORA_Game"
+            filename = "index.html" if platform == "web" else f"{safe_project_name}{suffix}"
             target_file = output / filename
             export_flag = "--export-debug" if target == "android" and str((android or {}).get("build_type") or "debug").lower() == "debug" else "--export-release"
             result = subprocess.run([exe,"--headless","--path",str(game),export_flag,preset,str(target_file)],capture_output=True,text=True,timeout=1800)
             if result.returncode != 0 or not target_file.exists():
                 detail = (result.stderr or result.stdout or "Godot did not produce an export file")[-3500:]
                 raise RuntimeError(f"{platform} export failed. Check that the Godot {platform} export template and platform SDK are installed. {detail}")
-            output_records.append({"id":platform,"filename":filename,"path":str(target_file.relative_to(folder)),"content_type":mimetypes.guess_type(filename)[0] or "application/octet-stream"})
+
+            artifact_path = target_file
+            artifact_filename = filename
+            artifact_content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            if platform == "web":
+                web_files = sorted(item for item in output.rglob("*") if item.is_file())
+                if not any(item.name == "index.html" for item in web_files) or len(web_files) < 2:
+                    raise RuntimeError("Godot Web export is incomplete: expected index.html and its JavaScript/WASM/PCK runtime files.")
+                web_archive = output.parent / f"{safe_project_name}_web_export.zip"
+                with ZipFile(web_archive, "w", compression=ZIP_DEFLATED, compresslevel=6, allowZip64=True) as archive:
+                    for item in web_files:
+                        archive.write(item, arcname=item.relative_to(output).as_posix())
+                artifact_path = web_archive
+                artifact_filename = web_archive.name
+                artifact_content_type = "application/zip"
+
+            output_records.append({
+                "id": platform,
+                "filename": artifact_filename,
+                "path": str(artifact_path.relative_to(folder)),
+                "content_type": artifact_content_type,
+            })
         _save_artifacts(folder, job_id, output_records)
         jobs.update(job_id, state=__import__("core.orchestration.jobs",fromlist=["JobState"]).JobState.COMPLETED, progress=100, message="Platform export completed: " + ", ".join(item["filename"] for item in output_records), error=None)
     except Exception as exc:
