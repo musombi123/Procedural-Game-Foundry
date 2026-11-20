@@ -435,6 +435,16 @@ def register_local_factory_routes(app: Any) -> None:
                         # account changes the shared computer's workspace root.
                         if str(recorded_owner) == str(owner_id):
                             project_dirs.append(item)
+                nested_targets = [
+                    str(item) for item in project_dirs
+                    if target == item.resolve() or item.resolve() in target.parents
+                ]
+                if nested_targets:
+                    raise HTTPException(422, {
+                        "code": "WORKSPACE_ROOT_INSIDE_PROJECT",
+                        "message": "Choose a workspace directory outside existing project folders.",
+                        "projects": nested_targets[:20],
+                    })
                 collisions = [str(target / item.name) for item in project_dirs if (target / item.name).exists()]
                 if collisions:
                     raise HTTPException(409, {
@@ -442,8 +452,29 @@ def register_local_factory_routes(app: Any) -> None:
                         "message": "The selected folder already contains one or more owned project IDs. No files were moved.",
                         "conflicts": collisions[:20],
                     })
-                for item in project_dirs:
-                    shutil.move(str(item), str(target / item.name))
+                moved_destinations: list[Path] = []
+                try:
+                    for item in project_dirs:
+                        destination = target / item.name
+                        shutil.move(str(item), str(destination))
+                        moved_destinations.append(destination)
+                except Exception as exc:
+                    rollback_failures: list[str] = []
+                    for destination in reversed(moved_destinations):
+                        original = current / destination.name
+                        try:
+                            if destination.exists():
+                                shutil.move(str(destination), str(original))
+                        except Exception as rollback_error:
+                            rollback_failures.append(f"{destination}: {rollback_error}")
+                    if rollback_failures:
+                        raise HTTPException(500, {
+                            "code": "WORKSPACE_MOVE_PARTIAL",
+                            "message": "A workspace move failed and one or more rollback operations also failed. Do not delete either folder; inspect the listed paths before retrying.",
+                            "move_error": str(exc),
+                            "rollback_failures": rollback_failures[:20],
+                        }) from exc
+                    raise HTTPException(500, f"Workspace migration failed; moved folders were rolled back: {exc}") from exc
                 manager.root = target
         _atomic_json(Path(os.environ.get("NEXORA_LOCAL_AGENT_DATA", str(Path.home() / ".nexora-local-agent"))) / "workspace.json", {
             "workspace_root": str(target),
