@@ -626,6 +626,40 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         shutil.rmtree(folder)
         return {"deleted":True,"id":pid}
 
+    @router.get("/api/v1/workspace/projects/{pid}/world")
+    def get_workspace_world(pid: str, request: Request):
+        try:
+            folder = manager.path_for(pid)
+            definition = manager.load(pid)
+        except FileNotFoundError:
+            raise HTTPException(404,"Project not found.")
+        except ValueError as exc:
+            raise HTTPException(400,str(exc)) from exc
+        _assert_owner(folder,request)
+        saved = folder / "world.json"
+        if saved.is_file():
+            try:
+                return WorldDocument.model_validate_json(saved.read_text(encoding="utf-8")).model_dump(mode="json")
+            except Exception as exc:
+                raise HTTPException(500,"Saved world document is invalid.") from exc
+        return WorldDocument(seed=definition.project.seed,world=definition.world).model_dump(mode="json")
+
+    @router.put("/api/v1/workspace/projects/{pid}/world")
+    def save_workspace_world(pid: str, document: WorldDocument, request: Request):
+        try:
+            folder = manager.path_for(pid)
+            manager.load(pid)
+        except FileNotFoundError:
+            raise HTTPException(404,"Project not found.")
+        except ValueError as exc:
+            raise HTTPException(400,str(exc)) from exc
+        _assert_owner(folder,request)
+        try:
+            saved = manager.save_world(pid,document,reason="authenticated workspace world builder update")
+        except Exception as exc:
+            raise HTTPException(400,str(exc)) from exc
+        return {**saved,"world_document":document.model_dump(mode="json"),"objects":len(document.objects),"seed":document.seed}
+
     @router.get("/api/v1/workspace/projects/{pid}/movie-pipeline")
     def get_workspace_movie_pipeline(pid: str, request: Request):
         try: folder=manager.path_for(pid); manager.load(pid)
