@@ -13,16 +13,13 @@ import platform
 import re
 import shutil
 import subprocess
-import tempfile
 import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel, ConfigDict, Field
 
 from core.project_engine.models import ProjectCreate
 from services.worker.system_profile import collect_system_profile
@@ -414,21 +411,29 @@ def _publisher_readiness(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "NEXORA_MSSTORE_TENANT_ID", "NEXORA_MSSTORE_CLIENT_ID",
         "NEXORA_MSSTORE_CLIENT_SECRET", "NEXORA_MSSTORE_PRODUCT_ID",
     )
+    signing_path = os.environ.get("GODOT_ANDROID_KEYSTORE_RELEASE_PATH", "").strip()
+    release_signing_ready = (
+        bool(signing_path) and Path(signing_path).is_file()
+        and bool(os.environ.get("GODOT_ANDROID_KEYSTORE_RELEASE_USER"))
+        and bool(os.environ.get("GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD"))
+    )
     play_ready = (
         bool(play_service_account)
         and Path(play_service_account).is_file()
         and bool(android.get("sdk_root"))
         and bool(tools["java"]["available"])
+        and release_signing_ready
     )
     apple_ready = (
-        is_mac and bool(xcode)
+        False and is_mac and bool(xcode)
         and all(os.environ.get(key) for key in (
             "NEXORA_APP_STORE_CONNECT_ISSUER_ID",
             "NEXORA_APP_STORE_CONNECT_KEY_ID",
         ))
         and bool(apple_key) and Path(apple_key).is_file()
     )
-    microsoft_ready = all(os.environ.get(key) for key in microsoft_values)
+    microsoft_packager = bool(shutil.which("makeappx") or shutil.which("makeappx.exe"))
+    microsoft_ready = all(os.environ.get(key) for key in microsoft_values) and microsoft_packager
     return [
         {
             "id": "google_play",
@@ -444,6 +449,7 @@ def _publisher_readiness(profile: dict[str, Any]) -> list[dict[str, Any]]:
                     ("Play service-account JSON file", bool(play_service_account and Path(play_service_account).is_file())),
                     ("Android SDK", bool(android.get("sdk_root"))),
                     ("Java", bool(tools["java"]["available"])),
+                    ("Protected Android release signing", release_signing_ready),
                 ) if not ok
             ],
             "publish_requires_confirmation": True,
@@ -460,7 +466,8 @@ def _publisher_readiness(profile: dict[str, Any]) -> list[dict[str, Any]]:
             ],
             "missing": [
                 label for label, ok in (
-                    ("macOS and Xcode", is_mac and bool(xcode)),
+                    ("NEXORA macOS build target (not implemented)", False),
+                ("macOS and Xcode", is_mac and bool(xcode)),
                     ("App Store Connect issuer and key IDs", bool(os.environ.get("NEXORA_APP_STORE_CONNECT_ISSUER_ID") and os.environ.get("NEXORA_APP_STORE_CONNECT_KEY_ID"))),
                     ("App Store Connect private key file", bool(apple_key and Path(apple_key).is_file())),
                 ) if not ok
@@ -477,7 +484,7 @@ def _publisher_readiness(profile: dict[str, Any]) -> list[dict[str, Any]]:
                 "A signed MSIX package and configured publisher identity",
                 "An authorized Microsoft Entra application",
             ],
-            "missing": [key for key in microsoft_values if not os.environ.get(key)],
+            "missing": [key for key in microsoft_values if not os.environ.get(key)] + ([] if microsoft_packager else ["Windows SDK makeappx MSIX packager"]),
             "publish_requires_confirmation": True,
             "first_submission_may_require_console_setup": True,
         },
@@ -523,8 +530,15 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             raise HTTPException(422, "The projects directory must be an absolute path.")
         try:
             resolved = selected.resolve()
-            if resolved == Path(resolved.anchor) or resolved == Path.home().resolve():
-                raise HTTPException(403, "Choose a dedicated NEXORA projects folder, not a drive root or home directory.")
+            protected = [Path(resolved.anchor), Path.home().resolve()]
+            for key in ("WINDIR", "SystemRoot", "ProgramFiles", "ProgramFiles(x86)"):
+                value = os.environ.get(key)
+                if value:
+                    protected.append(Path(value).resolve())
+            if platform.system().lower() != "windows":
+                protected.extend(Path(item) for item in ("/etc", "/usr", "/bin", "/sbin", "/var", "/System", "/Library"))
+            if any(resolved == item or item in resolved.parents for item in protected):
+                raise HTTPException(403, "Choose a dedicated NEXORA projects folder, not a system, program, drive-root or home directory.")
             resolved.mkdir(parents=True, exist_ok=True)
             if not resolved.is_dir():
                 raise HTTPException(422, "The selected workspace path is not a directory.")
@@ -833,8 +847,19 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         source = (folder / relative).resolve()
         if folder.resolve() not in source.parents or not source.is_file():
             raise HTTPException(404, "The build artifact is missing from the local project.")
+        if artifact_id != platform_id:
+            raise HTTPException(422, "Select the build artifact whose platform matches this release.")
         release_dir = folder / "releases"
         release_dir.mkdir(exist_ok=True)
+        release_source = source
+        if platform_id == "web":
+            web_directory = source.parent
+            bundle = release_dir / ("web-bundle-" + uuid.uuid4().hex[:8] + ".zip")
+            with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+                for item in web_directory.rglob("*"):
+                    if item.is_file() and not item.is_symlink():
+                        archive.write(item, arcname=item.relative_to(web_directory).as_posix())
+            release_source = bundle
         manifest = {
             "schema_version": 1,
             "project_id": pid,
@@ -842,10 +867,10 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "platform": platform_id,
             "artifact": {
                 "id": artifact_id,
-                "filename": source.name,
-                "relative_path": source.relative_to(folder).as_posix(),
-                "size_bytes": source.stat().st_size,
-                "sha256": _sha256_file(source),
+                "filename": release_source.name,
+                "relative_path": release_source.relative_to(folder).as_posix(),
+                "size_bytes": release_source.stat().st_size,
+                "sha256": _sha256_file(release_source),
             },
             "prepared_at": _utc(),
             "publishing_status": "prepared_locally_not_submitted",
