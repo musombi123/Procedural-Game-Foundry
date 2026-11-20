@@ -134,6 +134,13 @@ def test_world_document_cannot_be_read_or_written_by_another_account(tmp_path):
     assert created.status_code == 201
     project_id = created.json()["id"]
 
+    task_response = owner_client.post(
+        f"/api/v1/workspace/projects/{project_id}/tasks",
+        json={"title":"Owner-only task"},
+    )
+    assert task_response.status_code == 201
+    task_id = task_response.json()["task"]["id"]
+
     other_client = make_client(tmp_path, "creator-other")
     world_document = owner_client.get(f"/api/v1/workspace/projects/{project_id}/world").json()
     assert other_client.get(f"/api/v1/workspace/projects/{project_id}/world").status_code == 404
@@ -146,4 +153,11 @@ def test_world_document_cannot_be_read_or_written_by_another_account(tmp_path):
     assert other_client.post(
         f"/api/v1/workspace/projects/{project_id}/tasks",
         json={"title":"Attempted cross-account task"},
+    ).status_code == 404
+    assert other_client.put(
+        f"/api/v1/workspace/projects/{project_id}/tasks/{task_id}",
+        json={"title":"Hijack task"},
+    ).status_code == 404
+    assert other_client.delete(
+        f"/api/v1/workspace/projects/{project_id}/tasks/{task_id}"
     ).status_code == 404
