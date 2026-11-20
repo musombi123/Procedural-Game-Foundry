@@ -469,6 +469,22 @@ if _SAVED_WORKSPACE_ROOT:
 app.mount("/engine", foundry_app)
 register_local_workspace_routes(app, foundry_main.manager, DATA_ROOT, _require_paired)
 
+# Google Desktop OAuth redirects must target a bare loopback IP:port URI.
+# The outer Local Agent therefore receives the callback at http://127.0.0.1:8765,
+# while all authenticated NEXORA factory APIs remain mounted under /engine.
+from core.nexora_workspace.drive_backup import handle_drive_callback
+
+
+@app.get("/")
+def google_drive_oauth_callback(request: Request):
+    return handle_drive_callback(request)
+
+
+
+# Desktop factory services: workspace root, portable projects, snapshots,
+# toolchain inventory and local store-handoff preparation.
+from services.worker.local_factory import register_local_factory_routes
+register_local_factory_routes(app)
 
 if __name__ == "__main__":
     import uvicorn
