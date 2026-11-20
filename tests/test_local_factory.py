@@ -71,3 +71,10 @@ def test_safe_members_rejects_symbolic_link_entries() -> None:
         with pytest.raises(HTTPException) as error:
             _safe_members(archive)
     assert error.value.status_code == 400
+
+def test_safe_members_rejects_duplicate_paths_case_insensitively() -> None:
+    payload = archive_bytes({"Assets/Player.glb": b"first", "assets/player.glb": b"second"})
+    with zipfile.ZipFile(BytesIO(payload)) as archive:
+        with pytest.raises(HTTPException) as error:
+            _safe_members(archive)
+    assert error.value.status_code == 400
