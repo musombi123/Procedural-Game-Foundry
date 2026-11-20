@@ -422,10 +422,14 @@ def register_local_factory_routes(app: Any) -> None:
         with ROOT_LOCK:
             current = Path(manager.root).resolve()
             if current != target:
+                all_project_dirs: list[Path] = []
                 if current.is_dir():
                     for item in current.iterdir():
+                        if not item.is_dir() or not (item / "pgf.json").is_file():
+                            continue
+                        all_project_dirs.append(item)
                         marker = item / "nexora_owner.json"
-                        if not item.is_dir() or not (item / "pgf.json").is_file() or not marker.is_file():
+                        if not marker.is_file():
                             continue
                         try:
                             recorded_owner = json.loads(marker.read_text(encoding="utf-8")).get("user_id")
@@ -436,7 +440,7 @@ def register_local_factory_routes(app: Any) -> None:
                         if str(recorded_owner) == str(owner_id):
                             project_dirs.append(item)
                 nested_targets = [
-                    str(item) for item in project_dirs
+                    str(item) for item in all_project_dirs
                     if target == item.resolve() or item.resolve() in target.parents
                 ]
                 if nested_targets:
