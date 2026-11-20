@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from functools import lru_cache
 
 
 GIB = 1024 ** 3
@@ -230,6 +231,7 @@ def _android_sdk() -> dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=1)
 def _triposr_worker_status() -> dict[str, Any]:
     root_value = os.environ.get("NEXORA_TRIPOSR_ROOT", "").strip()
     root = Path(root_value).expanduser() if root_value else None
