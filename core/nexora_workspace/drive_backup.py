@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from core.nexora_workspace.desktop_factory import (
     BACKUP_TOTAL_LIMIT,
+    SNAPSHOT_ID_RE,
     _atomic_json,
     _project_folder,
     _safe_restore_archive,
@@ -400,6 +401,8 @@ def register_drive_backup_routes(app: Any, manager: Any) -> None:
     @router.post("/projects/{pid}/snapshots/{snapshot_id}/upload")
     def upload_snapshot(pid: str, snapshot_id: str, request: Request):
         folder = _project_folder(manager, pid, request)
+        if not SNAPSHOT_ID_RE.fullmatch(snapshot_id):
+            raise HTTPException(400, "Invalid local snapshot ID.")
         archive = folder / "backups" / (snapshot_id + ".zip")
         metadata_path = folder / "backups" / (snapshot_id + ".json")
         if not archive.is_file() or not metadata_path.is_file():
