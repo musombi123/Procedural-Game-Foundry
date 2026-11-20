@@ -8,6 +8,7 @@ from core.nexora_workspace.desktop_factory import (
     TOOL_CATALOG,
     _backup_project,
     _copy_godot_project,
+    _ensure_starter_godot_project,
     _relative_project_path,
     _safe_restore_archive,
 )
@@ -83,3 +84,19 @@ def test_tool_installer_exposes_only_fixed_package_ids():
         "godot", "blender", "ffmpeg", "java17", "android_studio"
     }
     assert all(item["winget_id"] for item in TOOL_CATALOG.values())
+
+
+
+def test_starter_project_is_created_and_existing_project_is_preserved(tmp_path: Path):
+    folder = tmp_path / "new-project"
+    folder.mkdir()
+    game = _ensure_starter_godot_project(folder, "Starter Game")
+    project_file = game / "project.godot"
+    assert project_file.is_file()
+    text = project_file.read_text(encoding="utf-8")
+    assert "config/name=\\"Starter Game\\"" in text
+    script = game / "scripts" / "custom.gd"
+    script.write_text("extends Node\\n", encoding="utf-8")
+    _ensure_starter_godot_project(folder, "Renamed Game")
+    assert script.read_text(encoding="utf-8") == "extends Node\\n"
+    assert "Starter Game" in project_file.read_text(encoding="utf-8")
