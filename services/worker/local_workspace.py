@@ -63,6 +63,8 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
     target = _safe_target(raw_path, agent_root)
     current = Path(manager.root).resolve()
     marker = target / ".nexora-workspace.json"
+    if marker.is_symlink():
+        raise HTTPException(403, "A NEXORA workspace marker cannot be a symbolic link.")
     marker_preexisted = marker.is_file()
 
     # A selected existing workspace is account-bound, even when it is already
@@ -86,6 +88,8 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
                 if not child.is_dir() or not (child / "pgf.json").is_file():
                     continue
                 owner_file = child / "nexora_owner.json"
+                if owner_file.is_symlink():
+                    raise HTTPException(403, "A project ownership marker cannot be a symbolic link.")
                 try:
                     child_owner = json.loads(owner_file.read_text(encoding="utf-8")).get("user_id") if owner_file.is_file() else None
                 except (OSError, ValueError):
@@ -122,6 +126,8 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
         destination = target / folder.name
         if destination.exists():
             destination_owner = destination / "nexora_owner.json"
+            if destination_owner.is_symlink():
+                raise HTTPException(409, f"Destination project '{folder.name}' has a symbolic-link ownership marker.")
             try:
                 existing_owner = json.loads(destination_owner.read_text(encoding="utf-8")).get("user_id") if destination_owner.is_file() else None
             except (OSError, ValueError):
@@ -141,6 +147,8 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
         })
 
     staging_root = target / ".nexora-migration-staging"
+    if staging_root.is_symlink():
+        raise HTTPException(403, "NEXORA migration staging cannot be a symbolic link.")
     staging = staging_root / __import__("uuid").uuid4().hex
     promoted: list[Path] = []
     marker_created = False
@@ -180,6 +188,8 @@ def set_workspace_root(manager: Any, agent_data: str | Path, raw_path: str, user
         manager.root = target
         manager.root.mkdir(parents=True, exist_ok=True)
         runtime_root = target / ".nexora-runtime"
+        if runtime_root.is_symlink():
+            raise HTTPException(403, "NEXORA runtime data cannot be a symbolic link.")
         runtime_root.mkdir(parents=True, exist_ok=True)
         os.environ["PGF_DATA_DIR"] = str(runtime_root)
     except Exception:
