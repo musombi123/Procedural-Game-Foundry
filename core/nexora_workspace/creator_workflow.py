@@ -162,11 +162,6 @@ class RewardCreditConsumeRequest(BaseModel):
     tool_id: Literal["environment","actors_props"]
     consumed_for: str = Field(min_length=1,max_length=160)
 
-class RewardCreditRefundRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    intent_id: str = Field(min_length=20,max_length=128)
-    consumed_for: str = Field(min_length=1,max_length=160)
-
 def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -369,21 +364,6 @@ def _consume_reward_credit_db(user_id: str, tool_id: str, consumed_for: str) -> 
     finally:
         conn.close()
 
-def _refund_reward_credit_db(user_id: str, intent_id: str, consumed_for: str) -> bool:
-    conn = _reward_database()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """UPDATE nexora_creator_reward_intents
-                   SET status='credited', consumed_at=NULL, consumed_for=NULL
-                   WHERE intent_id=%s AND user_id=%s AND status='consumed' AND consumed_for=%s""",
-                (intent_id, user_id, consumed_for),
-            )
-            restored = cur.rowcount == 1
-        return restored
-    finally:
-        conn.close()
-
 def _consume_reward_credit(manager: Any, user_id: str, tool_id: str, consumed_for: str) -> str:
     if os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}:
         result = _cloud_reward_request(
@@ -392,17 +372,6 @@ def _consume_reward_credit(manager: Any, user_id: str, tool_id: str, consumed_fo
         )
         return str(result["intent_id"])
     return _consume_reward_credit_db(user_id, tool_id, consumed_for)
-
-def _refund_reward_credit(manager: Any, user_id: str, intent_id: str, consumed_for: str) -> None:
-    if not intent_id:
-        return
-    if os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}:
-        _cloud_reward_request(
-            user_id, "/api/v1/creator-flow/rewards/credits/refund",
-            {"intent_id": intent_id, "consumed_for": consumed_for},
-        )
-        return
-    _refund_reward_credit_db(user_id, intent_id, consumed_for)
 
 def _load_admob_public_keys() -> dict[int, Any]:
     now = time.monotonic()
@@ -1095,11 +1064,6 @@ def _execute_creator_step(job_id: str, project_id: str, owner_id: str, step: str
             raise RuntimeError("Unknown Creator Flow job: "+step)
         jobs.update(job_id,state=JobState.COMPLETED,progress=100,message=message,error=None)
     except Exception as exc:
-        if reward_credit_id:
-            try:
-                _refund_reward_credit(manager, owner_id, reward_credit_id, consumed_for)
-            except Exception:
-                pass
         jobs.update(job_id,state=JobState.FAILED,progress=100,message="Creator Flow stage failed: "+step,error=str(getattr(exc,"detail",None) or exc))
 
 def _queue_creator_step(pid: str, folder: Path, owner_id: str, step: str, background: BackgroundTasks, manager: Any, jobs: Any) -> dict:
@@ -1111,19 +1075,11 @@ def _queue_creator_step(pid: str, folder: Path, owner_id: str, step: str, backgr
     consumed_for="creator-step:"+job.id
     if entitlement.get("plan") == "basic" and step in REWARDED_BASIC_TOOLS:
         reward_credit_id=_consume_reward_credit(manager,owner_id,step,consumed_for)
-    try:
-        job=jobs.add(job)
-        job_root=folder/"workspace_jobs"
-        job_root.mkdir(exist_ok=True)
-        (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner_id},indent=2),encoding="utf-8")
-        background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs,reward_credit_id)
-    except Exception:
-        if reward_credit_id:
-            try:
-                _refund_reward_credit(manager,owner_id,reward_credit_id,consumed_for)
-            except Exception:
-                pass
-        raise
+    job=jobs.add(job)
+    job_root=folder/"workspace_jobs"
+    job_root.mkdir(exist_ok=True)
+    (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner_id},indent=2),encoding="utf-8")
+    background.add_task(_execute_creator_step,job.id,pid,owner_id,step,manager,jobs,reward_credit_id)
     return {**job.as_dict(),"state":job.state.value.lower(),"kind":"creator."+step,"message":"Queued Creator Flow stage: "+step}
 
 def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
@@ -1231,13 +1187,6 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
         intent_id=_consume_reward_credit_db(str(user),payload.tool_id,payload.consumed_for)
         return {"consumed":True,"intent_id":intent_id,"tool_id":payload.tool_id}
-
-    @router.post("/api/v1/creator-flow/rewards/credits/refund")
-    def refund_creator_reward_credit(payload: RewardCreditRefundRequest, request: Request):
-        user=getattr(request.state,"nexora_user_id",None)
-        if not user: raise HTTPException(401,"Sign in to your NEXORA account.")
-        restored=_refund_reward_credit_db(str(user),payload.intent_id,payload.consumed_for)
-        return {"restored":restored}
 
     @router.get("/api/v1/creator-flow/rewards/admob/ssv")
     def admob_rewarded_ssv(request: Request):
