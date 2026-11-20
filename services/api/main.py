@@ -25,7 +25,10 @@ from core.execution_policy import is_local_compute_only_request, local_compute_b
 from services.worker.local_security import verify_local_access_token
 from services.worker.workload_guard import require_device_profile
 
-LOCAL_AGENT_MODE = os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}
+# Render is always a hosted control plane. Even an accidental environment
+# variable must never promote the cloud process into a local compute worker.
+_LOCAL_AGENT_REQUESTED = os.environ.get("NEXORA_LOCAL_AGENT", "false").strip().lower() in {"1", "true", "yes"}
+LOCAL_AGENT_MODE = _LOCAL_AGENT_REQUESTED and not bool(os.environ.get("RENDER"))
 
 DATA = Path(os.environ.get("PGF_DATA_DIR", ".pgf-data")).resolve()
 manager = ProjectManager(DATA / "projects")
