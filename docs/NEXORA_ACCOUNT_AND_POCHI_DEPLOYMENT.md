@@ -71,45 +71,35 @@ Cloud projects created before the NEXORA account boundary may contain legacy Rev
 - [ ] Test a low-value incoming Pochi payment, reconcile the real statement entry, and verify the entitlement only after matching the receipt.
 
 
-## Standalone frontend boundary
+## Frontend ownership and public path
 
-NEXORA Studio Pro is a separate Vite/React application deployed as its own
-Render Static Site from `apps/nexora-frontend` in this repository. It has its
-own `src/main.jsx`, account gate, browser session, API and database boundary.
-It does not import or mount RevelaCode's `App`, `AuthProvider`,
-`StartModal`, navigation shell or preferences.
+NEXORA's independent frontend source is maintained in the existing
+RevelaCode frontend repository at
+`musombi123/RevelaCode-Frontend/apps/nexora`. It has a separate Vite
+configuration, `index.html`, React startup entry, account gate, session
+storage and API client. It does not mount inside RevelaCode's React router
+or use RevelaCode authentication providers.
 
-Render Static Site configuration:
-- Repository: `musombi123/Procedural-Game-Foundry`
-- Branch: `main`
-- Root directory: `apps/nexora-frontend`
-- Build command: `npm install && npm run build`
-- Publish directory: `dist`
-- Public build variable: `VITE_NEXORA_API_URL=https://nexora-foundry-api.onrender.com`
-- Keep the Render-generated `*.onrender.com` URL; do not attach a NEXORA
-  custom domain.
-- Vite production base path: `/dev_nexora/`
+NEXORA does not have its own Render frontend service. The existing
+RevelaCode Render Static Site builds NEXORA separately into
+`public/dev_nexora` and then publishes it alongside the RevelaCode root
+application. Its public URL is
+`https://revelacode.co.ke/dev_nexora`.
 
-## Public entry through RevelaCode
-
-The sole public NEXORA browser URL is
-`https://revelacode.co.ke/dev_nexora`. In the Render dashboard for the
-existing RevelaCode Static Site, add these external Rewrite rules (not
-Redirect rules) above any catch-all SPA rule:
+The existing RevelaCode Render Static Site must have these Rewrite rules
+above the broad SPA fallback:
 
 | Source | Destination |
 | --- | --- |
-| `/dev_nexora` | `https://<NEXORA-STATIC-SITE>.onrender.com/` |
-| `/dev_nexora/*` | `https://<NEXORA-STATIC-SITE>.onrender.com/*` |
+| `/dev_nexora` | `/dev_nexora/index.html` |
+| `/dev_nexora/*` | `/dev_nexora/index.html` |
 
-Replace the placeholder with the exact hostname assigned to the separate
-NEXORA static site. The wildcard rule proxies NEXORA's assets while the
-browser remains on `revelacode.co.ke/dev_nexora`. RevelaCode's React entry
-point, providers and authentication are not used for these rewritten
-requests. NEXORA retains its own startup entry and deployment pipeline.
+The browser remains on the RevelaCode apex domain. Static NEXORA assets
+under `/dev_nexora/assets/` are served directly from the published
+directory when present.
 
 Set the NEXORA API's `NEXORA_CORS_ORIGINS` to
-`https://revelacode.co.ke` plus the local NEXORA development origins only.
-The API continues to use its own bearer sessions and NEXORA database. CORS
-is an origin policy, not an authentication boundary; account authorization
-remains enforced by NEXORA's API.
+`https://revelacode.co.ke` plus the local NEXORA development origins.
+The API continues to use its own bearer sessions, Neon database, payment
+reconciliation and entitlements. CORS is an origin policy, not an
+authentication boundary; account authorization remains enforced by NEXORA.
