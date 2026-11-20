@@ -13,7 +13,7 @@ Configure these on the NEXORA API service (not on the RevelaCode backend):
 | `NEXORA_POCHI_MERCHANT_NUMBER` | `0742466828` — the NEXORA Pochi la Biashara receiving number supplied by the owner. |
 | `NEXORA_PLAN_PRICES_KES` | JSON object with the owner-approved KES prices for each plan. |
 | `NEXORA_PAYMENT_VERIFICATION_SECRET` | High-entropy secret held only by the NEXORA server/operator. |
-| `NEXORA_CORS_ORIGINS` | Comma-separated NEXORA frontend origins only. Production: `https://nexora.revelacode.co.ke`; local development: `http://localhost:5173,http://127.0.0.1:5173`. |
+| `NEXORA_CORS_ORIGINS` | Comma-separated NEXORA frontend origins only. Production: `https://revelacode.co.ke`; local development: `http://localhost:5173,http://127.0.0.1:5173`. |
 | `NEXORA_SESSION_DAYS` | Optional session lifetime (default 30 days, capped at 90). |
 
 Use the Neon connection string in a private Render environment variable. Never put credentials, merchant secrets or the connection string in Vite's `.env.production`, frontend source, a public repository, or the browser.
@@ -73,8 +73,11 @@ Cloud projects created before the NEXORA account boundary may contain legacy Rev
 
 ## Standalone frontend boundary
 
-NEXORA Studio Pro is deployed as a separate Vite/React static site from
-`apps/nexora-frontend` in the `Procedural-Game-Foundry` repository.
+NEXORA Studio Pro is a separate Vite/React application deployed as its own
+Render Static Site from `apps/nexora-frontend` in this repository. It has its
+own `src/main.jsx`, account gate, browser session, API and database boundary.
+It does not import or mount RevelaCode's `App`, `AuthProvider`,
+`StartModal`, navigation shell or preferences.
 
 Render Static Site configuration:
 - Repository: `musombi123/Procedural-Game-Foundry`
@@ -83,19 +86,30 @@ Render Static Site configuration:
 - Build command: `npm install && npm run build`
 - Publish directory: `dist`
 - Public build variable: `VITE_NEXORA_API_URL=https://nexora-foundry-api.onrender.com`
-- Custom domain: `nexora.revelacode.co.ke`
+- Keep the Render-generated `*.onrender.com` URL; do not attach a NEXORA
+  custom domain.
+- Vite production base path: `/dev_nexora/`
 
-The NEXORA frontend owns its entry point, registration/login UI, local session
-storage, workspace and deployment. It does not import or mount RevelaCode's
-`App`, `AuthProvider`, `StartModal`, navigation shell or preferences.
+## Public entry through RevelaCode
 
-RevelaCode keeps only a legacy-entry redirect: requests to
-`https://revelacode.co.ke/dev_nexora` are redirected to
-`https://nexora.revelacode.co.ke/` before RevelaCode React providers are
-mounted. There is no NEXORA component or NEXORA API base variable in the
-RevelaCode frontend build.
+The sole public NEXORA browser URL is
+`https://revelacode.co.ke/dev_nexora`. In the Render dashboard for the
+existing RevelaCode Static Site, add these external Rewrite rules (not
+Redirect rules) above any catch-all SPA rule:
 
-Set the NEXORA API's `NEXORA_CORS_ORIGINS` to the NEXORA frontend origin and
-local NEXORA development origins only. Do not include the RevelaCode website
-origin. CORS is an origin policy, not an authentication boundary; NEXORA
-account authorization remains enforced by its own bearer sessions and API.
+| Source | Destination |
+| --- | --- |
+| `/dev_nexora` | `https://<NEXORA-STATIC-SITE>.onrender.com/` |
+| `/dev_nexora/*` | `https://<NEXORA-STATIC-SITE>.onrender.com/*` |
+
+Replace the placeholder with the exact hostname assigned to the separate
+NEXORA static site. The wildcard rule proxies NEXORA's assets while the
+browser remains on `revelacode.co.ke/dev_nexora`. RevelaCode's React entry
+point, providers and authentication are not used for these rewritten
+requests. NEXORA retains its own startup entry and deployment pipeline.
+
+Set the NEXORA API's `NEXORA_CORS_ORIGINS` to
+`https://revelacode.co.ke` plus the local NEXORA development origins only.
+The API continues to use its own bearer sessions and NEXORA database. CORS
+is an origin policy, not an authentication boundary; account authorization
+remains enforced by NEXORA's API.
