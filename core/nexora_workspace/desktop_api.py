@@ -502,7 +502,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             raise HTTPException(403, "Invalid Godot project directory.")
         project_root.mkdir(parents=True, exist_ok=True)
         try:
-            result = download_polyhaven_model(project_root, payload.asset_id, payload.resolution)
+            result = download_polyhaven_model(folder, payload.asset_id, payload.resolution)
         except PolyHavenError as exc:
             raise HTTPException(422, str(exc)) from exc
         return {
@@ -517,7 +517,7 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         folder, definition, owner_id = _project(manager, pid, request)
         if not re.fullmatch(r"[a-z0-9_]{2,100}", asset_id):
             raise HTTPException(422, "Invalid Poly Haven asset identifier.")
-        project_root = (folder / "game").resolve()
+        project_root = folder.resolve()
         asset_root = (project_root / "assets" / "3d" / "polyhaven" / asset_id).resolve()
         if project_root not in asset_root.parents:
             raise HTTPException(403, "Invalid 3D asset directory.")
