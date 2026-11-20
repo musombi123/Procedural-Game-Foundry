@@ -573,7 +573,7 @@ def handle_drive_callback(request: Request) -> HTMLResponse:
                     raise HTTPException(422, "The Drive archive has no valid NEXORA backup manifest.") from exc
             if str(manifest.get("project_id") or "") != pid:
                 raise HTTPException(403, "The backup belongs to a different NEXORA project.")
-            restored = _safe_restore_archive(staging, folder)
+            restored = _safe_restore_archive(staging, folder, expected_owner=owner)
             return {
                 "restored": True,
                 "project_id": pid,
