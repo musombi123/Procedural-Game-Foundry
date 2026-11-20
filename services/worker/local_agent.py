@@ -9,7 +9,6 @@ NEXORA_LOCAL_AGENT=true. It runs on this same user's machine, not on Render.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import ipaddress
 import os
@@ -19,6 +18,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
 
 # Set these before importing the Foundry application. The cloud Render process
 # never imports this module.
@@ -31,6 +31,7 @@ if not os.environ.get("PGF_DATA_DIR"):
         os.environ["PGF_DATA_DIR"] = str(Path.home() / ".local" / "share" / "nexora" / "foundry")
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
