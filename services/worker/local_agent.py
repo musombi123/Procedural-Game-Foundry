@@ -97,7 +97,12 @@ async def loopback_and_origin_guard(request: Request, call_next):
     if host and host not in allowed_hosts:
         return JSONResponse({"detail": "Invalid local agent Host header."}, status_code=403)
     origin = request.headers.get("origin")
-    if origin and origin not in ORIGINS:
+    # Google returns the PKCE authorization response as a top-level browser
+    # navigation. Its cross-site Origin must not be treated as an API CORS
+    # request; the loopback Host guard plus one-time PKCE state/code verifier
+    # protect this exact callback. All other cross-origin requests stay blocked.
+    oauth_callback = request.method.upper() == "GET" and request.url.path == "/drive/oauth/callback"
+    if origin and origin not in ORIGINS and not oauth_callback:
         return JSONResponse({"detail": "This website is not allowed to connect to NEXORA Local Agent."}, status_code=403)
     return await call_next(request)
 
