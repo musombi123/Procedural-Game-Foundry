@@ -574,8 +574,8 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
             if platform == "android":
                 artifact_record.update({
                     "artifact_format": str((android or {}).get("artifact_format") or "apk").lower(),
-                    "package_id": str((android or {}).get("package_id") or ""),
-                    "version_name": str((android or {}).get("version_name") or "1.0.0"),
+                    "package_id": str((android or {}).get("package_id") or "com.nexora.game").strip().lower(),
+                    "version_name": str((android or {}).get("version_name") or "1.0.0")[:32],
                     "version_code": max(1, int((android or {}).get("version_code") or 1)),
                     "build_type": str((android or {}).get("build_type") or "debug").lower(),
                 })
