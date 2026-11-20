@@ -85,6 +85,45 @@ def test_world_document_is_persisted_for_project_owner(tmp_path):
     assert restored.json()["objects"][0]["name"] == "Signal beacon"
     assert restored.json()["terrain_edits"][0]["operation"] == "raise"
 
+    task_response = client.post(
+        f"/api/v1/workspace/projects/{project_id}/tasks",
+        json={
+            "title": "Polish environment lighting",
+            "description": "Review the outpost light balance.",
+            "category": "Art",
+            "priority": "high",
+            "assignee": "Lighting Artist",
+            "status": "backlog",
+            "due_date": "2026-12-15",
+        },
+    )
+    assert task_response.status_code == 201
+    task = task_response.json()["task"]
+    assert task["projectId"] == project_id
+    assert task["dueDate"] == "2026-12-15"
+
+    moved = client.put(
+        f"/api/v1/workspace/projects/{project_id}/tasks/{task['id']}",
+        json={
+            "title": "Polish environment lighting",
+            "description": "Review the outpost light balance.",
+            "category": "Art",
+            "priority": "high",
+            "assignee": "Lighting Artist",
+            "status": "in_review",
+            "due_date": "2026-12-15",
+        },
+    )
+    assert moved.status_code == 200
+    assert moved.json()["task"]["status"] == "in_review"
+
+    listed = client.get(f"/api/v1/workspace/projects/{project_id}/tasks")
+    assert listed.status_code == 200
+    assert listed.json()["tasks"][0]["id"] == task["id"]
+    deleted = client.delete(f"/api/v1/workspace/projects/{project_id}/tasks/{task['id']}")
+    assert deleted.status_code == 200
+    assert client.get(f"/api/v1/workspace/projects/{project_id}/tasks").json()["tasks"] == []
+
 
 def test_world_document_cannot_be_read_or_written_by_another_account(tmp_path):
     owner_client = make_client(tmp_path, "creator-owner")
@@ -101,4 +140,10 @@ def test_world_document_cannot_be_read_or_written_by_another_account(tmp_path):
     assert other_client.put(
         f"/api/v1/workspace/projects/{project_id}/world",
         json=world_document,
+    ).status_code == 404
+
+    assert other_client.get(f"/api/v1/workspace/projects/{project_id}/tasks").status_code == 404
+    assert other_client.post(
+        f"/api/v1/workspace/projects/{project_id}/tasks",
+        json={"title":"Attempted cross-account task"},
     ).status_code == 404
