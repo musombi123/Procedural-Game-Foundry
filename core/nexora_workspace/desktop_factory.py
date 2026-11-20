@@ -381,17 +381,30 @@ def _backup_project(folder: Path, snapshot_id: str) -> dict[str, Any]:
     return record
 
 
-def _safe_restore_archive(archive: Path, folder: Path) -> dict[str, Any]:
-    stage = folder / "restore-staging" / uuid.uuid4().hex
+def _safe_restore_archive(
+    archive: Path,
+    folder: Path,
+    expected_owner: str | None = None,
+) -> dict[str, Any]:
+    """Restore all project source/metadata while preserving owner and backup history."""
+    staging_root = folder / "restore-staging"
+    stage = staging_root / uuid.uuid4().hex
+    retired = staging_root / ("retired-" + uuid.uuid4().hex)
+    extracted = stage / "project"
     stage.mkdir(parents=True, exist_ok=False)
+    extracted.mkdir(parents=True, exist_ok=False)
     count = 0
     total = 0
+    moved_current: list[str] = []
+    moved_restored: list[str] = []
+    keep_names = {"backups", "restore-staging", "nexora_owner.json"}
     try:
         with zipfile.ZipFile(archive, "r") as source:
             entries = source.infolist()
             if len(entries) > BACKUP_FILE_LIMIT + 1:
                 raise HTTPException(413, "Backup archive contains too many entries.")
             safe_entries: list[tuple[zipfile.ZipInfo, PurePosixPath]] = []
+            archive_files: set[str] = set()
             for entry in entries:
                 raw_name = str(entry.filename or "")
                 normalized = raw_name.replace("\\", "/")
@@ -403,8 +416,9 @@ def _safe_restore_archive(archive: Path, folder: Path) -> dict[str, Any]:
                     or path.is_absolute()
                     or ":" in normalized
                     or any(part in {"", ".", ".."} for part in path.parts)
+                    or any(part.lower() in IGNORED_DIRECTORY_NAMES for part in path.parts)
                 ):
-                    raise HTTPException(400, "Backup contains an unsafe path.")
+                    raise HTTPException(400, "Backup contains an unsafe or excluded path.")
                 if mode == 0o120000:
                     raise HTTPException(400, "Backup contains a symbolic link.")
                 if mode not in {0, 0o040000, 0o100000}:
@@ -414,18 +428,66 @@ def _safe_restore_archive(archive: Path, folder: Path) -> dict[str, Any]:
                 count += 1
                 total += int(entry.file_size)
                 if count > BACKUP_FILE_LIMIT:
-                    raise HTTPException(413, "Backup archive contains too many files.")
+                    raise HTTPException(413, "Backup archive contains too many entries.")
                 if total > BACKUP_TOTAL_LIMIT:
                     raise HTTPException(413, "Backup expands beyond the 10 GiB restore limit.")
-                target = stage.joinpath(*path.parts).resolve()
-                if stage.resolve() not in target.parents:
+                target = extracted.joinpath(*path.parts).resolve()
+                if extracted.resolve() not in target.parents:
                     raise HTTPException(400, "Backup extraction escaped its staging directory.")
+                if not entry.is_dir() and not raw_name.endswith(("/", "\\")):
+                    archive_files.add(path.as_posix())
                 safe_entries.append((entry, path))
 
-            # Extract entries manually after the complete path and size audit.
-            # This avoids platform-specific ZIP path normalization surprises.
+            try:
+                manifest = json.loads(source.read("NEXORA_BACKUP_MANIFEST.json").decode("utf-8"))
+            except (KeyError, ValueError, UnicodeDecodeError) as exc:
+                raise HTTPException(422, "Backup archive has no valid NEXORA manifest.") from exc
+            if str(manifest.get("project_id") or "") != folder.name:
+                raise HTTPException(403, "Backup belongs to a different NEXORA project.")
+            manifest_rows = manifest.get("files")
+            if not isinstance(manifest_rows, list):
+                raise HTTPException(422, "Backup file manifest is invalid.")
+            expected_files: set[str] = set()
+            for row in manifest_rows:
+                if not isinstance(row, dict):
+                    raise HTTPException(422, "Backup file manifest contains an invalid entry.")
+                relative = str(row.get("path") or "").replace("\\", "/")
+                pure = PurePosixPath(relative)
+                digest = str(row.get("sha256") or "")
+                if (
+                    not relative
+                    or pure.is_absolute()
+                    or ":" in relative
+                    or any(part in {"", ".", ".."} for part in pure.parts)
+                    or any(part.lower() in IGNORED_DIRECTORY_NAMES for part in pure.parts)
+                    or not re.fullmatch(r"[a-fA-F0-9]{64}", digest)
+                ):
+                    raise HTTPException(422, "Backup file manifest contains an unsafe path or checksum.")
+                expected_files.add(pure.as_posix())
+                staged_file = extracted.joinpath(*pure.parts)
+                if not staged_file.is_file() or staged_file.is_symlink():
+                    raise HTTPException(422, "Backup is missing a manifest-listed project file.")
+                if staged_file.stat().st_size != int(row.get("size_bytes", -1)):
+                    raise HTTPException(409, "A restored project file does not match its manifest size.")
+                if _sha256_file(staged_file).lower() != digest.lower():
+                    raise HTTPException(409, "A restored project file failed its SHA-256 check.")
+            if expected_files != archive_files:
+                raise HTTPException(422, "Backup archive contents do not match its file manifest.")
+
+            owner_record = extracted / "nexora_owner.json"
+            if expected_owner is not None:
+                if not owner_record.is_file():
+                    raise HTTPException(403, "Backup has no NEXORA project owner record.")
+                try:
+                    archived_owner = json.loads(owner_record.read_text(encoding="utf-8")).get("user_id")
+                except (OSError, ValueError, TypeError) as exc:
+                    raise HTTPException(422, "Backup owner record is unreadable.") from exc
+                if str(archived_owner) != str(expected_owner):
+                    raise HTTPException(403, "Backup belongs to a different NEXORA account.")
+
+            # Extract only after every archive path, owner, size and digest passed.
             for entry, relative in safe_entries:
-                target = stage.joinpath(*relative.parts)
+                target = extracted.joinpath(*relative.parts)
                 if entry.is_dir() or str(entry.filename).endswith(("/", "\\")):
                     target.mkdir(parents=True, exist_ok=True)
                     continue
@@ -436,24 +498,52 @@ def _safe_restore_archive(archive: Path, folder: Path) -> dict[str, Any]:
                 except FileExistsError as exc:
                     raise HTTPException(400, "Backup contains duplicate file paths.") from exc
 
-        replacement = stage / "game"
-        if not (replacement / "project.godot").is_file():
+        if not (extracted / "game" / "project.godot").is_file():
             raise HTTPException(422, "This backup does not contain a restorable Godot project.")
-        live_game = folder / "game"
-        retired = folder / f".game-before-restore-{uuid.uuid4().hex[:8]}"
-        if live_game.exists():
-            live_game.replace(retired)
+
+        # Preserve the live account owner and all local/remote backup history.
+        # Replace all other project-root entries as one rollback-capable operation.
+        retired.mkdir(parents=True, exist_ok=False)
+        for child in list(folder.iterdir()):
+            if child.name.lower() in keep_names:
+                continue
+            child.replace(retired / child.name)
+            moved_current.append(child.name)
+
         try:
-            replacement.replace(live_game)
+            for child in list(extracted.iterdir()):
+                if child.name == "nexora_owner.json":
+                    continue
+                child.replace(folder / child.name)
+                moved_restored.append(child.name)
         except OSError:
-            if retired.exists() and not live_game.exists():
-                retired.replace(live_game)
+            for name in reversed(moved_restored):
+                current = folder / name
+                if current.is_dir() and not current.is_symlink():
+                    shutil.rmtree(current, ignore_errors=True)
+                else:
+                    current.unlink(missing_ok=True)
+            for name in reversed(moved_current):
+                old = retired / name
+                if old.exists() or old.is_symlink():
+                    old.replace(folder / name)
             raise
-        if retired.exists():
-            shutil.rmtree(retired, ignore_errors=True)
-        return {"restored": True, "files": count, "size_bytes": total}
+
+        shutil.rmtree(retired, ignore_errors=True)
+        return {
+            "restored": True,
+            "files": len(archive_files),
+            "size_bytes": total,
+            "restored_components": sorted(moved_restored),
+            "owner_marker_preserved": True,
+            "backup_history_preserved": True,
+        }
     finally:
-        shutil.rmtree(stage.parent, ignore_errors=True)
+        shutil.rmtree(stage, ignore_errors=True)
+        if retired.exists():
+            # If rollback completed, this directory is empty; if an unexpected
+            # error occurred, keep no stale source fragments in the project.
+            shutil.rmtree(retired, ignore_errors=True)
 
 def _publisher_readiness(profile: dict[str, Any]) -> list[dict[str, Any]]:
     tools = _toolchain_summary(profile)
