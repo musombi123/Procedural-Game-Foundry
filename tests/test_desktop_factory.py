@@ -59,6 +59,7 @@ def test_snapshot_integrity_and_restore_round_trip(tmp_path: Path):
     game = project / "game"
     game.mkdir(parents=True)
     (game / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    (project / "pgf.json").write_text(json.dumps({"id": project.name}), encoding="utf-8")
     script = game / "player.gd"
     script.write_text("extends Node\n", encoding="utf-8")
     owner_file = project / "nexora_owner.json"
@@ -132,6 +133,7 @@ def test_snapshot_restore_rejects_another_account_owner(tmp_path: Path):
     game = project / "game"
     game.mkdir(parents=True)
     (game / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    (project / "pgf.json").write_text(json.dumps({"id": project.name}), encoding="utf-8")
     (project / "nexora_owner.json").write_text(json.dumps({"user_id": "creator-1"}), encoding="utf-8")
     snapshot = _backup_project(project, "snapshot-20261120T172102-1234abcd")
     before = (game / "project.godot").read_text(encoding="utf-8")
