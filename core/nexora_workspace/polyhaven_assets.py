@@ -15,6 +15,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from core.asset_registry.registry import AssetRegistry
+
 API_ROOT = "https://api.polyhaven.com"
 API_HOST = "api.polyhaven.com"
 DOWNLOAD_HOST = "dl.polyhaven.org"
@@ -28,13 +30,27 @@ class PolyHavenError(ValueError):
     pass
 
 
+class _SameHostRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        original = urllib.parse.urlparse(req.full_url)
+        target = urllib.parse.urlparse(newurl)
+        if target.scheme != "https" or target.hostname != original.hostname:
+            raise PolyHavenError("Rejected a cross-host or insecure provider redirect.")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open_same_host(request: urllib.request.Request, timeout: int):
+    opener = urllib.request.build_opener(_SameHostRedirectHandler())
+    return opener.open(request, timeout=timeout)
+
+
 def _request_json(url: str) -> Any:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https" or parsed.hostname != API_HOST:
         raise PolyHavenError("Rejected non-Poly Haven API URL.")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=25) as response:
+        with _open_same_host(request, timeout=25) as response:
             if urllib.parse.urlparse(response.geturl()).hostname != API_HOST:
                 raise PolyHavenError("Poly Haven API redirected to an untrusted host.")
             return json.loads(response.read(40 * 1024 * 1024).decode("utf-8"))
@@ -47,7 +63,7 @@ def search_models(query: str = "", limit: int = 40) -> dict[str, Any]:
     if len(query) > 120:
         raise PolyHavenError("Search text is too long.")
     limit = max(1, min(int(limit), 80))
-    payload = _request_json(f"{API_ROOT}/assets")
+    payload = _request_json(f"{API_ROOT}/assets?t=models")
     results = []
     for asset_id, item in payload.items():
         if not isinstance(item, dict) or item.get("type") != 2:
@@ -137,13 +153,15 @@ def _download_verified(url: str, target: Path, expected_size: int, expected_md5:
         raise PolyHavenError("Rejected untrusted asset download URL.")
     if expected_size <= 0 or expected_size > MAX_ASSET_BYTES:
         raise PolyHavenError("Asset file exceeds the 250 MB per-file download limit.")
+    if not re.fullmatch(r"[a-fA-F0-9]{32}", str(expected_md5 or "")):
+        raise PolyHavenError("Provider did not supply a valid MD5 checksum; refusing an unverified download.")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.md5()
     written = 0
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(target.name + ".nexora-download")
     try:
-        with urllib.request.urlopen(request, timeout=60) as response, temp.open("wb") as output:
+        with _open_same_host(request, timeout=60) as response, temp.open("wb") as output:
             if urllib.parse.urlparse(response.geturl()).hostname != DOWNLOAD_HOST:
                 raise PolyHavenError("Asset download redirected to an untrusted host.")
             while True:
@@ -166,19 +184,117 @@ def _download_verified(url: str, target: Path, expected_size: int, expected_md5:
         raise
 
 
+PROMPT_ASSET_HINTS = {
+    "jungle": ("tree", "plant", "rock"),
+    "forest": ("tree", "plant", "rock"),
+    "nature": ("tree", "plant", "rock"),
+    "survival": ("tree", "rock", "crate"),
+    "city": ("building", "car", "street"),
+    "urban": ("building", "car", "street"),
+    "racing": ("car", "vehicle", "road"),
+    "vehicle": ("car", "vehicle", "truck"),
+    "space": ("spaceship", "robot", "satellite"),
+    "sci-fi": ("robot", "spaceship", "futuristic"),
+    "robot": ("robot", "machine", "drone"),
+    "fantasy": ("castle", "sword", "dragon"),
+    "medieval": ("castle", "sword", "armor"),
+    "animal": ("animal", "horse", "dog"),
+    "farm": ("tractor", "animal", "barn"),
+    "football": ("football", "goal", "stadium"),
+    "sports": ("football", "ball", "stadium"),
+}
+MAX_AUTO_MODEL_BYTES = 60 * 1024 * 1024
+MAX_AUTO_TOTAL_BYTES = 120 * 1024 * 1024
+
+
+def auto_install_from_prompt(
+    project_root: Path, prompt: str, resolution: str = "1k", limit: int = 3
+) -> dict[str, Any]:
+    """Find a few relevant real models and register them for generated scenes.
+
+    This runs only in the paired desktop build worker. Network/provider failures
+    are non-fatal so an offline creator can still build the procedural world.
+    """
+    prompt_text = str(prompt or "").lower()
+    hints = []
+    for signal, values in PROMPT_ASSET_HINTS.items():
+        if signal in prompt_text:
+            hints.extend(values)
+    if not hints:
+        hints = ["tree", "rock", "crate"]
+    unique_hints = list(dict.fromkeys(hints))
+    registry = AssetRegistry((project_root / "assets").resolve())
+    existing = {item.get("asset_id"): item for item in registry.list()}
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    total_bytes = 0
+    errors = []
+    for hint in unique_hints:
+        if len(selected) >= max(1, min(int(limit), 5)):
+            break
+        try:
+            matches = search_models(hint, limit=12)["results"]
+        except PolyHavenError as exc:
+            errors.append(str(exc))
+            break
+        for match in matches:
+            asset_id = match["id"]
+            if asset_id in selected_ids:
+                continue
+            registry_id = f"polyhaven_{asset_id}"
+            if registry_id in existing:
+                existing_path = (registry.root / str(existing[registry_id].get("path") or "")).resolve()
+                if registry.root in existing_path.parents and existing_path.is_file():
+                    selected.append({
+                        "asset_id": asset_id, "asset_registry_id": registry_id,
+                        "name": match["name"], "already_installed": True,
+                        "total_bytes": 0, "model_path": existing[registry_id].get("path"),
+                    })
+                    selected_ids.add(asset_id)
+                    break
+            try:
+                file_tree = _request_json(f"{API_ROOT}/files/{urllib.parse.quote(asset_id, safe='')}")
+                files = _choose_model_files(file_tree, resolution)
+                expected_bytes = sum(int(record.get("size") or 0) for _, record in files)
+                if expected_bytes <= 0 or expected_bytes > MAX_AUTO_MODEL_BYTES:
+                    continue
+                if total_bytes + expected_bytes > MAX_AUTO_TOTAL_BYTES:
+                    return {
+                        "provider": "Poly Haven", "resolution": resolution,
+                        "assets": selected, "total_bytes": total_bytes,
+                        "warnings": errors + ["Automatic 3D asset download reached its 120 MB build budget."],
+                    }
+                result = download_model(project_root, asset_id, resolution)
+                result["already_installed"] = False
+                selected.append(result)
+                selected_ids.add(asset_id)
+                total_bytes += int(result["total_bytes"])
+                break
+            except PolyHavenError as exc:
+                errors.append(f"{asset_id}: {exc}")
+                continue
+    return {
+        "provider": "Poly Haven", "resolution": resolution,
+        "assets": selected, "total_bytes": total_bytes, "warnings": errors,
+    }
+
+
 def download_model(project_root: Path, asset_id: str, resolution: str = "2k") -> dict[str, Any]:
     if not ASSET_ID_RE.fullmatch(str(asset_id or "")):
         raise PolyHavenError("Invalid Poly Haven asset identifier.")
     if resolution not in RESOLUTIONS:
         raise PolyHavenError("Resolution must be 1k, 2k or 4k.")
-    metadata = _request_json(f"{API_ROOT}/assets")
+    metadata = _request_json(f"{API_ROOT}/assets?t=models")
     asset = metadata.get(asset_id)
     if not isinstance(asset, dict) or asset.get("type") != 2:
         raise PolyHavenError("The requested Poly Haven asset is not a 3D model.")
     files = _request_json(f"{API_ROOT}/files/{urllib.parse.quote(asset_id, safe='')}")
     selected = _choose_model_files(files, resolution)
+    # project_root is the NEXORA workspace root. AssetRegistry reads from
+    # workspace/assets and the Godot assembler copies this library into game/assets.
     project = project_root.resolve()
-    destination = (project / "assets" / "3d" / "polyhaven" / asset_id).resolve()
+    library_root = (project / "assets").resolve()
+    destination = (library_root / "3d" / "polyhaven" / asset_id).resolve()
     if project not in destination.parents:
         raise PolyHavenError("Asset destination escapes the selected Godot project.")
     destination.mkdir(parents=True, exist_ok=True)
@@ -192,8 +308,10 @@ def download_model(project_root: Path, asset_id: str, resolution: str = "2k") ->
         # Preserve dependency paths where the API describes them, but never
         # allow an absolute path or parent traversal into the workspace.
         safe_parts = [re.sub(r"[^A-Za-z0-9_.-]", "_", part) for part in path_parts if part not in {"", ".", ".."}]
-        if safe_parts and safe_parts[0].lower() in {"gltf", "blend", "fbx", "obj"}:
-            safe_parts = safe_parts[1:]
+        safe_parts = [
+            part for part in safe_parts
+            if part.lower() not in {"gltf", "glb", "blend", "fbx", "obj", "1k", "2k", "4k"}
+        ]
         relative = Path(*safe_parts[:-1], filename) if safe_parts else Path(filename)
         target = (destination / relative).resolve()
         if destination not in target.parents:
@@ -216,7 +334,29 @@ def download_model(project_root: Path, asset_id: str, resolution: str = "2k") ->
     }
     manifest_path = destination / "nexora-asset-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return {"downloaded": True, "asset_id": asset_id, "name": manifest["name"],
+    model_files = [item for item in downloaded if item["path"].lower().endswith((".glb", ".gltf"))]
+    if not model_files:
+        raise PolyHavenError("Provider download did not contain a GLB or glTF model file.")
+    model_file = next((item for item in model_files if item["path"].lower().endswith(".glb")), model_files[0])
+    relative_model_path = Path(model_file["path"]).relative_to("assets").as_posix()
+    registry = AssetRegistry(library_root)
+    registry_id = f"polyhaven_{asset_id}"
+    registered = next((item for item in registry.list() if item.get("asset_id") == registry_id), None)
+    if registered:
+        if registered.get("path") != relative_model_path or registered.get("license") != "CC0-1.0":
+            raise PolyHavenError("A conflicting asset registry entry already uses this Poly Haven ID.")
+    else:
+        registry.register(
+            asset_id=registry_id,
+            relative_path=relative_model_path,
+            kind="3d_model",
+            license_name="CC0-1.0",
+            source="Poly Haven",
+            author="Poly Haven contributors",
+            metadata={"provider_asset_id": asset_id, "resolution": resolution, "source_url": manifest["source_url"]},
+        )
+    return {"downloaded": True, "asset_id": asset_id, "asset_registry_id": registry_id,
+            "model_path": model_file["path"], "name": manifest["name"],
             "directory": str(destination.relative_to(project)).replace("\\", "/"),
             "files": downloaded, "total_bytes": total, "license": "CC0-1.0",
             "provider": "Poly Haven", "manifest": str(manifest_path.relative_to(project)).replace("\\", "/")}

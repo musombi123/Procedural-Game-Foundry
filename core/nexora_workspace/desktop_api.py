@@ -502,6 +502,51 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             raise HTTPException(403, "Invalid Godot project directory.")
         project_root.mkdir(parents=True, exist_ok=True)
         try:
+            result = download_polyhaven_model(folder, payload.asset_id, payload.resolution)
+        except PolyHavenError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {
+            **result,
+            "project_id": definition.id,
+            "project_name": definition.project.name,
+            "owner_id": owner_id,
+        }
+
+    @router.get("/api/v1/desktop/projects/{pid}/assets/3d/{asset_id}/file")
+    def serve_downloaded_3d_model(pid: str, asset_id: str, request: FastAPIRequest):
+        folder, definition, owner_id = _project(manager, pid, request)
+        if not re.fullmatch(r"[a-z0-9_]{2,100}", asset_id):
+            raise HTTPException(422, "Invalid Poly Haven asset identifier.")
+        project_root = folder.resolve()
+        asset_root = (project_root / "assets" / "3d" / "polyhaven" / asset_id).resolve()
+        if project_root not in asset_root.parents:
+            raise HTTPException(403, "Invalid 3D asset directory.")
+        if not asset_root.is_dir():
+            raise HTTPException(404, "Downloaded 3D model was not found in this project.")
+        models = sorted(asset_root.rglob("*.glb"))
+        if not models:
+            raise HTTPException(415, "This asset is available as glTF with dependencies. Open it from the Godot FileSystem dock.")
+        return FileResponse(
+            models[0], media_type="model/gltf-binary", filename=models[0].name,
+            headers={"Cache-Control": "no-store", "X-NEXORA-Asset-Provider": "Poly Haven"},
+        )
+
+    @router.get("/api/v1/desktop/assets/3d/search")
+    def search_3d_assets(request: FastAPIRequest, q: str = "", limit: int = 40):
+        _owner(request)
+        try:
+            return search_polyhaven_models(q, limit)
+        except PolyHavenError as exc:
+            raise HTTPException(502, str(exc)) from exc
+
+    @router.post("/api/v1/desktop/projects/{pid}/assets/3d/download")
+    def download_3d_asset(pid: str, payload: PolyHavenModelDownloadRequest, request: FastAPIRequest):
+        folder, definition, owner_id = _project(manager, pid, request)
+        project_root = (folder / "game").resolve()
+        if folder.resolve() not in project_root.parents:
+            raise HTTPException(403, "Invalid Godot project directory.")
+        project_root.mkdir(parents=True, exist_ok=True)
+        try:
             result = download_polyhaven_model(project_root, payload.asset_id, payload.resolution)
         except PolyHavenError as exc:
             raise HTTPException(422, str(exc)) from exc

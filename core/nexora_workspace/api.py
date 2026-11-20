@@ -29,6 +29,7 @@ from core.asset_registry.registry import AssetRegistry
 from core.build_engine.godot_cli import executable as godot_executable
 from core.game_assembler.godot import assemble_godot_project
 from core.nexora_workspace.default_assets import infer_pack, install_pack
+from core.nexora_workspace.polyhaven_assets import auto_install_from_prompt
 from core.project_engine.models import ProjectCreate, SceneObject, WorldDocument
 from core.validation.validator import validate_project
 from services.worker.workload_guard import require_device_profile
@@ -476,6 +477,36 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
             state = _load_state(folder, definition)
             world = _sync_editor_scene_to_world(folder, definition, state)
             jobs.update(job_id, progress=20, message="Synchronised scene, 3D assets and world data")
+            prompt_context = " ".join([
+                str(state.get("name") or ""),
+                str(state.get("description") or ""),
+                str(state.get("genre") or ""),
+                str(getattr(definition.project, "genre", "") or ""),
+            ])
+            # Real 3D model discovery/download runs locally. If the provider is
+            # unavailable, the procedural build still proceeds with its 2D kit.
+            if getattr(definition.project, "dimension", "3d") == "3d":
+                auto_3d_assets = auto_install_from_prompt(folder, prompt_context, resolution="1k", limit=3)
+            else:
+                auto_3d_assets = {"provider": "Poly Haven", "resolution": "1k", "assets": [], "warnings": []}
+            existing_model_ids = {item.model_asset_id for item in world.objects if item.model_asset_id}
+            placements = [(-8.0, -5.0), (8.0, -5.0), (0.0, -13.0)]
+            for index, asset in enumerate(auto_3d_assets.get("assets", [])):
+                registry_id = asset.get("asset_registry_id")
+                if not registry_id or registry_id in existing_model_ids:
+                    continue
+                x, z = placements[min(index, len(placements) - 1)]
+                safe_object_id = re.sub(r"[^A-Za-z0-9_-]", "_", f"auto_{asset.get('asset_id', index)}")[:64]
+                world.objects.append(SceneObject(
+                    id=safe_object_id,
+                    name=str(asset.get("name") or "Downloaded 3D Asset")[:80],
+                    kind="custom",
+                    x=x,
+                    y=0.0,
+                    z=z,
+                    model_asset_id=registry_id,
+                ))
+                existing_model_ids.add(registry_id)
             game = assemble_godot_project(definition, folder / "game", world.model_dump(mode="json"))
             # Every text-to-game build receives a local, original starter asset
             # pack. Preserve a previously selected pack and all creator edits.
@@ -505,6 +536,17 @@ def _run_workspace_job(job_id: str, project_id: str, kind: str, target: str, and
                 "asset_count": default_assets["asset_count"],
                 "manifest": default_assets["manifest"],
                 "license": default_assets["license"],
+            }
+            build_manifest["auto_3d_assets"] = {
+                "provider": auto_3d_assets.get("provider", "Poly Haven"),
+                "resolution": auto_3d_assets.get("resolution", "1k"),
+                "assets": [
+                    {"asset_id": item.get("asset_id"), "name": item.get("name"),
+                     "asset_registry_id": item.get("asset_registry_id"),
+                     "model_path": item.get("model_path")}
+                    for item in auto_3d_assets.get("assets", [])
+                ],
+                "warnings": auto_3d_assets.get("warnings", []),
             }
             build_manifest_path.write_text(json.dumps(build_manifest, indent=2), encoding="utf-8")
             report = validate_project(folder)
