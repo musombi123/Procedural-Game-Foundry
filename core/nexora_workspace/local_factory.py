@@ -64,6 +64,14 @@ def _project(manager: Any, pid: str, request: Request) -> tuple[Path, Any, str]:
     return folder, definition, user_id
 
 
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _atomic_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
@@ -273,6 +281,7 @@ def register_local_factory_routes(app: Any, manager: Any) -> None:
         backup_root.mkdir(parents=True, exist_ok=True)
         output = backup_root / f"{pid}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.zip"
         report = _archive_project(folder, output)
+        archive_sha256 = _sha256_path(output)
         record = {
             "schema_version": 1,
             "backup_id": uuid4().hex,
@@ -281,9 +290,10 @@ def register_local_factory_routes(app: Any, manager: Any) -> None:
             "project_name": manifest.get("name") or definition.project.name,
             "created_at": _utc(),
             **report,
+            "archive_sha256": archive_sha256,
         }
         _atomic_json(folder / ".nexora" / "backups" / f"{record['backup_id']}.json", record)
-        return FileResponse(output, media_type="application/zip", filename=f"NEXORA-{pid}-backup.zip", headers={"X-NEXORA-Backup-SHA256": report["sha256"]})
+        return FileResponse(output, media_type="application/zip", filename=f"NEXORA-{pid}-backup.zip", headers={"X-NEXORA-Backup-SHA256": archive_sha256})
 
     @router.post("/api/v1/workspace/projects/import", status_code=201)
     async def import_project_backup(request: Request, file: UploadFile = File(...), name: str = Form(default="")):
