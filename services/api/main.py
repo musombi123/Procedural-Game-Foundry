@@ -175,7 +175,10 @@ async def nexora_identity_and_project_scope(request: Request, call_next):
                 if not path.endswith("/jobs"):
                     profile_id = ""
             if profile_id:
-                require_device_profile(profile_id)
+                try:
+                    require_device_profile(profile_id)
+                except HTTPException as exc:
+                    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
     return await call_next(request)
 
