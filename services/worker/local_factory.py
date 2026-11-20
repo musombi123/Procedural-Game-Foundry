@@ -681,6 +681,40 @@ def register_local_factory_routes(app: Any) -> None:
             "drive_backup": {"available": False, "status": "google_oauth_client_id_and_drive_file_scope_not_configured", "optional": True},
         }
 
+    @app.get("/publishing/projects/{project_id}/releases")
+    def list_prepared_releases(project_id: str, owner_id: str = Depends(_paired_user)):
+        folder = _project_folder(_manager(), project_id, owner_id)
+        root = folder / ".nexora" / "releases"
+        rows = []
+        if root.is_dir():
+            for manifest_path in sorted(root.glob("*/release-manifest.json"), reverse=True):
+                try:
+                    row = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    if str(row.get("owner_id")) == str(owner_id):
+                        rows.append(row)
+                except (OSError, ValueError):
+                    continue
+        return {"releases": rows}
+
+    @app.get("/publishing/projects/{project_id}/releases/{release_id}/download")
+    def download_prepared_release(project_id: str, release_id: str, owner_id: str = Depends(_paired_user)):
+        if not re.fullmatch(r"[A-Za-z0-9T_-]{8,64}", release_id):
+            raise HTTPException(422, "Invalid release identifier.")
+        folder = _project_folder(_manager(), project_id, owner_id)
+        release_root = (folder / ".nexora" / "releases" / release_id).resolve()
+        root = (folder / ".nexora" / "releases").resolve()
+        manifest_path = release_root / "release-manifest.json"
+        handoff = release_root / "nexora-release-handoff.zip"
+        if root not in release_root.parents or not manifest_path.is_file() or not handoff.is_file():
+            raise HTTPException(404, "Prepared release handoff not found.")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise HTTPException(500, "Release manifest is unreadable.")
+        if str(manifest.get("owner_id")) != str(owner_id):
+            raise HTTPException(404, "Prepared release handoff not found.")
+        return FileResponse(handoff, media_type="application/zip", filename=f"nexora-{project_id}-{release_id}.zip")
+
     @app.post("/publishing/prepare")
     def prepare_store_handoff(payload: ReleasePrepareRequest, owner_id: str = Depends(_paired_user)):
         if not payload.confirm_prepare:
