@@ -340,31 +340,6 @@ class LoginPayload(BaseModel):
         return result
 
 
-def register_nexora_auth_routes(app: Any) -> None:
-    router = APIRouter()
-
-    @router.post("/api/v1/auth/register", status_code=201)
-    def register_account_route(payload: RegistrationPayload):
-        try:
-            return create_account(payload.email, payload.display_name, payload.password)
-        except NexoraIdentityUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @router.post("/api/v1/auth/login")
-    def login_account_route(payload: LoginPayload):
-        try:
-            return login_account(payload.email, payload.password)
-        except NexoraIdentityUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @router.get("/api/v1/auth/me")
-    def current_account(request: Request):
-        user = getattr(request.state, "nexora_user", None)
-        if not user or user.get("id") == "local":
-            raise HTTPException(status_code=401, detail="Sign in to your NEXORA account.")
-        return {"user": user}
-
-
 class TourProgressPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int = Field(default=1, ge=1, le=100)
@@ -440,6 +415,30 @@ def save_tour_progress(user_id: str, payload: TourProgressPayload) -> dict[str, 
     finally:
         conn.close()
 
+
+def register_nexora_auth_routes(app: Any) -> None:
+    router = APIRouter()
+
+    @router.post("/api/v1/auth/register", status_code=201)
+    def register_account_route(payload: RegistrationPayload):
+        try:
+            return create_account(payload.email, payload.display_name, payload.password)
+        except NexoraIdentityUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.post("/api/v1/auth/login")
+    def login_account_route(payload: LoginPayload):
+        try:
+            return login_account(payload.email, payload.password)
+        except NexoraIdentityUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.get("/api/v1/auth/me")
+    def current_account(request: Request):
+        user = getattr(request.state, "nexora_user", None)
+        if not user or user.get("id") == "local":
+            raise HTTPException(status_code=401, detail="Sign in to your NEXORA account.")
+        return {"user": user}
 
     @router.get("/api/v1/profile/tour")
     def read_tour_progress(request: Request):
