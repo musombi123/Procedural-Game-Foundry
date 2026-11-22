@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.nexora_workspace.creator_workflow import _payment_expired, _receipt_in_use
+from core.nexora_workspace.creator_workflow import (
+    _merchant_payment_matches, _payment_expired, _receipt_in_use,
+)
 
 
 def test_payment_expiry_is_persisted_policy_not_only_checkout_ui() -> None:
@@ -47,3 +49,26 @@ def test_receipt_code_cannot_be_reused_by_another_local_payment(
     )
     assert _receipt_in_use(manager, "qwe123456", "payment-2") is True
     assert _receipt_in_use(manager, "qwe123456", "payment-1") is False
+
+
+
+def test_merchant_receipt_must_exactly_match_customer_claim_and_invoice() -> None:
+    record = {
+        "status": "claimed",
+        "receipt_code": "QWE123456",
+        "paid_amount_kes": 499,
+        "amount_kes": 499,
+    }
+    assert _merchant_payment_matches(record, "qwe123456", 499) is True
+    assert _merchant_payment_matches(record, "QWE123457", 499) is False
+    assert _merchant_payment_matches(record, "QWE123456", 500) is False
+
+
+def test_merchant_receipt_cannot_verify_an_unclaimed_or_expired_style_record() -> None:
+    record = {
+        "status": "pending",
+        "receipt_code": "QWE123456",
+        "paid_amount_kes": 499,
+        "amount_kes": 499,
+    }
+    assert _merchant_payment_matches(record, "QWE123456", 499) is False
