@@ -133,7 +133,7 @@ Existing controls include owner-bound project operations, path traversal/symlink
 - [ ] On-device check confirms generated player/environment/props appear in Asset Collection Center and previews load through the local API.
 - [ ] No Render/server storage or processing of source videos, project assets, generated game files or exports is introduced.
 
-This tracker deliberately separates existing foundations, code delivered in this branch, and uncompleted acceptance gates. A feature is not considered complete because a route, UI label or architecture document exists.
+The numbered Phase 0–9 sections above preserve the repository's original engineering workstream labels. The separate **User-requested Phase 4** section maps to the product milestone the owner specified (Internal IDE, game monetization, in-Studio sponsored placements and premium UI); do not confuse it with the older internal `Phase 4 — Export Center` heading. This tracker deliberately separates existing foundations, code delivered in this branch, and uncompleted acceptance gates. A feature is not considered complete because a route, UI label or architecture document exists.
 
 
 ## Phase 4 implementation setup and verification
