@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 type Props={projectId:string;api:string;ready:boolean;onBuilt:()=>void};
 type Cue={id:string;label:string;kind:"tone"|"impact"|"sweep"|"pulse"|"noise"|"alarm";frequency:number;duration:number;seed:number;trigger:string};
 export default function AudioFoundry({projectId,api,ready,onBuilt}:Props){
@@ -7,7 +8,7 @@ export default function AudioFoundry({projectId,api,ready,onBuilt}:Props){
  const [busy,setBusy]=useState(false),[assets,setAssets]=useState<any[]>([]),[message,setMessage]=useState("Approve Actors & Props to unlock Audio Foundry.");
  async function build(){
   setBusy(true);
-  try{const response=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/audio/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cues,music:music?{mood,duration,seed:7,loop:true}:null})});
+  try{const response=await localAgentFetch(api+"/api/projects/"+projectId+"/movie-pipeline/audio/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cues,music:music?{mood,duration,seed:7,loop:true}:null})});
    const data=await response.json();if(!response.ok)throw new Error(data.detail??"Audio generation failed");
    const stage=data.stage;const outputs=stage.output;setAssets([...outputs.effects.map((x:any)=>({name:x.label,asset:x.asset,duration:x.duration_seconds})),...(outputs.music?[{name:"Background music · "+outputs.music.mood,asset:outputs.music.asset,duration:outputs.music.duration_seconds}]:[])]);
    setMessage("Generated "+data.effects_count+" sound effects"+(data.music_generated?" and background music.":"." )+" Listen and approve the Audio stage.");onBuilt();
