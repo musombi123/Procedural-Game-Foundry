@@ -30,6 +30,7 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
   useEffect(() => { void checkHealth(); }, [checkHealth]);
 
   async function connect() {
+    let permissionDenied = false;
     setBusy(true);
     try {
       const response = await fetch(AGENT + "/system/capabilities", {
@@ -38,6 +39,7 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
       });
       const body = await response.json().catch(() => ({}));
       if (response.status === 401) {
+        permissionDenied = true;
         setState("permission");
         throw new Error(body.detail ?? "Pairing token expired or is invalid. Pair this browser again.");
       }
@@ -63,7 +65,7 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
       setMessage(bondBody.enabled ? (readinessBody.summary ?? "PC connected for this browser session.") : "PC connected, but device resource access is not enabled. Review CPU, RAM and GPU permission in the PC app.");
       onConnected?.();
     } catch (error) {
-      if (state !== "permission") setState("not-connected");
+      if (!permissionDenied) setState("not-connected");
       setMessage(error instanceof Error ? error.message : "PC connection failed. Retry.");
     } finally { setBusy(false); }
   }
