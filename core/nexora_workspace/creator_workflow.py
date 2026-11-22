@@ -243,6 +243,8 @@ def _ensure_billing_schema(conn) -> None:
         )
         """)
         cur.execute("ALTER TABLE nexora_creator_payments ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ")
+        cur.execute("ALTER TABLE nexora_creator_payments ADD COLUMN IF NOT EXISTS merchant_receipt_code TEXT")
+        cur.execute("ALTER TABLE nexora_creator_payments ADD COLUMN IF NOT EXISTS merchant_paid_amount_kes INTEGER")
         cur.execute("""
         CREATE TABLE IF NOT EXISTS nexora_creator_entitlements (
           user_id TEXT PRIMARY KEY, plan TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
@@ -273,11 +275,11 @@ def _find_payment(manager: Any, payment_id: str) -> dict | None:
     if conn:
         _ensure_billing_schema(conn)
         with conn.cursor() as cur:
-            cur.execute("SELECT payment_id,reference,user_id,project_id,plan,amount_kes,status,payer_phone,receipt_code,paid_amount_kes,expires_at,created_at,claimed_at,verified_at FROM nexora_creator_payments WHERE payment_id=%s",(payment_id,))
+            cur.execute("SELECT payment_id,reference,user_id,project_id,plan,amount_kes,status,payer_phone,receipt_code,paid_amount_kes,expires_at,created_at,claimed_at,verified_at,merchant_receipt_code,merchant_paid_amount_kes FROM nexora_creator_payments WHERE payment_id=%s",(payment_id,))
             row=cur.fetchone()
         conn.close()
         if not row: return None
-        keys=["payment_id","reference","user_id","project_id","plan","amount_kes","status","payer_phone","receipt_code","paid_amount_kes","expires_at","created_at","claimed_at","verified_at"]
+        keys=["payment_id","reference","user_id","project_id","plan","amount_kes","status","payer_phone","receipt_code","paid_amount_kes","expires_at","created_at","claimed_at","verified_at","merchant_receipt_code","merchant_paid_amount_kes"]
         return dict(zip(keys,[value.isoformat() if hasattr(value,"isoformat") else value for value in row]))
     path=_json_payments(manager)
     data=json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"payments":[]}
@@ -329,7 +331,7 @@ def _save_payment(manager: Any, record: dict, *, create: bool=False) -> dict:
                 cur.execute("""INSERT INTO nexora_creator_payments(payment_id,reference,user_id,project_id,plan,amount_kes,payer_phone,status,expires_at)
                 VALUES(%s,%s,%s,%s,%s,%s,%s,'pending',%s)""",(record["payment_id"],record["reference"],record["user_id"],record.get("project_id"),record["plan"],record["amount_kes"],record["payer_phone"],record.get("expires_at")))
             else:
-                cur.execute("""UPDATE nexora_creator_payments SET status=%s,receipt_code=%s,paid_amount_kes=%s,claimed_at=NOW(),verified_at=CASE WHEN %s='verified' THEN NOW() ELSE verified_at END WHERE payment_id=%s""",(record["status"],record.get("receipt_code"),record.get("paid_amount_kes"),record["status"],record["payment_id"]))
+                cur.execute("""UPDATE nexora_creator_payments SET status=%s,receipt_code=%s,paid_amount_kes=%s,merchant_receipt_code=%s,merchant_paid_amount_kes=%s,claimed_at=CASE WHEN %s='claimed' THEN NOW() ELSE claimed_at END,verified_at=CASE WHEN %s='verified' THEN NOW() ELSE verified_at END WHERE payment_id=%s""",(record["status"],record.get("receipt_code"),record.get("paid_amount_kes"),record.get("merchant_receipt_code"),record.get("merchant_paid_amount_kes"),record["status"],record["status"],record["payment_id"]))
         conn.close()
         return record
     path=_json_payments(manager)
