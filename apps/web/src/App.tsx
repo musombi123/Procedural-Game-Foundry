@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { localAgentFetch } from "./localAgentFetch";
 import WorldEditor from "./WorldEditor";
 import MoviePipelinePanel from "./MoviePipelinePanel";
@@ -29,6 +29,9 @@ export default function App() {
   const [selected, setSelected] = useState("");
   const [view, setView] = useState<"workspace" | "world" | "scene" | "ide" | "monetization">("workspace");
   const [world, setWorld] = useState<WorldDocument>(initialWorld(784215));
+  const worldRef = useRef(world);
+  const undoStack = useRef<WorldDocument[]>([]);
+  const redoStack = useRef<WorldDocument[]>([]);
   const [selectedObject, setSelectedObject] = useState("");
   const [placementType, setPlacementType] = useState<ObjectKind | null>(null);
   const [sculptMode, setSculptMode] = useState<TerrainEdit["operation"] | null>(null);
@@ -60,14 +63,18 @@ export default function App() {
       const response = await localAgentFetch(API + "/api/projects/" + projectId + "/world");
       if (!response.ok) throw new Error("World load unavailable");
       const document = await response.json() as WorldDocument;
-      setWorld({ ...document, terrain_edits: document.terrain_edits ?? [] });
+      const restored = { ...document, terrain_edits: document.terrain_edits ?? [] };
+      worldRef.current = restored; undoStack.current = []; redoStack.current = [];
+      setWorld(restored);
       setLoadedProjectId(projectId);
       setSaveStatus("All changes saved");
       setSelectedObject("");
       setStatus("World loaded · seed " + document.seed);
     } catch {
       const project = projects.find((item) => item.id === projectId);
-      setWorld(initialWorld(project?.project.seed ?? 784215));
+      const fallback = initialWorld(project?.project.seed ?? 784215);
+      worldRef.current = fallback; undoStack.current = []; redoStack.current = [];
+      setWorld(fallback);
       setLoadedProjectId(projectId);
       setSaveStatus("Offline · local recovery copy only");
       setStatus("Local preview active · API unavailable");
@@ -93,7 +100,9 @@ export default function App() {
       await refresh();
       setProjects((current) => current.some((item) => item.id === project.id) ? current : [project, ...current]);
       setSelected(project.id);
-      setWorld(initialWorld(project.project.seed));
+      const freshWorld = initialWorld(project.project.seed);
+      worldRef.current = freshWorld; undoStack.current = []; redoStack.current = [];
+      setWorld(freshWorld);
       setLoadedProjectId(project.id);
       setSaveStatus("All changes saved");
       setView(returnToWorkspace ? "workspace" : "world");
@@ -125,7 +134,7 @@ export default function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault(); setPaletteOpen(value => !value);
-      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {\n        event.preventDefault(); if (event.shiftKey) redoWorld(); else undoWorld();\n      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {\n        event.preventDefault(); redoWorld();\n      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault(); void saveWorld();
       } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault(); setView("world"); setMode("play");
@@ -135,8 +144,35 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
+  function commitWorld(update: WorldDocument | ((current: WorldDocument) => WorldDocument)) {
+    const current = worldRef.current;
+    const next = typeof update === "function" ? update(current) : update;
+    if (JSON.stringify(current) === JSON.stringify(next)) return;
+    undoStack.current.push(current);
+    if (undoStack.current.length > 100) undoStack.current.shift();
+    redoStack.current = [];
+    worldRef.current = next;
+    setWorld(next);
+  }
+
+  function undoWorld() {
+    const previous = undoStack.current.pop();
+    if (!previous) return;
+    redoStack.current.push(worldRef.current);
+    worldRef.current = previous;
+    setWorld(previous);
+  }
+
+  function redoWorld() {
+    const next = redoStack.current.pop();
+    if (!next) return;
+    undoStack.current.push(worldRef.current);
+    worldRef.current = next;
+    setWorld(next);
+  }
+
   function updateWorld(patch: WorldPatch) {
-    setWorld((current) => ({ ...current, ...patch, world: { ...current.world, ...(patch.world ?? {}) } }));
+    commitWorld((current) => ({ ...current, ...patch, world: { ...current.world, ...(patch.world ?? {}) } }));
   }
   function placeObject(kind: ObjectKind, x: number, z: number) {
     const item: SceneObject = {
@@ -145,18 +181,18 @@ export default function App() {
       kind, x: Math.round(x * 10) / 10, y: 0, z: Math.round(z * 10) / 10,
       rotation: 0, scale: 1, color: colors[kind]
     };
-    setWorld((current) => ({ ...current, objects: [...current.objects, item] }));
+    commitWorld((current) => ({ ...current, objects: [...current.objects, item] }));
     setSelectedObject(item.id);
     setPlacementType(null);
     setStatus(item.name + " placed · scene updated");
   }
   function updateObject(patch: Partial<SceneObject>) {
     if (!selectedObject) return;
-    setWorld((current) => ({ ...current, objects: current.objects.map((item) => item.id === selectedObject ? { ...item, ...patch } : item) }));
+    commitWorld((current) => ({ ...current, objects: current.objects.map((item) => item.id === selectedObject ? { ...item, ...patch } : item) }));
   }
   function sculptTerrain(x: number, z: number) {
     const edit: TerrainEdit = { id: "sculpt-" + Math.random().toString(36).slice(2, 10), operation: sculptMode ?? "raise", x: Math.round(x*10)/10, z: Math.round(z*10)/10, radius: brushRadius, strength: brushStrength };
-    setWorld((current) => ({ ...current, terrain_edits: [...(current.terrain_edits ?? []), edit] }));
+    commitWorld((current) => ({ ...current, terrain_edits: [...(current.terrain_edits ?? []), edit] }));
     setStatus(edit.operation + " stroke applied · terrain updated");
   }
   async function saveWorld() {
@@ -223,7 +259,7 @@ export default function App() {
           <h1>{view === "ide" ? "Edit the game itself." : view === "monetization" ? "Turn play into value." : worldView ? (view === "world" ? "Shape a living world." : "Build the scene.") : "Build worlds. Make games."}</h1>
           <p>{view === "ide" ? "A local source workspace connected to your paired NEXORA computer." : view === "monetization" ? "Configure optional revenue modules for your game, with privacy and platform requirements built in." : worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
         </div>
-        <div className="top-actions"><span className="connection">{status} · {saveStatus}</span><button className="button secondary" onClick={() => setShortcutsOpen(true)}>Shortcuts</button>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
+        <div className="top-actions"><span className="connection">{status} · {saveStatus}</span>{worldView && <><button className="button secondary" disabled={!undoStack.current.length} onClick={undoWorld} aria-label="Undo last scene edit">Undo</button><button className="button secondary" disabled={!redoStack.current.length} onClick={redoWorld} aria-label="Redo scene edit">Redo</button></>}<button className="button secondary" onClick={() => setShortcutsOpen(true)}>Shortcuts</button>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
       </header>
 
       {view === "workspace" ? <>
@@ -284,12 +320,12 @@ export default function App() {
               <div className="object-list">{world.objects.map((item) => <button key={item.id} className={selectedObject === item.id ? "object-row active" : "object-row"} onClick={() => { setSelectedObject(item.id); setPlacementType(null); }}><span className="object-swatch" style={{ background: item.color }}/><span><b>{item.name}</b><small>{item.kind} · {item.x.toFixed(1)}, {item.z.toFixed(1)}</small></span><i>›</i></button>)}
                 {!world.objects.length && <p className="list-empty">Your scene is empty. Pick an asset and click the terrain to place it.</p>}</div>
               {activeObject && <div className="object-inspector">
-                <div className="object-list-title"><b>{activeObject.name}</b><button onClick={() => { setWorld((current) => ({ ...current, objects: current.objects.filter((item) => item.id !== activeObject.id) })); setSelectedObject(""); }}>Delete</button></div>
+                <div className="object-list-title"><b>{activeObject.name}</b><button onClick={() => { commitWorld((current) => ({ ...current, objects: current.objects.filter((item) => item.id !== activeObject.id) })); setSelectedObject(""); }}>Delete</button></div>
                 <label className="field-label">Position X <b>{activeObject.x.toFixed(1)}</b><input type="range" min={-world.world.width / 2 + 2} max={world.world.width / 2 - 2} step=".5" value={activeObject.x} onChange={(event) => updateObject({ x: Number(event.target.value) })}/></label>
                 <label className="field-label">Position Z <b>{activeObject.z.toFixed(1)}</b><input type="range" min={-world.world.depth / 2 + 2} max={world.world.depth / 2 - 2} step=".5" value={activeObject.z} onChange={(event) => updateObject({ z: Number(event.target.value) })}/></label>
                 <label className="field-label">Scale <b>{activeObject.scale.toFixed(2)}×</b><input type="range" min=".25" max="3" step=".05" value={activeObject.scale} onChange={(event) => updateObject({ scale: Number(event.target.value) })}/></label>
                 <div className="rotate-row"><span>Rotation</span><button onClick={() => rotateSelected(-15)}>−15°</button><b>{activeObject.rotation}°</b><button onClick={() => rotateSelected(15)}>＋15°</button></div>
-                <button className="button secondary full-width" onClick={() => { const duplicate = { ...activeObject, id: "obj-" + Math.random().toString(36).slice(2, 10), name: activeObject.name + " copy", x: activeObject.x + 3, z: activeObject.z + 3 }; setWorld((current) => ({ ...current, objects: [...current.objects, duplicate] })); setSelectedObject(duplicate.id); }}>Duplicate object</button>
+                <button className="button secondary full-width" onClick={() => { const duplicate = { ...activeObject, id: "obj-" + Math.random().toString(36).slice(2, 10), name: activeObject.name + " copy", x: activeObject.x + 3, z: activeObject.z + 3 }; commitWorld((current) => ({ ...current, objects: [...current.objects, duplicate] })); setSelectedObject(duplicate.id); }}>Duplicate object</button>
               </div>}
             </>}
           </aside>
