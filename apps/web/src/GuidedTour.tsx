@@ -27,7 +27,7 @@ export default function GuidedTour({ onStart }: Props) {
   const persist = useCallback(async (next: TourRecord) => {
     setRecord(next);
     localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY) ?? "";
     if (!token) return;
     try {
       await fetch(API + "/api/v1/profile/tour", {
@@ -113,8 +113,11 @@ export default function GuidedTour({ onStart }: Props) {
     const target = document.querySelector(step.target) as HTMLElement | null;
     if (!target) return;
     const onTarget = () => { if (stepIndex < NEXORA_TOUR.length - 1) next(); };
-    target.addEventListener("click", onTarget, { once: true });
-    return () => target.removeEventListener("click", onTarget);
+    const fileInput = step.id === "video" ? target.querySelector('input[type="file"]') : null;
+    const eventTarget: HTMLElement = fileInput ?? target;
+    const eventName = fileInput ? "change" : "click";
+    eventTarget.addEventListener(eventName, onTarget, { once: true });
+    return () => eventTarget.removeEventListener(eventName, onTarget);
   }, [active, step, stepIndex]);
 
   async function finish(skipped: boolean) {
