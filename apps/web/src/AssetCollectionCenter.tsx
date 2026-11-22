@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 import AvatarPreview from "./AvatarPreview";
 
 type Asset = {
@@ -36,8 +37,8 @@ export default function AssetCollectionCenter({ projectId, api }: Props) {
     setBusy(true); setError("");
     try {
       const [assetResponse, worldResponse] = await Promise.all([
-        fetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets"),
-        fetch(api + "/api/projects/" + encodeURIComponent(projectId) + "/world")
+        localAgentFetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets"),
+        localAgentFetch(api + "/api/projects/" + encodeURIComponent(projectId) + "/world")
       ]);
       if (!assetResponse.ok) {
         const body = await assetResponse.json().catch(() => ({}));
@@ -78,7 +79,7 @@ export default function AssetCollectionCenter({ projectId, api }: Props) {
       data.append("kind", kind);
       data.append("license_name", "Creator confirms usage rights");
       data.append("source", "creator-upload");
-      const response = await fetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets", { method: "POST", body: data });
+      const response = await localAgentFetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets", { method: "POST", body: data });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail?.message || body.detail || "Upload failed with HTTP " + response.status);
       setNotice("Uploaded " + file.name + " and registered it in the project library.");
@@ -93,7 +94,7 @@ export default function AssetCollectionCenter({ projectId, api }: Props) {
     if (!window.confirm("Delete " + asset.filename + " from this project?")) return;
     setBusy(true);
     try {
-      const response = await fetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets/" + encodeURIComponent(asset.id), { method: "DELETE" });
+      const response = await localAgentFetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets/" + encodeURIComponent(asset.id), { method: "DELETE" });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail || "Asset deletion failed.");
       if (selected?.id === asset.id) setSelected(null);
