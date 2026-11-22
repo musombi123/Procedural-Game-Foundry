@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 type Props = { projectId: string; api: string; ready: boolean; busy: boolean; onBuilt: () => void };
 export default function AssemblyFoundry({ projectId, api, ready, busy, onBuilt }: Props) {
   const [working, setWorking] = useState(false);
@@ -8,7 +9,7 @@ export default function AssemblyFoundry({ projectId, api, ready, busy, onBuilt }
     setWorking(true);
     setMessage("Importing approved GLB assets, wiring gameplay and validating the Godot runtime…");
     try {
-      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/assembly/build", { method: "POST" });
+      const response = await localAgentFetch(api + "/api/projects/" + projectId + "/movie-pipeline/assembly/build", { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Godot assembly failed");
       setCounts({ missions: data.mission_count, objectives: data.objective_count, actors: data.actor_count, props: data.prop_count, audio: data.audio_effect_count });
