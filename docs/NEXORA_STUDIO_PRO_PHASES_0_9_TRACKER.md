@@ -134,3 +134,20 @@ Existing controls include owner-bound project operations, path traversal/symlink
 - [ ] No Render/server storage or processing of source videos, project assets, generated game files or exports is introduced.
 
 This tracker deliberately separates existing foundations, code delivered in this branch, and uncompleted acceptance gates. A feature is not considered complete because a route, UI label or architecture document exists.
+
+
+## Phase 4 implementation setup and verification
+
+The Internal IDE and Monetization Center require the NEXORA Local Agent to be running and paired in the same browser session. The web app calls the loopback agent at `http://127.0.0.1:8765/engine` by default; set `VITE_NEXORA_LOCAL_AGENT` only when the local agent uses a different loopback URL.
+
+The paired Local Agent token is held in browser component state and sent only to the loopback agent. The Local Agent resolves it in memory and substitutes the associated account credential for the mounted engine request; the account credential is not returned to the browser or written to project files.
+
+Suggested checks:
+- `pytest -q tests/test_nexora_desktop_factory.py`
+- `cd apps/web && npm ci && npm run build`
+- Pair the local agent, select a locally owned project, create and edit a small `.gd` file, then verify a stale file hash returns HTTP 409 rather than overwriting newer changes.
+- Open Monetization, enable analytics only, save, restart the local agent, reconnect and verify the local manifest is retained.
+- Try an invalid AdMob app ID and an unsupported placement; the API must reject both with HTTP 422.
+- Configure the four sponsor environment variables with an HTTPS destination and verify the sponsored card is labelled, dismissible and hidden when the required fields are absent.
+
+The current sponsor slot is first-party configuration, not a general advertiser self-service console. No third-party ad network, campaign bidding, impression/click tracking, payouts or external billing integration is implemented in this phase.
