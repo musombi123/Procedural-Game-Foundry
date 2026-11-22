@@ -16,7 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PASSWORD_ROUNDS = 310_000
@@ -372,12 +372,11 @@ class TourProgressPayload(BaseModel):
     skipped: bool = False
     last_step: int = Field(default=0, ge=0, le=100)
 
-    @field_validator("skipped")
-    @classmethod
-    def finished_states_are_exclusive(cls, value: bool, info):
-        if value and info.data.get("completed"):
+    @model_validator(mode="after")
+    def finished_states_are_exclusive(self):
+        if self.completed and self.skipped:
             raise ValueError("Tour progress cannot be both completed and skipped.")
-        return value
+        return self
 
 
 def _account_id(request: Request) -> str:
