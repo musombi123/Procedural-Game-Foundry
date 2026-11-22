@@ -328,21 +328,60 @@ def _sync_editor_scene_to_world(folder: Path, definition: Any, state: dict) -> W
     return result
 
 def _asset_rows(folder: Path) -> list[dict]:
+    """Return both registered uploads and generated movie-pipeline artifacts.
+
+    Pipeline outputs historically lived under movie_pipeline/ while the Asset
+    Collection Center only queried AssetRegistry under assets/. Include those
+    real generated files without copying them or creating a second registry.
+    """
     records = AssetRegistry(folder / "assets").list()
-    output = []
+    output: list[dict] = []
+    seen_paths: set[str] = set()
     for item in records:
-        path = Path(item["path"]).name
-        file_path = (folder / "assets" / path).resolve()
-        if not file_path.is_file():
+        relative = Path(str(item.get("path") or ""))
+        file_path = (folder / "assets" / relative).resolve()
+        asset_root = (folder / "assets").resolve()
+        if asset_root not in file_path.parents or not file_path.is_file():
             continue
+        seen_paths.add(file_path)
         output.append({
-            "id": item["asset_id"], "filename": path,
-            "content_type": mimetypes.guess_type(path)[0] or "application/octet-stream",
+            "id": item["asset_id"], "filename": relative.name,
+            "content_type": mimetypes.guess_type(relative.name)[0] or "application/octet-stream",
             "size": file_path.stat().st_size, "created_at": datetime.fromtimestamp(file_path.stat().st_mtime, timezone.utc).isoformat(),
             "status": "ready" if item.get("metadata",{}).get("validation",{}).get("valid", True) else "failed",
             "kind": item.get("kind"), "license": item.get("license"),
             "sha256": item.get("checksum"), "metadata": item.get("metadata",{}),
+            "origin": "project-library",
         })
+
+    generated_root = (folder / "movie_pipeline").resolve()
+    supported = {".glb", ".gltf", ".wav", ".ogg", ".mp3", ".png", ".jpg", ".jpeg", ".webp"}
+    if generated_root.is_dir():
+        for generated in sorted(generated_root.rglob("*")):
+            if not generated.is_file() or generated.suffix.lower() not in supported:
+                continue
+            resolved = generated.resolve()
+            if generated_root not in resolved.parents or resolved in seen_paths:
+                continue
+            relative = resolved.relative_to(folder.resolve()).as_posix()
+            digest = __import__("hashlib").sha256(relative.encode("utf-8")).hexdigest()[:16]
+            parts = Path(relative).parts
+            stage = parts[1] if len(parts) > 1 else "generated"
+            kind = {
+                "player": "character", "environment": "environment",
+                "actors_props": "prop", "audio": "audio", "gameplay": "gameplay",
+                "assembly": "game",
+            }.get(stage, "generated")
+            output.append({
+                "id": "generated-" + digest, "filename": generated.name,
+                "content_type": mimetypes.guess_type(generated.name)[0] or "application/octet-stream",
+                "size": generated.stat().st_size,
+                "created_at": datetime.fromtimestamp(generated.stat().st_mtime, timezone.utc).isoformat(),
+                "status": "ready" if generated.stat().st_size > 0 else "failed",
+                "kind": kind, "license": "NEXORA-generated",
+                "sha256": None, "metadata": {"relative_path": relative, "stage": stage},
+                "origin": "movie-pipeline",
+            })
     return output
 
 def _write_export_presets(game: Path, targets: list[tuple[str,str,str]], android: dict | None = None, preserve_existing: bool = False) -> dict[str, str]:
@@ -1136,9 +1175,21 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         except FileNotFoundError: raise HTTPException(404,"Project not found")
         _assert_owner(folder,request)
         item=next((row for row in AssetRegistry(folder/"assets").list() if row.get("asset_id")==asset_id),None)
-        if not item: raise HTTPException(404,"Asset not found")
-        path=(folder/"assets"/Path(item["path"]).name).resolve()
-        if folder.resolve() not in path.parents or not path.is_file(): raise HTTPException(404,"Asset file not found")
+        if item:
+            path=(folder/"assets"/Path(item["path"]).resolve()).resolve()
+            if (folder/"assets").resolve() not in path.parents or not path.is_file():
+                raise HTTPException(404,"Asset file not found")
+        elif re.fullmatch(r"generated-[a-f0-9]{16}", asset_id):
+            matches = [row for row in _asset_rows(folder) if row.get("id") == asset_id and row.get("origin") == "movie-pipeline"]
+            if not matches:
+                raise HTTPException(404,"Generated asset not found")
+            relative = Path(str(matches[0].get("metadata",{}).get("relative_path") or ""))
+            generated_root = (folder/"movie_pipeline").resolve()
+            path = (folder/relative).resolve()
+            if generated_root not in path.parents or not path.is_file():
+                raise HTTPException(404,"Generated asset file not found")
+        else:
+            raise HTTPException(404,"Asset not found")
         return FileResponse(path,media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",filename=path.name)
 
     @router.delete("/api/v1/workspace/projects/{pid}/assets/{asset_id}")
