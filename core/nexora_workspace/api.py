@@ -336,7 +336,7 @@ def _asset_rows(folder: Path) -> list[dict]:
     """
     records = AssetRegistry(folder / "assets").list()
     output: list[dict] = []
-    seen_paths: set[str] = set()
+    seen_paths: set[Path] = set()
     for item in records:
         relative = Path(str(item.get("path") or ""))
         file_path = (folder / "assets" / relative).resolve()
@@ -1176,7 +1176,7 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         _assert_owner(folder,request)
         item=next((row for row in AssetRegistry(folder/"assets").list() if row.get("asset_id")==asset_id),None)
         if item:
-            path=(folder/"assets"/Path(item["path"]).resolve()).resolve()
+            path=(folder/"assets"/Path(item["path"])).resolve()
             if (folder/"assets").resolve() not in path.parents or not path.is_file():
                 raise HTTPException(404,"Asset file not found")
         elif re.fullmatch(r"generated-[a-f0-9]{16}", asset_id):
