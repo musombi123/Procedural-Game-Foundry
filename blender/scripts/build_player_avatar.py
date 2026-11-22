@@ -199,22 +199,36 @@ def build(args):
     rig["proportions_json"]=json.dumps(p)
     # Build authored idle and walk cycles; store both as NLA strips for GLB export.
     rig.animation_data_create()
-    idle=bpy.data.actions.new("PGF_Idle"); rig.animation_data.action=idle
+    idle=bpy.data.actions.new("PGF_Idle")
+    rig.animation_data.action=idle
     for frame,breath in ((1,0.0),(12,.025),(24,0.0)):
         spine=rig.pose.bones["spine"]; spine.rotation_mode="XYZ"; spine.rotation_euler=(breath,0,0)
         spine.keyframe_insert(data_path="rotation_euler",frame=frame,group="spine")
         head=rig.pose.bones["head"]; head.rotation_mode="XYZ"; head.rotation_euler=(0,0,math.sin(frame/24*math.pi)*.025)
         head.keyframe_insert(data_path="rotation_euler",frame=frame,group="head")
+    # Blender 4.4+ uses slotted Actions. Preserve the active slot when moving
+    # the action into an NLA strip; Blender 5 otherwise exports a strip with a
+    # None action_slot and aborts glTF animation gathering.
+    idle_slot=getattr(rig.animation_data,"action_slot",None)
     rig.animation_data.action=None
-    track=rig.animation_data.nla_tracks.new(); track.name="PGF_Idle"; strip=track.strips.new("PGF_Idle",1,idle)
+    track=rig.animation_data.nla_tracks.new(); track.name="PGF_Idle"
+    strip=track.strips.new("PGF_Idle",1,idle)
+    if idle_slot is not None and hasattr(strip,"action_slot"):
+        strip.action_slot=idle_slot
+
     walk=bpy.data.actions.new("PGF_Walk")
+    rig.animation_data.action=walk
     for frame,phase in ((1,0),(7,math.pi/2),(13,math.pi),(19,3*math.pi/2),(25,2*math.pi)):
         for name,offset in (("upper_arm.L",0),("upper_arm.R",math.pi),("thigh.L",math.pi),("thigh.R",0)):
             pose=rig.pose.bones[name]; pose.rotation_mode="XYZ"
             pose.rotation_euler=(math.sin(phase+offset)*.42,0,0)
             pose.keyframe_insert(data_path="rotation_euler",frame=frame,group=name)
+    walk_slot=getattr(rig.animation_data,"action_slot",None)
+    rig.animation_data.action=None
     walk_track=rig.animation_data.nla_tracks.new(); walk_track.name="PGF_Walk"
     walk_strip=walk_track.strips.new("PGF_Walk",1,walk)
+    if walk_slot is not None and hasattr(walk_strip,"action_slot"):
+        walk_strip.action_slot=walk_slot
     bpy.context.scene.frame_start=1; bpy.context.scene.frame_end=25
     # Export skinned avatar, armature and both animation strips.
     bpy.ops.object.select_all(action="DESELECT"); body.select_set(True); rig.select_set(True); bpy.context.view_layer.objects.active=rig
