@@ -23,11 +23,22 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
       setAgent("offline");
       setState("not-connected");
       setProfile(null);
-      setMessage("Local Agent not detected. Install and start the NEXORA PC app, then retry.");
+      setMessage("Local Agent not detected. Install and start the NEXORA PC app, then retry. Browser recovery copies remain available.");
     }
   }, []);
 
-  useEffect(() => { void checkHealth(); }, [checkHealth]);
+  useEffect(() => {
+    void checkHealth();
+    const poll = window.setInterval(() => { void checkHealth(); }, 8000);
+    const onExpired = () => {
+      sessionStorage.removeItem("nexora:local-agent-token");
+      setState("permission");
+      setProfile(null);
+      setMessage("Your PC session expired. Pair this browser again; unsynced edits remain in the browser recovery copy.");
+    };
+    window.addEventListener("nexora:local-agent-session-expired", onExpired);
+    return () => { window.clearInterval(poll); window.removeEventListener("nexora:local-agent-session-expired", onExpired); };
+  }, [checkHealth]);
 
   async function connect() {
     let permissionDenied = false;
