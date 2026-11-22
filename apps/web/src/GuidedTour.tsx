@@ -4,8 +4,8 @@ import { NEXORA_TOUR, NEXORA_TOUR_VERSION } from "./nexoraTourConfig";
 type TourRecord = { version: number; completed: boolean; skipped: boolean; last_step: number };
 type Props = { onStart?: () => void };
 const LOCAL_KEY = "nexora:guided-tour:v1";
-const API = (import.meta.env.VITE_NEXORA_ACCOUNT_API ?? "https://nexora-foundry-api.onrender.com").replace(/\/$/, "");
-const TOKEN_KEY = "nexora_access_token";
+const API = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "");
+const TOKEN_KEY = "nexora:local-agent-token";
 
 function readLocal(): TourRecord {
   try {
@@ -27,10 +27,10 @@ export default function GuidedTour({ onStart }: Props) {
   const persist = useCallback(async (next: TourRecord) => {
     setRecord(next);
     localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
-    const token = localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY) ?? "";
+    const token = sessionStorage.getItem(TOKEN_KEY) ?? "";
     if (!token) return;
     try {
-      await fetch(API + "/api/v1/profile/tour", {
+      await fetch(API + "/profile/tour", {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
         body: JSON.stringify(next)
@@ -46,30 +46,31 @@ export default function GuidedTour({ onStart }: Props) {
   }, [record.last_step]);
 
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      if (!record.completed && !record.skipped) begin(false);
-      return;
-    }
     let cancelled = false;
-    (async () => {
+    const loadAccountProgress = async () => {
+      const token = sessionStorage.getItem(TOKEN_KEY) ?? "";
+      if (!token) {
+        if (!record.completed && !record.skipped) begin(false);
+        return;
+      }
       try {
-        const response = await fetch(API + "/api/v1/profile/tour", { headers: { Authorization: "Bearer " + token } });
-        if (!response.ok) throw new Error("Tour profile unavailable");
+        const response = await fetch(API + "/profile/tour", { headers: { Authorization: "Bearer " + token } });
+        if (!response.ok) throw new Error("Account tour profile is not available");
         const payload = await response.json();
         const remote = payload.tour as TourRecord | undefined;
-        if (cancelled || !remote || remote.version !== NEXORA_TOUR_VERSION) {
-          if (!cancelled && !record.completed && !record.skipped) begin(false);
-          return;
-        }
+        if (cancelled || !remote || remote.version !== NEXORA_TOUR_VERSION) return;
         setRecord(remote);
         localStorage.setItem(LOCAL_KEY, JSON.stringify(remote));
-        if (!remote.completed && !remote.skipped) begin(false);
+        if (remote.completed || remote.skipped) setActive(false);
+        else begin(false);
       } catch {
         if (!cancelled && !record.completed && !record.skipped) begin(false);
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    void loadAccountProgress();
+    const onConnected = () => { void loadAccountProgress(); };
+    window.addEventListener("nexora:local-agent-connected", onConnected);
+    return () => { cancelled = true; window.removeEventListener("nexora:local-agent-connected", onConnected); };
   }, []);
 
   useEffect(() => {
