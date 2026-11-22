@@ -2,7 +2,7 @@
 
 ## Scope and test standard
 
-This audit was performed against the existing apps/web workspace on the nexora-workspace-productivity-tour branch. The workspace was extended in place; it was not rebuilt. Source inspection and automated CI are not substitutes for a live browser session, a paired Windows PC, or physical device testing.
+This audit was performed against the existing apps/web workspace on the feat/nexora-workspace-productivity-mainline branch. The workspace was extended in place; it was not rebuilt. Source inspection and automated CI are not substitutes for a live browser session, a paired Windows PC, or physical device testing.
 
 ## Audit status
 
