@@ -66,7 +66,7 @@ def test_nexora_auth_routes_are_registered():
     app = FastAPI()
     register_nexora_auth_routes(app)
 
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     assert "/api/v1/auth/register" in paths
     assert "/api/v1/auth/login" in paths
     assert "/api/v1/auth/me" in paths

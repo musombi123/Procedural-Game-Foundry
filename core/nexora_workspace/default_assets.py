@@ -26,7 +26,7 @@ def catalog() -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "packs": [
         {"id": key, "name": value["name"], "description": value["description"],
          "asset_types": ["character", "environment", "props", "collectibles", "ui", "audio"],
-         "license": "CC0-1.0 (original procedural assets)", "offline": True}
+         "license": "CC0-1.0", "license_note": "Original procedural assets", "offline": True}
         for key, value in PACKS.items()
     ]}
 
