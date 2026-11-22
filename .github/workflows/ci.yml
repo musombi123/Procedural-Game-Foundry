@@ -84,7 +84,7 @@ jobs:
         with:
           packages: "platform-tools"
       - name: Install Android export SDK components
-        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmdline-tools;latest"
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmdline-tools;latest" "ndk;28.2.13676358" "cmake;3.22.1"
       - uses: chickensoft-games/setup-godot@v2
         with:
           version: "4.6.1"
