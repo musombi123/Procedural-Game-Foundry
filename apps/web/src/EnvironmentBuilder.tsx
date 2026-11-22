@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 import AvatarPreview from "./AvatarPreview";
 
 type Props={projectId:string;api:string;ready:boolean;onBuilt:()=>void};
@@ -7,7 +8,7 @@ export default function EnvironmentBuilder({projectId,api,ready,onBuilt}:Props){
  async function build(){
   setBusy(true);
   try{
-   const r=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/environment/build",{method:"POST"});
+   const r=await localAgentFetch(api+"/api/projects/"+projectId+"/movie-pipeline/environment/build",{method:"POST"});
    const data=await r.json();if(!r.ok)throw new Error(data.detail??"Environment generation failed");
    setAsset(data.glb_scene);setMessage("3D world generated: "+data.landmarks+" landmarks and "+data.props+" props. Inspect and approve the Environment stage.");onBuilt();
   }catch(e){setMessage(e instanceof Error?e.message:"Environment generation failed");}
