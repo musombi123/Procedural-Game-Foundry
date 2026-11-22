@@ -112,3 +112,16 @@
 @media(max-width:1000px){.monetization-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:780px){.monetization-hero{flex-direction:column}.monetization-agent{min-width:100%;width:100%}.monetization-form-grid{grid-template-columns:1fr}.placement-list{grid-template-columns:1fr}}
 @media(max-width:440px){.monetization-agent{grid-template-columns:1fr}.monetization-agent label{grid-column:auto}.monetization-agent .button{width:100%}.monetization-grid{grid-template-columns:1fr}.monetization-card p{min-height:0}}
+
+
+/* Admin-configured sponsored discovery placement. Hidden unless all sponsor fields are configured. */
+.studio-sponsor-slot{position:relative;display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:16px;padding:17px 46px 17px 18px;border:1px solid #3a4b65;border-radius:12px;background:linear-gradient(105deg,#121e30,#17263a)}
+.studio-sponsor-copy{display:grid;gap:6px;min-width:0}
+.studio-sponsored-label{color:#c6ad79;font:8px "DM Mono",monospace;letter-spacing:1.3px}
+.studio-sponsor-copy b{color:#dce8fb;font-size:12px}
+.studio-sponsor-copy p{margin:0;color:#9aabc4;font-size:10px;line-height:1.6}
+.studio-sponsor-copy a{width:max-content;color:#9dc0ff;font-size:9px;text-decoration:none}
+.studio-sponsor-copy a:hover{text-decoration:underline}
+.studio-sponsor-slot img{width:110px;height:70px;object-fit:cover;border-radius:8px;border:1px solid #40536f}
+.studio-sponsor-slot>button{position:absolute;right:12px;top:9px;border:0;background:transparent;color:#91a1b9;font-size:19px}
+@media(max-width:520px){.studio-sponsor-slot img{width:72px;height:58px}}
