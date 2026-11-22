@@ -76,13 +76,19 @@ export default function App() {
       setSelectedObject("");
       setStatus("World loaded · seed " + document.seed);
     } catch {
+      const cached = localStorage.getItem("nexora:world-recovery:" + projectId);
       const project = projects.find((item) => item.id === projectId);
-      const fallback = initialWorld(project?.project.seed ?? 784215);
+      let fallback: WorldDocument;
+      try {
+        fallback = cached ? JSON.parse(cached) as WorldDocument : initialWorld(project?.project.seed ?? 784215);
+      } catch {
+        fallback = initialWorld(project?.project.seed ?? 784215);
+      }
       worldRef.current = fallback; undoStack.current = []; redoStack.current = [];
       setWorld(fallback);
       setLoadedProjectId(projectId);
-      setSaveStatus("Offline · local recovery copy only");
-      setStatus("Local preview active · API unavailable");
+      setSaveStatus(cached ? "Recovered local draft · reconnect to sync" : "Offline · no recovery copy found");
+      setStatus(cached ? "Recovered this project's latest browser copy" : "Local preview active · API unavailable");
     }
   }
   useEffect(() => { void refresh(); }, []);
@@ -214,8 +220,11 @@ export default function App() {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(world)
       });
       if (!response.ok) throw new Error((await response.json()).detail ?? "Save failed");
+      setSaveStatus("All changes saved");
       setStatus("Scene saved · " + world.objects.length + " placed object(s)");
     } catch {
+      try { localStorage.setItem("nexora:world-recovery:" + selected, JSON.stringify(world)); } catch { /* recovery cache unavailable */ }
+      setSaveStatus("Recovery copy saved in this browser · reconnect to sync to the PC project folder");
       setStatus("Preview updated locally · Foundry API is required to persist this scene");
     } finally { setBusy(false); }
   }
