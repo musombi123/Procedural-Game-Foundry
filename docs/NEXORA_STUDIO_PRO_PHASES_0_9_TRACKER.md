@@ -53,6 +53,27 @@ No browser-only claim is made that a web tab can reserve or safely govern all de
 
 The paired desktop API now reads and writes an owner-checked, project-local ordered level manifest with unique IDs, difficulty, draft/testing/approved state, and shared asset IDs. The manifest is stored under the local project `.nexora/levels.json`; no game content is uploaded to Render. Tests cover ordering, shared asset de-duplication, invalid IDs/states/difficulties and the 100-level limit. Remaining work: Level Manager UI, level duplication/deletion/reordering controls, level-specific scene state and multi-level export/resume integration.
 
+## User-requested Phase 4 — Internal IDE, game monetization, in-Studio ads and premium UI
+
+**Status: implementation started; SDK integration and full acceptance remain.**
+
+Delivered in branch `nexora-studio-pro-phase-4`:
+- Added a local-first Internal IDE screen with file explorer, text editing, create-file, save, dirty-state handling and Ctrl/Cmd+S. File creation is exclusive (no overwrite), limited to 2 MiB and restricted to supported text formats. Existing file writes use SHA-256 optimistic concurrency checks.
+- Routed IDE requests through the paired Local Agent's `/engine` mount. The Local Agent translates its short-lived pairing token to the paired cloud credential only inside the loopback process before the engine's account/owner middleware runs.
+- Added a validated, owner-scoped game monetization manifest saved locally at `.nexora/monetization.json`. Supported configuration switches: local analytics schema, rewarded ads, in-app purchases and premium content. Ad configuration supports AdMob identifiers, explicit placements, mandatory consent and test-mode default.
+- Added a Monetization Center UI to configure the project manifest.
+- Added an in-Studio sponsored placement slot. It is hidden unless an administrator configures all sponsor fields at build/deploy time; it labels the placement as sponsored, accepts HTTPS destinations only, supports optional HTTPS artwork, and can be dismissed.
+- Added responsive premium styling for the IDE and monetization screens.
+- Added tests for safe monetization defaults, supported placements, provider validation and AdMob app ID format.
+
+Configuration for the in-Studio sponsor slot:
+- `VITE_NEXORA_SPONSOR_NAME`
+- `VITE_NEXORA_SPONSOR_MESSAGE`
+- `VITE_NEXORA_SPONSOR_URL` (HTTPS only)
+- `VITE_NEXORA_SPONSOR_IMAGE` (optional HTTPS image)
+
+Important boundary: this is a first-party sponsored slot, not a third-party ad exchange or automatic campaign marketplace. No ad impression/click tracking or advertiser payouts are implemented. Game monetization is currently configuration and validation only; AdMob and Google Play Billing SDKs are not bundled and no live ads or purchases are processed. These require platform-specific SDK work, consent/age/privacy review, publisher accounts and device acceptance. The manifest is stored on the creator's computer and is not uploaded to Render.
+
 ## Phase 4 — Export Center
 
 **Status: local build foundations exist; Studio Pro Export Center UI and acceptance remain.**
