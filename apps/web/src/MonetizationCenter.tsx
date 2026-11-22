@@ -25,7 +25,7 @@ const emptyManifest: Manifest = {
 };
 
 export default function MonetizationCenter({ projectId, projectName }: { projectId: string; projectName: string }) {
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => sessionStorage.getItem("nexora:local-agent-token") ?? "");
   const [manifest, setManifest] = useState<Manifest>(emptyManifest);
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
