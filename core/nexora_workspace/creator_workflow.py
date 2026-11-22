@@ -279,12 +279,12 @@ def _find_payment(manager: Any, payment_id: str) -> dict | None:
 
 def _payment_expired(record: dict) -> bool:
     raw = record.get("expires_at")
-    if not raw:
-        created = record.get("created_at")
-        if not created:
-            return True
-        raw = (datetime.fromisoformat(str(created).replace("Z", "+00:00")) + timedelta(hours=24)).isoformat()
     try:
+        if not raw:
+            created = record.get("created_at")
+            if not created:
+                return True
+            raw = (datetime.fromisoformat(str(created).replace("Z", "+00:00")) + timedelta(hours=24)).isoformat()
         expiry = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return True
