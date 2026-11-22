@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 type Props = { projectId: string; api: string; ready: boolean; busy: boolean; onBuilt: () => void };
 const starter = {
   player: { move_speed: 5, jump_velocity: 4.5, gravity: 9.8, health: 100, inventory_capacity: 20 },
@@ -18,7 +19,7 @@ export default function GameplayFoundry({ projectId, api, ready, busy, onBuilt }
     try { spec = JSON.parse(source); } catch { setMessage("Gameplay definition is not valid JSON. Correct the syntax and try again."); return; }
     setWorking(true);
     try {
-      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/gameplay/compile", {
+      const response = await localAgentFetch(api + "/api/projects/" + projectId + "/movie-pipeline/gameplay/compile", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec)
       });
       const data = await response.json();
