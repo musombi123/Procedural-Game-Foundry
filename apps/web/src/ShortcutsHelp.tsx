@@ -11,7 +11,7 @@ export default function ShortcutsHelp({ onClose }: Props) {
         <div><span>Replay guided tour</span><kbd>Help → Take the tour</kbd></div>
       </div>
       <p>Undo/redo, create-level and export shortcuts will be listed here when those actions are available in this workspace. They are not wired yet.</p>
-      <button className="button primary" onClick={onClose}>Done</button>
+      <div className="shortcuts-actions"><button className="button secondary" onClick={() => { onClose(); window.dispatchEvent(new Event("nexora:replay-tour")); }}>Take the tour</button><button className="button primary" onClick={onClose}>Done</button></div>
     </section>
   </div>;
 }
