@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 import WorldEditor from "./WorldEditor";
 import MoviePipelinePanel from "./MoviePipelinePanel";
 import AssetCollectionCenter from "./AssetCollectionCenter";
@@ -45,7 +46,7 @@ export default function App() {
 
   async function refresh() {
     try {
-      const response = await fetch(API + "/api/projects");
+      const response = await localAgentFetch(API + "/api/projects");
       if (!response.ok) throw new Error("API returned " + response.status);
       const data = await response.json() as Project[];
       setProjects(data);
@@ -56,7 +57,7 @@ export default function App() {
   }
   async function loadWorld(projectId: string) {
     try {
-      const response = await fetch(API + "/api/projects/" + projectId + "/world");
+      const response = await localAgentFetch(API + "/api/projects/" + projectId + "/world");
       if (!response.ok) throw new Error("World load unavailable");
       const document = await response.json() as WorldDocument;
       setWorld({ ...document, terrain_edits: document.terrain_edits ?? [] });
@@ -83,7 +84,7 @@ export default function App() {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      const response = await fetch(API + "/api/projects", {
+      const response = await localAgentFetch(API + "/api/projects", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, genre: "science-fiction", dimension: "3d", seed: Math.floor(Math.random() * 1000000) })
       });
@@ -108,7 +109,7 @@ export default function App() {
     setSaveStatus("Saving changes…");
     const timer = window.setTimeout(async () => {
       try {
-        const response = await fetch(API + "/api/projects/" + encodeURIComponent(selected) + "/world", {
+        const response = await localAgentFetch(API + "/api/projects/" + encodeURIComponent(selected) + "/world", {
           method: "PUT", headers: { "Content-Type": "application/json" }, body: snapshot
         });
         if (!response.ok) throw new Error("Local project save failed");
@@ -162,7 +163,7 @@ export default function App() {
     if (!selected) { setStatus("Create or select a project before saving this world"); return; }
     setBusy(true);
     try {
-      const response = await fetch(API + "/api/projects/" + selected + "/world", {
+      const response = await localAgentFetch(API + "/api/projects/" + selected + "/world", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(world)
       });
       if (!response.ok) throw new Error((await response.json()).detail ?? "Save failed");
@@ -175,17 +176,17 @@ export default function App() {
     if (!selected) { setStatus("Create or select a project first"); return; }
     setBusy(true);
     try {
-      const saveResponse = await fetch(API + "/api/projects/" + selected + "/world", {
+      const saveResponse = await localAgentFetch(API + "/api/projects/" + selected + "/world", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(world)
       });
       if (!saveResponse.ok) throw new Error("Could not save the scene before generation");
-      const response = await fetch(API + "/api/projects/" + selected + "/generate", { method: "POST" });
+      const response = await localAgentFetch(API + "/api/projects/" + selected + "/generate", { method: "POST" });
       if (!response.ok) throw new Error("Generation request failed");
       const job = await response.json() as { id: string };
       let done = false;
       while (!done) {
         await new Promise((resolve) => window.setTimeout(resolve, 850));
-        const current = await (await fetch(API + "/api/jobs/" + job.id)).json();
+        const current = await (await localAgentFetch(API + "/api/jobs/" + job.id)).json();
         setStatus(current.progress + "% · " + current.message);
         if (["COMPLETED", "FAILED"].includes(current.state)) {
           done = true;
