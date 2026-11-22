@@ -6,6 +6,7 @@ from core.nexora_workspace.identity import (
     LoginPayload,
     NexoraIdentityUnavailable,
     RegistrationPayload,
+    TourProgressPayload,
     _connect,
     _database_url,
     hash_password,
@@ -71,3 +72,24 @@ def test_nexora_auth_routes_are_registered():
     assert "/api/v1/auth/login" in paths
     assert "/api/v1/auth/me" in paths
     assert "/api/v1/auth/logout" in paths
+    assert "/api/v1/profile/tour" in paths
+
+
+def test_tour_progress_payload_rejects_conflicting_terminal_states():
+    with pytest.raises(ValidationError):
+        TourProgressPayload.model_validate({
+            "version": 1,
+            "completed": True,
+            "skipped": True,
+            "last_step": 8,
+        })
+
+
+def test_tour_progress_payload_rejects_negative_step():
+    with pytest.raises(ValidationError):
+        TourProgressPayload.model_validate({
+            "version": 1,
+            "completed": False,
+            "skipped": False,
+            "last_step": -1,
+        })
