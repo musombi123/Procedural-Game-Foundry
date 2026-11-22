@@ -119,15 +119,21 @@ export default function GuidedTour({ onStart }: Props) {
 
   useEffect(() => {
     if (!active || !step.target) return;
+    const onTarget = () => { if (stepIndex < NEXORA_TOUR.length - 1) next(); };
+    if (step.id === "connect") {
+      window.addEventListener("nexora:local-agent-connected", onTarget, { once: true });
+      return () => window.removeEventListener("nexora:local-agent-connected", onTarget);
+    }
+    if (step.id === "video") {
+      const onFileSelected = (event: Event) => {
+        const input = event.target;
+        if (input instanceof HTMLInputElement && input.type === "file" && input.closest('[data-tour="upload-video"]')) onTarget();
+      };
+      document.addEventListener("change", onFileSelected, true);
+      return () => document.removeEventListener("change", onFileSelected, true);
+    }
     const target = document.querySelector(step.target) as HTMLElement | null;
     if (!target) return;
-    const onTarget = () => { if (stepIndex < NEXORA_TOUR.length - 1) next(); };
-    if (step.id === "video") {
-      const fileInput = target.querySelector('input[type="file"]');
-      if (!fileInput) return;
-      fileInput.addEventListener("change", onTarget, { once: true });
-      return () => fileInput.removeEventListener("change", onTarget);
-    }
     target.addEventListener("click", onTarget, { once: true });
     return () => target.removeEventListener("click", onTarget);
   }, [active, step, stepIndex]);
