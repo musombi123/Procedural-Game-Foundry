@@ -74,6 +74,12 @@ export default function GuidedTour({ onStart }: Props) {
   }, []);
 
   useEffect(() => {
+    const replay = () => begin(false);
+    window.addEventListener("nexora:replay-tour", replay);
+    return () => window.removeEventListener("nexora:replay-tour", replay);
+  }, [begin]);
+
+  useEffect(() => {
     if (!active) return;
     const update = () => {
       const target = step.target ? document.querySelector(step.target) as HTMLElement | null : null;
@@ -83,11 +89,13 @@ export default function GuidedTour({ onStart }: Props) {
       } else setRect(null);
     };
     const timer = window.setTimeout(update, 80);
-    const observer = new ResizeObserver(update);
-    observer.observe(document.body);
+    const resizeObserver = new ResizeObserver(update);
+    resizeObserver.observe(document.body);
+    const mutationObserver = new MutationObserver(update);
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
-    return () => { window.clearTimeout(timer); observer.disconnect(); window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
+    return () => { window.clearTimeout(timer); resizeObserver.disconnect(); mutationObserver.disconnect(); window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
   }, [active, step]);
 
   useEffect(() => {
@@ -114,11 +122,14 @@ export default function GuidedTour({ onStart }: Props) {
     const target = document.querySelector(step.target) as HTMLElement | null;
     if (!target) return;
     const onTarget = () => { if (stepIndex < NEXORA_TOUR.length - 1) next(); };
-    const fileInput = step.id === "video" ? target.querySelector('input[type="file"]') : null;
-    const eventTarget: HTMLElement = fileInput ?? target;
-    const eventName = fileInput ? "change" : "click";
-    eventTarget.addEventListener(eventName, onTarget, { once: true });
-    return () => eventTarget.removeEventListener(eventName, onTarget);
+    if (step.id === "video") {
+      const fileInput = target.querySelector('input[type="file"]');
+      if (!fileInput) return;
+      fileInput.addEventListener("change", onTarget, { once: true });
+      return () => fileInput.removeEventListener("change", onTarget);
+    }
+    target.addEventListener("click", onTarget, { once: true });
+    return () => target.removeEventListener("click", onTarget);
   }, [active, step, stepIndex]);
 
   async function finish(skipped: boolean) {
