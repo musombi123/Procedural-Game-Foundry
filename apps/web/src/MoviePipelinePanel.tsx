@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 import StoryBuilderPanel from "./StoryBuilderPanel";
 import PlayerAvatarBuilder from "./PlayerAvatarBuilder";
 import EnvironmentBuilder from "./EnvironmentBuilder";
@@ -24,7 +25,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
   const [message, setMessage] = useState("Loading production pipeline…");
   const refresh = useCallback(async () => {
     try {
-      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline");
+      const response = await localAgentFetch(api + "/api/projects/" + projectId + "/movie-pipeline");
       if (response.status === 404) { setPipeline(null); setMessage("No movie-to-game pipeline created for this project yet."); return; }
       if (!response.ok) throw new Error("Could not load pipeline");
       setPipeline(await response.json() as Pipeline);
@@ -35,7 +36,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
   async function create() {
     setBusy(true);
     try {
-      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline", {
+      const response = await localAgentFetch(api + "/api/projects/" + projectId + "/movie-pipeline", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rights: { has_video_rights: rights[0], has_photo_rights: rights[1], likeness_consent: rights[2], accepts_original_assets_only: rights[3] } })
       });
@@ -50,7 +51,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
     setBusy(true);
     try {
       const form = new FormData(); form.append("file", file);
-      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/source/" + kind, { method: "POST", body: form });
+      const response = await localAgentFetch(api + "/api/projects/" + projectId + "/movie-pipeline/source/" + kind, { method: "POST", body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Upload failed");
       await refresh(); setMessage(kind === "photo" ? "Player portrait uploaded and verified" : "Movie uploaded and verified");
@@ -60,13 +61,13 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
   async function runAnalysis() {
     setBusy(true);
     try {
-      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/analysis/run", { method: "POST" });
+      const response = await localAgentFetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/analysis/run", { method: "POST" });
       const queued = await response.json();
       if (!response.ok) throw new Error(queued.detail ?? "Could not start media analysis");
       setMessage("Local media analysis running · extracting metadata and keyframes…");
       for (let attempt = 0; attempt < 240; attempt++) {
         await new Promise(resolve => window.setTimeout(resolve, 1500));
-        const jobResponse = await fetch(api + "/api/jobs/" + queued.id);
+        const jobResponse = await localAgentFetch(api + "/api/jobs/" + queued.id);
         if (!jobResponse.ok) throw new Error("Could not read media analysis job status");
         const job = await jobResponse.json();
         if (job.state === "COMPLETED") {
@@ -83,7 +84,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
   async function stageAction(stage: string, action: "approve" | "regenerate") {
     setBusy(true);
     try {
-      const response = await fetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/" + stage + "/" + action, {
+      const response = await localAgentFetch(api + "/api/projects/" + projectId + "/movie-pipeline/stages/" + stage + "/" + action, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: "Approved in creator studio" })
       });
       const data = await response.json();
