@@ -34,12 +34,13 @@ Generated entries are currently read-only in the collection. Deletion is not exp
 
 ## Phase 2 — Local Engine and device readiness
 
-**Status: existing pairing/hardware foundation plus local consent-policy API committed; enforcement and runtime monitoring remain.**
+**Status: local consent API and a fail-closed production workload gate are implemented; UI and runtime controls remain.**
 
 Existing implementation includes a paired loopback agent, pairing authority, local-only execution policy, selected project root, hardware/toolchain inventory and workload preflight. The hosted API rejects local-compute-only production routes.
 
 Remaining work:
-- Explicit first-run Device Access Bond with purpose and permission summary.
+- First-run Device Access Bond UI with purpose and permission summary.
+- Enforce the stored consent before every production workload path; current workload preflight now blocks local production work unless the paired Local Agent bond is enabled and returns the selected CPU/RAM/GPU ceilings.
 - User-adjustable CPU/RAM/GPU workload ceilings and a visible pause/resume control.
 - Runtime resource telemetry and a revocation workflow.
 - Signed installer/update acceptance and Windows hardware acceptance.
@@ -48,9 +49,9 @@ No browser-only claim is made that a web tab can reserve or safely govern all de
 
 ## Phase 3 — Level Manager
 
-**Status: not implemented as a first-class project-level feature.**
+**Status: local project manifest API implemented; Studio UI and export integration remain.**
 
-The current movie pipeline supports episode/stage concepts, but the standard workspace does not yet expose the requested Level 1, Level 2+ lifecycle, reorder, difficulty, shared asset references and multi-level export manifest.
+The paired desktop API now reads and writes an owner-checked, project-local ordered level manifest with unique IDs, difficulty, draft/testing/approved state, and shared asset IDs. The manifest is stored under the local project `.nexora/levels.json`; no game content is uploaded to Render. Tests cover ordering, shared asset de-duplication, invalid IDs/states/difficulties and the 100-level limit. Remaining work: Level Manager UI, level duplication/deletion/reordering controls, level-specific scene state and multi-level export/resume integration.
 
 ## Phase 4 — Export Center
 
@@ -76,7 +77,7 @@ Remaining work:
 - Server-enforced gating for every paid export target, not only Creator Flow generation actions.
 - Receipts and export history metadata.
 
-A user-submitted transaction code is not proof of payment and must never activate an entitlement by itself.
+A user-submitted transaction code is not proof of payment and must never activate an entitlement by itself. The privileged verification endpoint now also requires the independent merchant-side received-payment code and amount; it compares the normalized transaction code exactly with the customer's claim and checks the invoice amount before activation.
 
 ## Phase 6 — Plans and monetization add-ons
 
