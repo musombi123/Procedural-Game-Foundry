@@ -18,7 +18,7 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
       const response = await fetch(AGENT + "/health", { signal: AbortSignal.timeout(2500) });
       if (!response.ok) throw new Error("Agent health check failed");
       setAgent("running");
-      setMessage("Local Agent detected. Connect with the short-lived pairing token from your PC pairing flow.");
+      setMessage(current => current.startsWith("PC connected") || current.startsWith("Your PC session expired") ? current : "Local Agent detected. Connect with the short-lived pairing token from your PC pairing flow.");
     } catch {
       setAgent("offline");
       setState("not-connected");
