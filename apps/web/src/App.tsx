@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { localAgentFetch } from "./localAgentFetch";
+import { localAgentBase, localAgentFetch } from "./localAgentFetch";
 import WorldEditor from "./WorldEditor";
 import MoviePipelinePanel from "./MoviePipelinePanel";
 import AssetCollectionCenter from "./AssetCollectionCenter";
@@ -13,7 +13,7 @@ import ShortcutsHelp from "./ShortcutsHelp";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
-const API = (import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8765/engine").replace(/\/$/, "");
+const API = localAgentBase(import.meta.env.VITE_PGF_API, "http://127.0.0.1:8765/engine");
 const initialWorld = (seed: number): WorldDocument => ({
   seed,
   world: { width: 96, depth: 96, resolution: 64, amplitude: 9, frequency: 0.055, biomes: ["rocky-desert", "alien-forest"], weather: true },
