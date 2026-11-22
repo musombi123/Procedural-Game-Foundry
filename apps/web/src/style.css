@@ -171,3 +171,11 @@
 .tour-upload-placeholder b{font-size:11px}.tour-upload-placeholder p{margin:4px 0 0;color:#91a6c4;font-size:9px;line-height:1.5}
 .shortcuts-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 @media(max-width:780px){.tour-upload-placeholder{align-items:flex-start;flex-direction:column}.tour-upload-placeholder .button{width:100%}}
+
+.project-checklist{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:18px 0;padding:13px;border:1px solid #293d59;border-radius:10px;background:#0b1524}
+.project-check{display:flex;align-items:flex-start;gap:8px;min-width:0;padding:8px;border:1px solid #263a55;border-radius:7px;background:#101d30}
+.project-check>span{color:#7d91ad;font-size:13px}.project-check.done>span{color:#79d5a5}
+.project-check>div{display:grid;gap:4px;min-width:0}.project-check b{color:#d7e5f8;font-size:9px}.project-check small{color:#879ab6;font-size:8px;line-height:1.45}
+.pc-bond-details{display:grid;gap:4px;margin-top:10px;padding-top:9px;border-top:1px solid #293d57;color:#c7d8f0;font-size:9px}.pc-bond-details span{color:#a9bedc;font:9px "DM Mono",monospace}.pc-bond-details small{color:#8398b6;font-size:8px}
+@media(max-width:780px){.project-checklist{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:440px){.project-checklist{grid-template-columns:1fr}}
