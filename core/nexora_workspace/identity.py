@@ -86,6 +86,18 @@ def ensure_identity_schema() -> None:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_nexora_sessions_expiry ON nexora_sessions(expires_at)"
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS nexora_account_tour_progress (
+                    user_id TEXT PRIMARY KEY REFERENCES nexora_accounts(id) ON DELETE CASCADE,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    completed BOOLEAN NOT NULL DEFAULT FALSE,
+                    skipped BOOLEAN NOT NULL DEFAULT FALSE,
+                    last_step INTEGER NOT NULL DEFAULT 0 CHECK (last_step >= 0),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -351,6 +363,98 @@ def register_nexora_auth_routes(app: Any) -> None:
         if not user or user.get("id") == "local":
             raise HTTPException(status_code=401, detail="Sign in to your NEXORA account.")
         return {"user": user}
+
+
+class TourProgressPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: int = Field(default=1, ge=1, le=100)
+    completed: bool = False
+    skipped: bool = False
+    last_step: int = Field(default=0, ge=0, le=100)
+
+    @field_validator("skipped")
+    @classmethod
+    def finished_states_are_exclusive(cls, value: bool, info):
+        if value and info.data.get("completed"):
+            raise ValueError("Tour progress cannot be both completed and skipped.")
+        return value
+
+
+def _account_id(request: Request) -> str:
+    user = getattr(request.state, "nexora_user", None)
+    if not user or user.get("id") == "local":
+        raise HTTPException(status_code=401, detail="Sign in to your NEXORA account.")
+    return str(user["id"])
+
+
+def get_tour_progress(user_id: str) -> dict[str, Any]:
+    ensure_identity_schema()
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT version, completed, skipped, last_step, updated_at
+                FROM nexora_account_tour_progress WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return {"version": 1, "completed": False, "skipped": False, "last_step": 0}
+        return {
+            "version": row[0], "completed": row[1], "skipped": row[2],
+            "last_step": row[3], "updated_at": row[4].isoformat() if row[4] else None,
+        }
+    finally:
+        conn.close()
+
+
+def save_tour_progress(user_id: str, payload: TourProgressPayload) -> dict[str, Any]:
+    ensure_identity_schema()
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO nexora_account_tour_progress(user_id, version, completed, skipped, last_step)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    version = EXCLUDED.version,
+                    completed = EXCLUDED.completed,
+                    skipped = EXCLUDED.skipped,
+                    last_step = EXCLUDED.last_step,
+                    updated_at = NOW()
+                RETURNING version, completed, skipped, last_step, updated_at
+                """,
+                (user_id, payload.version, payload.completed, payload.skipped, payload.last_step),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return {
+            "version": row[0], "completed": row[1], "skipped": row[2],
+            "last_step": row[3], "updated_at": row[4].isoformat() if row[4] else None,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+    @router.get("/api/v1/profile/tour")
+    def read_tour_progress(request: Request):
+        try:
+            return {"tour": get_tour_progress(_account_id(request))}
+        except NexoraIdentityUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.put("/api/v1/profile/tour")
+    def write_tour_progress(payload: TourProgressPayload, request: Request):
+        try:
+            return {"tour": save_tour_progress(_account_id(request), payload)}
+        except NexoraIdentityUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @router.post("/api/v1/auth/logout")
     def logout_account(
