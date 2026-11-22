@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 const AGENT = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "");
-type Profile = { cpu?: Record<string, unknown>; memory?: Record<string, unknown>; gpu?: Record<string, unknown>; readiness?: number; [key: string]: unknown };
+type Profile = { machine?: Record<string, unknown>; gpu?: Record<string, unknown>; readiness?: number | null; [key: string]: unknown };
 
-export default function PCConnectionCard() {
+export default function PCConnectionCard({ onConnected }: { onConnected?: () => void }) {
   const [token, setToken] = useState(() => sessionStorage.getItem("nexora:local-agent-token") ?? "");
   const [agent, setAgent] = useState<"checking" | "running" | "offline">("checking");
   const [profile, setProfile] = useState<Profile | null>(null);
