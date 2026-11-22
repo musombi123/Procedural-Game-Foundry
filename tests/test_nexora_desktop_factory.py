@@ -301,14 +301,13 @@ def test_ide_file_creation_rejects_unsafe_or_non_text_paths(tmp_path: Path, unsa
         _create_project_text_file(project, unsafe_path, "not allowed")
 
 
-def test_ide_file_creation_requires_existing_parent_and_size_limit(tmp_path: Path):
+def test_ide_file_creation_creates_nested_folders_and_enforces_size_limit(tmp_path: Path):
     project = tmp_path / "project"
     project.mkdir()
-    with pytest.raises(HTTPException) as missing:
-        _create_project_text_file(project, "missing/script.gd", "pass")
-    assert missing.value.status_code == 404
+    created = _create_project_text_file(project, "game/scripts/player.gd", "pass")
+    assert created["created"] is True
+    assert (project / "game" / "scripts" / "player.gd").is_file()
 
-    (project / "scripts").mkdir()
     with pytest.raises(HTTPException) as oversized:
         _create_project_text_file(project, "scripts/large.gd", "x" * (2 * 1024 * 1024 + 1))
     assert oversized.value.status_code == 413
