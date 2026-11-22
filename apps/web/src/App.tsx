@@ -156,10 +156,10 @@ export default function App() {
         if (!response.ok) throw new Error("Local project save failed");
         if (JSON.stringify(worldRef.current) === snapshot) {
           try { localStorage.setItem(cacheKey, JSON.stringify({ document: world, updated_at: Date.now(), dirty: false })); } catch { /* local cache is best effort */ }
+          setSaveStatus("All changes saved");
         }
-        setSaveStatus("All changes saved");
       } catch {
-        setSaveStatus("Recovery copy saved in this browser · reconnect to sync to the PC project folder");
+        if (JSON.stringify(worldRef.current) === snapshot) setSaveStatus("Recovery copy saved in this browser · reconnect to sync to the PC project folder");
       }
     }, 900);
     return () => window.clearTimeout(timer);
