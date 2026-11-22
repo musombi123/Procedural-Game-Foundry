@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from core.execution_policy import is_local_compute_only_request
 from core.nexora_workspace.local_factory import _archive_project, _safe_extract
+from core.nexora_workspace.desktop_factory import validate_monetization_manifest
 from core.nexora_workspace.desktop_api import _create_project_text_file, _resolve_project_path, _restore_archive
 from core.project_engine.manager import ProjectManager
 from core.project_engine.models import ProjectCreate
@@ -311,3 +312,43 @@ def test_ide_file_creation_creates_nested_folders_and_enforces_size_limit(tmp_pa
     with pytest.raises(HTTPException) as oversized:
         _create_project_text_file(project, "scripts/large.gd", "x" * (2 * 1024 * 1024 + 1))
     assert oversized.value.status_code == 413
+
+
+def test_monetization_manifest_defaults_to_safe_disabled_configuration():
+    manifest = validate_monetization_manifest({})
+    assert manifest["schema_version"] == "1.0"
+    assert all(value is False for value in manifest["addons"].values())
+    assert manifest["ads"]["provider"] == "none"
+    assert manifest["ads"]["placements"] == []
+    assert manifest["ads"]["test_mode"] is True
+    assert manifest["ads"]["consent_required"] is True
+
+
+def test_monetization_manifest_requires_addon_provider_and_valid_admob_id():
+    payload = {
+        "addons": {"rewarded_ads": True},
+        "ads": {
+            "provider": "admob",
+            "app_id": "ca-app-pub-1234567890123456~1234567890",
+            "placements": ["rewarded_continue", "banner_menu"],
+        },
+    }
+    manifest = validate_monetization_manifest(payload)
+    assert manifest["ads"]["placements"] == ["banner_menu", "rewarded_continue"]
+    assert manifest["ads"]["consent_required"] is True
+    assert manifest["integrations"]["rewarded_ads"] == "sdk_required"
+
+    with pytest.raises(ValueError, match="Enable the rewarded-ads"):
+        validate_monetization_manifest({
+            "addons": {},
+            "ads": {"provider": "admob", "app_id": "ca-app-pub-1234567890123456~1234567890", "placements": ["rewarded_continue"]},
+        })
+
+
+def test_monetization_manifest_rejects_invalid_provider_placement_and_admob_id():
+    with pytest.raises(ValueError, match="provider is unsupported"):
+        validate_monetization_manifest({"ads": {"provider": "unknown"}})
+    with pytest.raises(ValueError, match="placement is not supported"):
+        validate_monetization_manifest({"addons": {"rewarded_ads": True}, "ads": {"provider": "admob", "app_id": "ca-app-pub-1234567890123456~1234567890", "placements": ["gameplay_overlay"]}})
+    with pytest.raises(ValueError, match="valid AdMob app ID"):
+        validate_monetization_manifest({"addons": {"rewarded_ads": True}, "ads": {"provider": "admob", "app_id": "fake-id"}})
