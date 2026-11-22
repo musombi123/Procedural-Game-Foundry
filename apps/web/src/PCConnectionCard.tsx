@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { localAgentBase } from "./localAgentFetch";
 
-const AGENT = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "");
+const AGENT = localAgentBase(import.meta.env.VITE_NEXORA_LOCAL_AGENT);
 type Profile = { machine?: Record<string, unknown>; gpu?: Record<string, unknown>; readiness?: number | null; [key: string]: unknown };
 type DeviceBond = { enabled: boolean; limits?: { cpu_percent?: number; ram_percent?: number; gpu_percent?: number } };
 
