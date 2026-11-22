@@ -26,7 +26,7 @@ Change policy: extend existing modules and preserve current API contracts. The c
 
 ## Phase 1 — Asset Collection Center and asset visibility
 
-**Status: implementation added; CI/runtime acceptance pending.**
+**Status: implementation added; Python and web CI pass on the latest checked commit; Godot/Blender integration and local-device acceptance are still pending.**
 
 - The existing asset endpoint previously returned only AssetRegistry records under `assets/`. Generated movie-pipeline files were stored under `movie_pipeline/`, so player and environment GLBs could be successfully generated yet remain absent from the shared collection.
 - `core/nexora_workspace/api.py` now includes supported generated GLB/glTF, WAV/OGG/MP3 and image artifacts in the same read model, without copying files or creating a second registry.
@@ -41,7 +41,7 @@ Acceptance still required: run the CI suite and a local end-to-end generation wi
 
 **Existing foundation: present; full product acceptance pending.**
 
-The repository already has a loopback local agent, expiring pairing code, account verification, local engine mount, device-token handling, CPU/RAM/storage/GPU/toolchain preflight, and server-side workload guard. The hosted API blocks local-compute routes. Remaining work: explicit first-run Device Access Bond consent, revocation/settings UI, adjustable resource caps, live resource telemetry, pause/resume controls, signed installer verification and cross-platform installer acceptance.
+The repository already has a loopback local agent, expiring pairing code, account verification, local engine mount, device-token handling, CPU/RAM/storage/GPU/toolchain preflight, and server-side workload guard. The hosted API blocks local-compute routes. Remaining work: explicit first-run Device Access Bond consent, revocation/settings UI, adjustable resource caps, live resource telemetry, pause/resume controls, signed installer verification and cross-platform installer acceptance. The current React App still defaults to port 8000 and uses direct fetch calls; it does not yet complete the browser-to-agent pairing/token flow to the agent's `127.0.0.1:8765/engine` mount. The desktop CSP also needs to be aligned with that bridge. Therefore the existing agent is a foundation, not a finished PC Studio experience.
 
 ## Phase 3 — Level Manager
 
