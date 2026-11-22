@@ -98,6 +98,16 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
       <div><small style={{ color: "#91a9c4", letterSpacing: 1.2 }}>NEW PRODUCTION WORKFLOW</small><h2 style={{ margin: "6px 0" }}>Movie → playable game</h2><p style={{ margin: 0, color: "#a9b8c9" }}>One player portrait + your story, an optional movie clip, or both. Seven review-gated stages.</p></div>
       <span style={{ fontSize: 12, color: "#9fb5ca" }}>LOCAL-FIRST · NO PAID APIs</span>
     </div>
+    {pipeline && <div className="project-checklist" aria-label="Project progress checklist">
+      {[
+        ["Video added", Boolean(pipeline.source_video), "Upload a source clip to the project"],
+        ["Character extracted", pipeline.stages.some(stage => stage.stage === "player" && ["REVIEW", "APPROVED"].includes(stage.state)), "Build and review the player character"],
+        ["Assets ready", ["environment", "actors_props"].every(id => pipeline.stages.some(stage => stage.stage === id && ["REVIEW", "APPROVED"].includes(stage.state))), "Generate and approve world assets"],
+        ["Level 1 assembled", pipeline.stages.some(stage => stage.stage === "assembly" && ["REVIEW", "APPROVED"].includes(stage.state)), "Assemble the first playable level"],
+        ["Tested", pipeline.stages.some(stage => stage.stage === "assembly" && stage.state === "APPROVED"), "Complete the assembly playtest and approval"],
+        ["Exported", false, "Export tracking is not yet wired into this pipeline"]
+      ].map(([label, done, detail]) => <div key={String(label)} className={done ? "project-check done" : "project-check"}><span>{done ? "✓" : "○"}</span><div><b>{String(label)}</b><small>{String(detail)}</small></div></div>)}
+    </div>}
     {!pipeline ? <div style={{ marginTop: 18 }}>
       <p style={{ color: "#c1cedc" }}>Before enabling processing, confirm portrait rights, likeness consent and original-asset requirements. Movie rights are required only if you select movie-first or guided mode.</p>
       {["If I use a movie clip, I own it or have permission to use it (optional for story-first creation).", "I own or have permission to use the portrait photo.", "I have consent to use the depicted person's likeness.", "I agree the game will use original inspired assets, not copied footage, music, logos or exact character designs."].map((label, index) => <label key={index} style={{ display: "flex", gap: 10, margin: "11px 0", color: "#c8d4e1", fontSize: 14 }}><input type="checkbox" checked={rights[index]} onChange={(event) => setRights(current => current.map((value, i) => i === index ? event.target.checked : value))}/>{label}</label>)}
