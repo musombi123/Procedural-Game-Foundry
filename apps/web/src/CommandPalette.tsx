@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
 type View = "workspace" | "world" | "scene" | "ide" | "monetization";
 type Props = { selected: boolean; onNavigate: (view: View) => void; onHelp: () => void; onClose: () => void };
@@ -16,7 +16,7 @@ export default function CommandPalette({ selected, onNavigate, onHelp, onClose }
     { label: "Shortcuts and help", detail: "Keyboard reference and guided tour", run: onHelp }
   ].filter(item => (item.label + " " + item.detail).toLowerCase().includes(query.toLowerCase())), [onHelp, onNavigate, query, selected]);
   useEffect(() => setActive(0), [query]);
-  function onKey(event: React.KeyboardEvent<HTMLInputElement>) {
+  function onKey(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown") { event.preventDefault(); setActive(value => Math.min(commands.length - 1, value + 1)); }
     if (event.key === "ArrowUp") { event.preventDefault(); setActive(value => Math.max(0, value - 1)); }
     if (event.key === "Enter" && commands[active] && !commands[active].disabled) { event.preventDefault(); commands[active].run(); onClose(); }
