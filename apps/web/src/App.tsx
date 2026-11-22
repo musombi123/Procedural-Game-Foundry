@@ -141,7 +141,11 @@ export default function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault(); setPaletteOpen(value => !value);
-      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {\n        event.preventDefault(); if (event.shiftKey) redoWorld(); else undoWorld();\n      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {\n        event.preventDefault(); redoWorld();\n      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault(); if (event.shiftKey) redoWorld(); else undoWorld();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+        event.preventDefault(); redoWorld();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault(); void saveWorld();
       } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault(); setView("world"); setMode("play");
