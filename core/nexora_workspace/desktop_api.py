@@ -26,7 +26,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request as FastAPIRequ
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.nexora_workspace.desktop_factory import _levels_path, validate_level_manifest
+from core.nexora_workspace.desktop_factory import _levels_path, validate_level_manifest, validate_monetization_manifest
 from core.nexora_workspace.local_factory import (
     _archive_project, _atomic_json, _ensure_project_layout, _project, _safe_extract,
     EXCLUDED_DIRS, MAX_BACKUP_BYTES,
@@ -82,7 +82,14 @@ def _owner(request: FastAPIRequest) -> str:
 
 
 def _safe_relative(raw: str) -> Path:
-    value = str(raw or "").replace("\\", "/").strip("/")
+    raw_value = str(raw or "").replace("\\", "/")
+    # Check absolute syntax before trimming separators; trimming first would
+    # turn "/outside.gd" into a seemingly harmless relative filename.
+    if raw_value.startswith("/") or (
+        len(raw_value) >= 3 and raw_value[1] == ":" and raw_value[2] == "/"
+    ):
+        raise HTTPException(400, "Invalid project-relative path.")
+    value = raw_value.strip("/")
     candidate = Path(value)
     if not value:
         return Path(".")
@@ -104,6 +111,33 @@ def _resolve_project_path(folder: Path, raw: str) -> Path:
     if root not in target.parents and target != root:
         raise HTTPException(403, "Project path escapes the selected project.")
     return target
+
+
+def _create_project_text_file(folder: Path, raw_path: str, content: str) -> dict:
+    """Create a new, bounded text source file inside an existing project directory."""
+    relative = _safe_relative(raw_path)
+    if relative == Path(".") or relative.name == "nexora_owner.json" or relative.suffix.lower() not in TEXT_EXTENSIONS:
+        raise HTTPException(415, "Choose a supported text source-file extension.")
+    encoded = content.encode("utf-8")
+    if len(encoded) > MAX_EDIT_BYTES:
+        raise HTTPException(413, "New source file exceeds the 2 MiB editor limit.")
+    target = _resolve_project_path(folder, raw_path)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Re-resolve after directory creation and re-check the project boundary.
+        target = _resolve_project_path(folder, raw_path)
+        with target.open("xb") as stream:
+            stream.write(encoded)
+    except FileExistsError as exc:
+        raise HTTPException(409, "A file already exists at this path. Open it instead of overwriting it.") from exc
+    except OSError as exc:
+        raise HTTPException(400, "The source file could not be created in this project folder.") from exc
+    return {
+        "created": True,
+        "path": target.relative_to(folder.resolve()).as_posix(),
+        "size_bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
 
 
 def _snapshot_dir(manager: Any, pid: str) -> Path:
@@ -377,6 +411,12 @@ class WorkspaceFileUpdate(BaseModel):
     expected_sha256: str = Field(min_length=64, max_length=64)
 
 
+class WorkspaceFileCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1, max_length=1024)
+    content: str = Field(default="", max_length=2 * 1024 * 1024)
+
+
 class DesktopWorkspaceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     path: str = Field(min_length=3, max_length=2048)
@@ -456,6 +496,33 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         owner_id = _owner(request)
         agent_root = Path(os.environ.get("NEXORA_LOCAL_AGENT_DATA", str(Path.home() / ".nexora-local-agent"))).expanduser().resolve()
         return set_workspace_root(manager, agent_root, payload.path, owner_id, payload.confirm_migration)
+
+    @router.get("/api/v1/desktop/projects/{pid}/monetization")
+    def get_project_monetization(pid: str, request: FastAPIRequest):
+        folder, definition, _ = _project(manager, pid, request)
+        path = folder / ".nexora" / "monetization.json"
+        if not path.is_file():
+            return validate_monetization_manifest({})
+        try:
+            return validate_monetization_manifest(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(500, "The local monetization settings are unreadable or invalid.") from exc
+
+    @router.put("/api/v1/desktop/projects/{pid}/monetization")
+    def save_project_monetization(pid: str, payload: dict, request: FastAPIRequest):
+        folder, definition, _ = _project(manager, pid, request)
+        try:
+            manifest = validate_monetization_manifest(payload)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        path = folder / ".nexora" / "monetization.json"
+        _atomic_json(path, manifest)
+        game_folder = folder / "game"
+        if game_folder.is_dir():
+            # This public runtime manifest contains IDs and feature flags only;
+            # credentials and private purchase data never belong in game files.
+            _atomic_json(game_folder / "nexora_monetization.json", manifest)
+        return {"saved": True, "manifest": manifest, "runtime_manifest_written": game_folder.is_dir(), "execution": "configuration_only"}
 
     @router.get("/api/v1/desktop/projects/{pid}/levels")
     def list_project_levels(pid: str, request: FastAPIRequest):
@@ -703,6 +770,11 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         temporary.replace(target)
         digest = hashlib.sha256(encoded).hexdigest()
         return {"saved": True, "sha256": digest, "size_bytes": len(encoded)}
+
+    @router.post("/api/v1/desktop/projects/{pid}/file", status_code=201)
+    def create_project_file(pid: str, payload: WorkspaceFileCreate, request: FastAPIRequest):
+        folder, definition, _ = _project(manager, pid, request)
+        return _create_project_text_file(folder, payload.path, payload.content)
 
     @router.get("/api/v1/desktop/projects/{pid}/snapshots")
     def list_project_snapshots(pid: str, request: FastAPIRequest):

@@ -74,6 +74,65 @@ def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+MONETIZATION_ADDONS = {
+    "analytics": {"label": "Game analytics", "provider": "NEXORA local event schema"},
+    "rewarded_ads": {"label": "Rewarded ads", "provider": "AdMob SDK integration required"},
+    "in_app_purchases": {"label": "In-app purchases", "provider": "Google Play Billing integration required"},
+    "premium_content": {"label": "Premium content", "provider": "Game-side entitlement integration required"},
+}
+AD_PLACEMENTS = {"rewarded_continue", "rewarded_bonus", "interstitial_between_levels", "banner_menu"}
+
+
+def validate_monetization_manifest(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("A monetization settings object is required.")
+    supplied = payload.get("addons", {})
+    if not isinstance(supplied, dict) or set(supplied) - set(MONETIZATION_ADDONS):
+        raise ValueError("The add-on selection contains an unsupported module.")
+    addons = {key: bool(supplied.get(key, False)) for key in MONETIZATION_ADDONS}
+    ads = payload.get("ads", {})
+    if not isinstance(ads, dict):
+        raise ValueError("Ad settings must be an object.")
+    placements = ads.get("placements", [])
+    if not isinstance(placements, list) or len(placements) > len(AD_PLACEMENTS):
+        raise ValueError("Choose valid ad placements.")
+    normalized_placements = sorted(set(str(item) for item in placements))
+    if any(item not in AD_PLACEMENTS for item in normalized_placements):
+        raise ValueError("An ad placement is not supported.")
+    provider = str(ads.get("provider") or "none").lower()
+    if provider not in {"none", "admob"}:
+        raise ValueError("The selected ad provider is unsupported.")
+    if normalized_placements and (provider != "admob" or not addons["rewarded_ads"]):
+        raise ValueError("Enable the rewarded-ads add-on and select AdMob before configuring ad placements.")
+    app_id = str(ads.get("app_id") or "").strip()
+    android_unit = str(ads.get("android_unit_id") or "").strip()
+    ios_unit = str(ads.get("ios_unit_id") or "").strip()
+    if len(app_id) > 160 or len(android_unit) > 160 or len(ios_unit) > 160:
+        raise ValueError("AdMob identifiers must be 160 characters or fewer.")
+    if provider == "admob" and not re.fullmatch(r"ca-app-pub-[0-9]{4,25}~[0-9]{4,25}", app_id):
+        raise ValueError("Enter a valid AdMob app ID before selecting AdMob.")
+    return {
+        "schema_version": "1.0",
+        "addons": addons,
+        "ads": {
+            "provider": provider,
+            "app_id": app_id,
+            "android_unit_id": android_unit,
+            "ios_unit_id": ios_unit,
+            "placements": normalized_placements,
+            "test_mode": bool(ads.get("test_mode", True)),
+            "consent_required": True,
+        },
+        "integrations": {
+            "analytics": "local_event_schema" if addons["analytics"] else "disabled",
+            "rewarded_ads": "sdk_required" if addons["rewarded_ads"] else "disabled",
+            "in_app_purchases": "billing_sdk_required" if addons["in_app_purchases"] else "disabled",
+            "premium_content": "entitlement_runtime_required" if addons["premium_content"] else "disabled",
+        },
+        "updated_at": _utc(),
+    }
+
+
 def _settings_file() -> Path:
     root = Path(os.environ.get(
         "NEXORA_LOCAL_AGENT_DATA",
@@ -787,6 +846,33 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         })
         return {"saved": True, "workspace_root": str(resolved), "previous_root": previous}
 
+    @router.get("/projects/{pid}/monetization")
+    def get_project_monetization(pid: str, request: Request):
+        folder = _project_folder(manager, pid, request)
+        path = folder / ".nexora" / "monetization.json"
+        if not path.is_file():
+            return validate_monetization_manifest({})
+        try:
+            return validate_monetization_manifest(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(500, "The local monetization settings are unreadable or invalid.") from exc
+
+    @router.put("/projects/{pid}/monetization")
+    def save_project_monetization(pid: str, payload: dict, request: Request):
+        folder = _project_folder(manager, pid, request)
+        try:
+            manifest = validate_monetization_manifest(payload)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        path = folder / ".nexora" / "monetization.json"
+        _atomic_json(path, manifest)
+        game_folder = folder / "game"
+        if game_folder.is_dir():
+            # This public runtime manifest contains IDs and feature flags only;
+            # credentials and private purchase data never belong in game files.
+            _atomic_json(game_folder / "nexora_monetization.json", manifest)
+        return {"saved": True, "manifest": manifest, "runtime_manifest_written": game_folder.is_dir(), "execution": "configuration_only"}
+
     @router.get("/projects/{pid}/levels")
     def list_project_levels(pid: str, request: Request):
         folder = _project_folder(manager, pid, request)
@@ -916,6 +1002,31 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
             "size_bytes": target.stat().st_size,
         }
+
+    @router.post("/projects/{pid}/file", status_code=201)
+    def create_project_file(pid: str, payload: dict, request: Request):
+        folder = _project_folder(manager, pid, request)
+        base = _editor_root(folder)
+        path = str(payload.get("path") or "")
+        content = payload.get("content", "")
+        if not isinstance(content, str):
+            raise HTTPException(422, "File content must be text.")
+        encoded = content.encode("utf-8")
+        if len(encoded) > WRITE_LIMIT:
+            raise HTTPException(413, "New source files are limited to 2 MiB.")
+        if Path(path).suffix.lower() not in TEXT_EXTENSIONS:
+            raise HTTPException(415, "This file extension is not editable in the embedded text editor.")
+        target = _relative_project_path(base, path)
+        if not target.parent.is_dir():
+            raise HTTPException(404, "The destination folder must already exist.")
+        try:
+            with target.open("xb") as stream:
+                stream.write(encoded)
+        except FileExistsError as exc:
+            raise HTTPException(409, "A file already exists at this path. Open it instead of overwriting it.") from exc
+        except OSError as exc:
+            raise HTTPException(400, "The source file could not be created.") from exc
+        return {"created": True, "path": path, "size_bytes": len(encoded), "sha256": hashlib.sha256(encoded).hexdigest()}
 
     @router.put("/projects/{pid}/file")
     def write_project_file(pid: str, payload: dict, request: Request):

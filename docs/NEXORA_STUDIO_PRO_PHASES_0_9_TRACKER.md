@@ -1,6 +1,6 @@
 # NEXORA Studio Pro — Phases 0–9 execution tracker
 
-**Working branch:** `nexora-studio-pro-phases-0-9`  
+**Current working branch:** `nexora-studio-pro-phase-4` (Phase 1–3 baseline is in `main`)  
 **Base:** `main`  
 **Execution rule:** preserve the existing FastAPI + React + Blender + Godot + paired local-agent architecture. No duplicate asset database, no hosted media/game processing, and no paid infrastructure introduced by this work.
 
@@ -52,6 +52,27 @@ No browser-only claim is made that a web tab can reserve or safely govern all de
 **Status: local project manifest API implemented; Studio UI and export integration remain.**
 
 The paired desktop API now reads and writes an owner-checked, project-local ordered level manifest with unique IDs, difficulty, draft/testing/approved state, and shared asset IDs. The manifest is stored under the local project `.nexora/levels.json`; no game content is uploaded to Render. Tests cover ordering, shared asset de-duplication, invalid IDs/states/difficulties and the 100-level limit. Remaining work: Level Manager UI, level duplication/deletion/reordering controls, level-specific scene state and multi-level export/resume integration.
+
+## User-requested Phase 4 — Internal IDE, game monetization, in-Studio ads and premium UI
+
+**Status: implementation started; SDK integration and full acceptance remain.**
+
+Delivered in branch `nexora-studio-pro-phase-4`:
+- Added a local-first Internal IDE screen with file explorer, text editing, create-file, save, dirty-state handling and Ctrl/Cmd+S. File creation is exclusive (no overwrite), limited to 2 MiB and restricted to supported text formats. Existing file writes use SHA-256 optimistic concurrency checks.
+- Routed IDE requests through the paired Local Agent's `/engine` mount. The Local Agent translates its short-lived pairing token to the paired cloud credential only inside the loopback process before the engine's account/owner middleware runs.
+- Added a validated, owner-scoped game monetization manifest saved locally at `.nexora/monetization.json` and mirrored as the non-secret `game/nexora_monetization.json` export manifest. Supported configuration switches: local analytics schema, rewarded ads, in-app purchases and premium content. Ad configuration supports AdMob identifiers, explicit placements, mandatory consent and test-mode default.
+- Added a Monetization Center UI to configure the project manifest.
+- Added an in-Studio sponsored placement slot. It is hidden unless an administrator configures all sponsor fields at build/deploy time; it labels the placement as sponsored, accepts HTTPS destinations only, supports optional HTTPS artwork, and can be dismissed.
+- Added responsive premium styling for the IDE and monetization screens.
+- Added tests for safe monetization defaults, supported placements, provider validation and AdMob app ID format.
+
+Configuration for the in-Studio sponsor slot:
+- `VITE_NEXORA_SPONSOR_NAME`
+- `VITE_NEXORA_SPONSOR_MESSAGE`
+- `VITE_NEXORA_SPONSOR_URL` (HTTPS only)
+- `VITE_NEXORA_SPONSOR_IMAGE` (optional HTTPS image)
+
+Important boundary: this is a first-party sponsored slot, not a third-party ad exchange or automatic campaign marketplace. No ad impression/click tracking or advertiser payouts are implemented. Game monetization is currently configuration and validation only; AdMob and Google Play Billing SDKs are not bundled and no live ads or purchases are processed. These require platform-specific SDK work, consent/age/privacy review, publisher accounts and device acceptance. The manifest is stored on the creator's computer and is not uploaded to Render.
 
 ## Phase 4 — Export Center
 
@@ -112,4 +133,21 @@ Existing controls include owner-bound project operations, path traversal/symlink
 - [ ] On-device check confirms generated player/environment/props appear in Asset Collection Center and previews load through the local API.
 - [ ] No Render/server storage or processing of source videos, project assets, generated game files or exports is introduced.
 
-This tracker deliberately separates existing foundations, code delivered in this branch, and uncompleted acceptance gates. A feature is not considered complete because a route, UI label or architecture document exists.
+The numbered Phase 0–9 sections above preserve the repository's original engineering workstream labels. The separate **User-requested Phase 4** section maps to the product milestone the owner specified (Internal IDE, game monetization, in-Studio sponsored placements and premium UI); do not confuse it with the older internal `Phase 4 — Export Center` heading. This tracker deliberately separates existing foundations, code delivered in this branch, and uncompleted acceptance gates. A feature is not considered complete because a route, UI label or architecture document exists.
+
+
+## Phase 4 implementation setup and verification
+
+The Internal IDE and Monetization Center require the NEXORA Local Agent to be running and paired in the same browser session. The web app calls the loopback agent at `http://127.0.0.1:8765/engine` by default; set `VITE_NEXORA_LOCAL_AGENT` only when the local agent uses a different loopback URL.
+
+The paired Local Agent token is held in browser component state and sent only to the loopback agent. The Local Agent resolves it in memory and substitutes the associated account credential for the mounted engine request; the account credential is not returned to the browser or written to project files.
+
+Suggested checks:
+- `pytest -q tests/test_nexora_desktop_factory.py`
+- `cd apps/web && npm ci && npm run build`
+- Pair the local agent, select a locally owned project, create and edit a small `.gd` file, then verify a stale file hash returns HTTP 409 rather than overwriting newer changes.
+- Open Monetization, enable analytics only, save, restart the local agent, reconnect and verify the local manifest is retained.
+- Try an invalid AdMob app ID and an unsupported placement; the API must reject both with HTTP 422.
+- Configure the four sponsor environment variables with an HTTPS destination and verify the sponsored card is labelled, dismissible and hidden when the required fields are absent.
+
+The current sponsor slot is first-party configuration, not a general advertiser self-service console. No third-party ad network, campaign bidding, impression/click tracking, payouts or external billing integration is implemented in this phase.
