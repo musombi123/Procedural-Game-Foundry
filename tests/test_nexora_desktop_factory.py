@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from core.execution_policy import is_local_compute_only_request
 from core.nexora_workspace.local_factory import _archive_project, _safe_extract
-from core.nexora_workspace.desktop_api import _resolve_project_path, _restore_archive
+from core.nexora_workspace.desktop_api import _create_project_text_file, _resolve_project_path, _restore_archive
 from core.project_engine.manager import ProjectManager
 from core.project_engine.models import ProjectCreate
 from services.worker.local_workspace import load_workspace_root, set_workspace_root
@@ -270,3 +270,45 @@ def test_google_drive_pkce_flow_stores_refresh_token_in_os_vault(monkeypatch):
     assert result["connected"] is True
     assert FakeKeyring.get_password("NEXORA Desktop Studio", "refresh:creator-1") == "test-refresh-token"
     assert drive_oauth.drive_access_token("creator-1") == "test-access-token"
+
+
+
+def test_ide_file_creation_is_bounded_and_never_overwrites(tmp_path: Path):
+    project = tmp_path / "project"
+    game = project / "game"
+    game.mkdir(parents=True)
+
+    created = _create_project_text_file(project, "game/scripts/player.gd", "extends CharacterBody3D\n")
+    assert created["created"] is True
+    assert (game / "scripts" / "player.gd").read_text(encoding="utf-8") == "extends CharacterBody3D\n"
+
+    with pytest.raises(HTTPException) as duplicate:
+        _create_project_text_file(project, "game/scripts/player.gd", "overwrite")
+    assert duplicate.value.status_code == 409
+    assert (game / "scripts" / "player.gd").read_text(encoding="utf-8") == "extends CharacterBody3D\n"
+
+
+@pytest.mark.parametrize("unsafe_path", [
+    "../outside.gd",
+    "nexora_owner.json",
+    "game/assets/model.glb",
+    "/absolute.gd",
+])
+def test_ide_file_creation_rejects_unsafe_or_non_text_paths(tmp_path: Path, unsafe_path: str):
+    project = tmp_path / "project"
+    (project / "game").mkdir(parents=True)
+    with pytest.raises(HTTPException):
+        _create_project_text_file(project, unsafe_path, "not allowed")
+
+
+def test_ide_file_creation_requires_existing_parent_and_size_limit(tmp_path: Path):
+    project = tmp_path / "project"
+    project.mkdir()
+    with pytest.raises(HTTPException) as missing:
+        _create_project_text_file(project, "missing/script.gd", "pass")
+    assert missing.value.status_code == 404
+
+    (project / "scripts").mkdir()
+    with pytest.raises(HTTPException) as oversized:
+        _create_project_text_file(project, "scripts/large.gd", "x" * (2 * 1024 * 1024 + 1))
+    assert oversized.value.status_code == 413
