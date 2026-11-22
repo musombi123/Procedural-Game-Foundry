@@ -80,7 +80,7 @@ export default function App() {
     setView("world");
     void loadWorld(projectId);
   }
-  async function createProject() {
+  async function createProject(returnToWorkspace = false) {
     if (!name.trim()) return;
     setBusy(true);
     try {
@@ -209,11 +209,11 @@ export default function App() {
       </a>
       <div className="side-label">WORKSPACE</div>
       <button className={view === "workspace" ? "side-link active" : "side-link"} onClick={() => setView("workspace")}><span>▦</span> Overview</button>
-      <button className={view === "world" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("world"); }}><span>◈</span> World Foundry</button>
+      <button data-tour="world-nav" className={view === "world" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("world"); }}><span>◈</span> World Foundry</button>
       <button className={view === "scene" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("scene"); }}><span>⬡</span> Scene Editor</button>
       <button className={view === "ide" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("ide")}><span>⌘</span> Internal IDE</button>
       <button data-tour="monetization" className={view === "monetization" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("monetization")}><span>◇</span> Monetization</button>
-      <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
+      <button data-tour="help-nav" className="side-link" onClick={() => setShortcutsOpen(true)}><span>?</span> Help &amp; Shortcuts</button>\n      <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
     </aside>
 
     <section className="main-pane">
@@ -232,7 +232,7 @@ export default function App() {
             <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
           </div><div className="planet-art"><span /></div>
         </section>
-        <PCConnectionCard onConnected={() => { void refresh(); }} />
+        <PCConnectionCard onConnected={() => { void refresh(); }} />\n        {!selected && <div className="tour-upload-placeholder" data-tour="upload-video"><b>Ready to add your video?</b><p>Create a project first. The video upload panel appears inside the project workspace.</p><button className="button primary" disabled={busy} onClick={() => void createProject(true)}>＋ Create a project to add video</button></div>}
         <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
         <div className="project-grid">
           {projects.map((project) => <button key={project.id} className={selected === project.id ? "project-card chosen" : "project-card"} onClick={() => changeProject(project.id)}>
@@ -294,7 +294,7 @@ export default function App() {
         </div>
       </>}
       <footer className="app-footer">NEXORA · Local-first generation · Godot is the exported gameplay runtime</footer>
-      <GuidedTour onStart={() => { if (!selected) void createProject(); else setView("workspace"); }} />
+      <GuidedTour onStart={() => { if (!selected) void createProject(true); else setView("workspace"); }} />
       {paletteOpen && <CommandPalette selected={Boolean(selected)} onNavigate={next => { setView(next); if (next === "world" || next === "scene") setMode("edit"); }} onHelp={() => setShortcutsOpen(true)} onClose={() => setPaletteOpen(false)} />}
       {shortcutsOpen && <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />}
     </section>
