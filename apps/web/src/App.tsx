@@ -47,14 +47,14 @@ export default function App() {
   const selectedProject = useMemo(() => projects.find((project) => project.id === selected), [projects, selected]);
   const activeObject = useMemo(() => world.objects.find((item) => item.id === selectedObject), [world.objects, selectedObject]);
 
-  async function refresh() {
+  async function refresh(restoreLast = true) {
     try {
       const response = await localAgentFetch(API + "/api/projects");
       if (!response.ok) throw new Error("API returned " + response.status);
       const data = await response.json() as Project[];
       setProjects(data);
       const lastProjectId = localStorage.getItem("nexora:last-project");
-      if (!selected && lastProjectId && data.some(project => project.id === lastProjectId)) {
+      if (restoreLast && !selected && lastProjectId && data.some(project => project.id === lastProjectId)) {
         setSelected(lastProjectId);
         void loadWorld(lastProjectId);
       }
@@ -109,7 +109,7 @@ export default function App() {
       });
       if (!response.ok) throw new Error((await response.json()).detail ?? "Project creation failed");
       const project = await response.json() as Project;
-      await refresh();
+      await refresh(false);
       setProjects((current) => current.some((item) => item.id === project.id) ? current : [project, ...current]);
       setSelected(project.id);
       localStorage.setItem("nexora:last-project", project.id);
