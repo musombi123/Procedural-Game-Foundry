@@ -517,7 +517,12 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             raise HTTPException(422, str(exc)) from exc
         path = folder / ".nexora" / "monetization.json"
         _atomic_json(path, manifest)
-        return {"saved": True, "manifest": manifest, "execution": "configuration_only"}
+        game_folder = folder / "game"
+        if game_folder.is_dir():
+            # This public runtime manifest contains IDs and feature flags only;
+            # credentials and private purchase data never belong in game files.
+            _atomic_json(game_folder / "nexora_monetization.json", manifest)
+        return {"saved": True, "manifest": manifest, "runtime_manifest_written": game_folder.is_dir(), "execution": "configuration_only"}
 
     @router.get("/api/v1/desktop/projects/{pid}/levels")
     def list_project_levels(pid: str, request: FastAPIRequest):
