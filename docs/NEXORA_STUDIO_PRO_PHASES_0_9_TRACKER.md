@@ -21,7 +21,7 @@ The verified asset-display defect was a split between the registered asset libra
 
 ## Phase 1 — Asset Collection Center
 
-**Status: implementation in PR; acceptance pending CI and runtime verification.**
+**Status: asset API fix and collection improvements committed; runtime acceptance still pending.**
 
 Changes in this branch:
 - Merge supported files from the existing `movie_pipeline/` tree into the asset listing as read-only generated entries; do not copy them into a second registry.
@@ -34,7 +34,7 @@ Generated entries are currently read-only in the collection. Deletion is not exp
 
 ## Phase 2 — Local Engine and device readiness
 
-**Status: substantial foundation exists; Device Access Bond and resource-cap controls remain.**
+**Status: existing pairing/hardware foundation plus local consent-policy API committed; enforcement and runtime monitoring remain.**
 
 Existing implementation includes a paired loopback agent, pairing authority, local-only execution policy, selected project root, hardware/toolchain inventory and workload preflight. The hosted API rejects local-compute-only production routes.
 
@@ -102,7 +102,7 @@ No ad/campaign system or advertiser reporting is claimed. Future implementation 
 
 Existing controls include owner-bound project operations, path traversal/symlink protections in desktop file APIs, local-only production execution, upload size/format validation, snapshot validation/restore, and owner-scoped job artifacts. Remaining acceptance includes export-token replay tests, payment race/duplicate receipt tests, crash-recovery checkpoints, exportable diagnostics, local-agent bridge security review, and end-to-end acceptance on a real supported desktop.
 
-## Current PR acceptance gates
+## Current feature-branch acceptance gates
 
 - [ ] Python unit and integration suite passes.
 - [ ] React/TypeScript production build passes.

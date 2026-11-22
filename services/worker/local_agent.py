@@ -116,6 +116,13 @@ class RequirementsRequest(BaseModel):
     profile: str = Field(min_length=1, max_length=40)
 
 
+class DeviceBondRequest(BaseModel):
+    enabled: bool
+    cpu_percent: int = Field(default=70, ge=50, le=90)
+    ram_percent: int = Field(default=70, ge=50, le=90)
+    gpu_percent: int = Field(default=70, ge=50, le=90)
+
+
 class WirelessPairRequest(BaseModel):
     host: str = Field(min_length=7, max_length=64)
     pairing_port: int = Field(ge=1, le=65535)
@@ -329,6 +336,30 @@ def requirements(payload: RequirementsRequest, user_id: str = Depends(_require_p
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {**result, "checked_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}
+
+
+@app.get("/device-access-bond")
+def get_device_access_bond(user_id: str = Depends(_require_paired)):
+    from services.worker.device_bond import load_bond
+    return load_bond(DATA_ROOT)
+
+
+@app.put("/device-access-bond")
+def update_device_access_bond(
+    payload: DeviceBondRequest,
+    user_id: str = Depends(_require_paired),
+):
+    from services.worker.device_bond import save_bond
+    try:
+        return save_bond(
+            DATA_ROOT,
+            enabled=payload.enabled,
+            cpu_percent=payload.cpu_percent,
+            ram_percent=payload.ram_percent,
+            gpu_percent=payload.gpu_percent,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/devices")
