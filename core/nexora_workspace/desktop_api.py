@@ -26,6 +26,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request as FastAPIRequ
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.nexora_workspace.desktop_factory import _levels_path, validate_level_manifest
 from core.nexora_workspace.local_factory import (
     _archive_project, _atomic_json, _ensure_project_layout, _project, _safe_extract,
     EXCLUDED_DIRS, MAX_BACKUP_BYTES,
@@ -455,6 +456,34 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         owner_id = _owner(request)
         agent_root = Path(os.environ.get("NEXORA_LOCAL_AGENT_DATA", str(Path.home() / ".nexora-local-agent"))).expanduser().resolve()
         return set_workspace_root(manager, agent_root, payload.path, owner_id, payload.confirm_migration)
+
+    @router.get("/api/v1/desktop/projects/{pid}/levels")
+    def list_project_levels(pid: str, request: FastAPIRequest):
+        folder, _, _ = _project(manager, pid, request)
+        path = _levels_path(folder)
+        if not path.is_file():
+            return validate_level_manifest({"levels": [{
+                "id": "level-1", "title": "Level 1", "difficulty": "normal",
+                "state": "draft", "shared_asset_ids": [],
+            }]})
+        try:
+            return validate_level_manifest(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(500, "The local level manifest is unreadable or invalid.") from exc
+
+    @router.put("/api/v1/desktop/projects/{pid}/levels")
+    def save_project_levels(pid: str, payload: dict, request: FastAPIRequest):
+        folder, _, _ = _project(manager, pid, request)
+        try:
+            manifest = validate_level_manifest(payload)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        path = _levels_path(folder)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+        return {"saved": True, **manifest}
 
     @router.post("/api/v1/desktop/projects/{pid}/initialize")
     def initialize_project(pid: str, request: FastAPIRequest):
