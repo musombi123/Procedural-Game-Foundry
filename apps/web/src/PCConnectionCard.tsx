@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 
 const AGENT = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "");
 type Profile = { machine?: Record<string, unknown>; gpu?: Record<string, unknown>; readiness?: number | null; [key: string]: unknown };
+type DeviceBond = { enabled: boolean; limits?: { cpu_percent?: number; ram_percent?: number; gpu_percent?: number } };
 
 export default function PCConnectionCard({ onConnected }: { onConnected?: () => void }) {
   const [token, setToken] = useState(() => sessionStorage.getItem("nexora:local-agent-token") ?? "");
   const [agent, setAgent] = useState<"checking" | "running" | "offline">("checking");
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [bond, setBond] = useState<DeviceBond | null>(null);
   const [state, setState] = useState<"not-connected" | "connected" | "permission">("not-connected");
   const [message, setMessage] = useState("Checking whether the NEXORA Local Agent is running on this PC…");
   const [busy, setBusy] = useState(false);
@@ -47,13 +49,18 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
         signal: AbortSignal.timeout(8000)
       });
       const readinessBody = await readinessResponse.json().catch(() => ({}));
+      if (!readinessResponse.ok) throw new Error(readinessBody.detail ?? "Could not evaluate local video-processing requirements.");
+      const bondResponse = await fetch(AGENT + "/device-access-bond", { headers: { Authorization: "Bearer " + token.trim() }, signal: AbortSignal.timeout(8000) });
+      const bondBody = await bondResponse.json().catch(() => ({}));
+      if (!bondResponse.ok) throw new Error(bondBody.detail ?? "Could not read device-access permissions.");
+      setBond(bondBody as DeviceBond);
       const checks = Array.isArray(readinessBody.checks) ? readinessBody.checks : [];
       const passCount = checks.filter((item: { status?: string }) => item.status === "pass").length;
       setProfile({ ...(body as Profile), readiness: checks.length ? Math.round(passCount / checks.length * 100) : null });
-      setState("connected");
+      setState(bondBody.enabled ? "connected" : "permission");
       sessionStorage.setItem("nexora:local-agent-token", token.trim());
       window.dispatchEvent(new Event("nexora:local-agent-connected"));
-      setMessage(readinessBody.summary ?? "PC connected for this browser session. Hardware profile loaded.");
+      setMessage(bondBody.enabled ? (readinessBody.summary ?? "PC connected for this browser session.") : "PC connected, but device resource access is not enabled. Review CPU, RAM and GPU permission in the PC app.");
       onConnected?.();
     } catch (error) {
       if (state !== "permission") setState("not-connected");
@@ -81,7 +88,8 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
       <b>Device readiness</b>
       <strong>{readiness === null ? "Awaiting connection" : readiness + "%"}</strong>
       <div className="pc-readiness-track"><span style={{ width: (readiness ?? 0) + "%" }}/></div>
-      <small>{profile ? "Capabilities read from this PC. Device access permissions remain controlled by the PC app." : "Connect to read CPU, memory and GPU capability data."}</small>
+      <small>{profile ? "Score is the percentage of local video-workload checks passing; it is not a benchmark." : "Connect to read CPU, memory and GPU capability data."}</small>
+      {bond && <div className="pc-bond-details"><b>Device Access · {bond.enabled ? "Enabled" : "Permission needed"}</b><span>CPU {bond.limits?.cpu_percent ?? 70}% · RAM {bond.limits?.ram_percent ?? 70}% · GPU {bond.limits?.gpu_percent ?? 70}%</span><small>These ceilings apply only while a creator-started job is running.</small></div>}
       {agent === "offline" && import.meta.env.VITE_NEXORA_PC_DOWNLOAD_URL && <a href={import.meta.env.VITE_NEXORA_PC_DOWNLOAD_URL} target="_blank" rel="noreferrer">Download NEXORA PC app</a>}
     </div>
   </section>;
