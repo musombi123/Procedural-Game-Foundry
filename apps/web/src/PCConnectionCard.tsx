@@ -40,10 +40,20 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
         throw new Error(body.detail ?? "Pairing token expired or is invalid. Pair this browser again.");
       }
       if (!response.ok) throw new Error(body.detail ?? "Could not read PC capabilities.");
-      setProfile(body as Profile);
+      const readinessResponse = await fetch(AGENT + "/requirements/check", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token.trim(), "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: "movie_processing" }),
+        signal: AbortSignal.timeout(8000)
+      });
+      const readinessBody = await readinessResponse.json().catch(() => ({}));
+      const checks = Array.isArray(readinessBody.checks) ? readinessBody.checks : [];
+      const passCount = checks.filter((item: { status?: string }) => item.status === "pass").length;
+      setProfile({ ...(body as Profile), readiness: checks.length ? Math.round(passCount / checks.length * 100) : null });
       setState("connected");
       sessionStorage.setItem("nexora:local-agent-token", token.trim());
-      setMessage("PC connected for this browser session. Hardware profile loaded.");
+      setMessage(readinessBody.summary ?? "PC connected for this browser session. Hardware profile loaded.");
+      onConnected?.();
     } catch (error) {
       if (state !== "permission") setState("not-connected");
       setMessage(error instanceof Error ? error.message : "PC connection failed. Retry.");
