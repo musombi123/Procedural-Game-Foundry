@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NEXORA_TOUR, NEXORA_TOUR_VERSION } from "./nexoraTourConfig";
+import { localAgentBase } from "./localAgentFetch";
 
 type TourRecord = { version: number; completed: boolean; skipped: boolean; last_step: number };
 type Props = { onStart?: () => void };
 const LOCAL_KEY = "nexora:guided-tour:v1";
-const API = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "");
+const API = localAgentBase(import.meta.env.VITE_NEXORA_LOCAL_AGENT);
 const TOKEN_KEY = "nexora:local-agent-token";
 
 function readLocal(): TourRecord {
