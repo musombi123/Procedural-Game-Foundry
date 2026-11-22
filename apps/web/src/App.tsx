@@ -314,7 +314,7 @@ export default function App() {
         </section>
         <PCConnectionCard onConnected={() => { void refresh(); }} />
         {!selected && <div className="tour-upload-placeholder" data-tour="upload-video"><b>Ready to add your video?</b><p>Create a project first. The video upload panel appears inside the project workspace.</p><button className="button primary" disabled={busy} onClick={() => void createProject(true)}>＋ Create a project to add video</button></div>}
-        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
+        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={() => void refresh()}>↻ Refresh</button></div>
         <div className="project-grid">
           {projects.map((project) => <button key={project.id} className={selected === project.id ? "project-card chosen" : "project-card"} onClick={() => changeProject(project.id)}>
             <span className="project-icon">◉</span><b>{project.project.name}</b><small>{project.project.genre} · {project.project.dimension}D · seed {project.project.seed}</small><span className="card-open">Open project →</span>
