@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NEXORA_TOUR, NEXORA_TOUR_VERSION, type TourStep } from "./nexoraTourConfig";
+import { NEXORA_TOUR, NEXORA_TOUR_VERSION } from "./nexoraTourConfig";
 
 type TourRecord = { version: number; completed: boolean; skipped: boolean; last_step: number };
 type Props = { onStart?: () => void };
 const LOCAL_KEY = "nexora:guided-tour:v1";
-const API = (import.meta.env.VITE_NEXORA_ACCOUNT_API ?? import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8765/engine").replace(/\/$/, "");
+const API = (import.meta.env.VITE_NEXORA_ACCOUNT_API ?? "https://nexora-foundry-api.onrender.com").replace(/\/$/, "");
 const TOKEN_KEY = "nexora_access_token";
 
 function readLocal(): TourRecord {
@@ -117,25 +117,25 @@ export default function GuidedTour({ onStart }: Props) {
     return () => target.removeEventListener("click", onTarget);
   }, [active, step, stepIndex]);
 
-  const finish = useCallback(async (skipped: boolean) => {
+  async function finish(skipped: boolean) {
     const nextRecord = { version: NEXORA_TOUR_VERSION, completed: !skipped, skipped, last_step: stepIndex };
     await persist(nextRecord);
     setActive(false);
     previousFocus.current?.focus();
-  }, [persist, stepIndex]);
+  }
 
-  const next = useCallback(() => {
+  function next() {
     if (stepIndex >= NEXORA_TOUR.length - 1) { void finish(false); return; }
     const nextIndex = stepIndex + 1;
     setStepIndex(nextIndex);
     void persist({ version: NEXORA_TOUR_VERSION, completed: false, skipped: false, last_step: nextIndex });
-  }, [finish, persist, stepIndex]);
+  }
 
-  const back = useCallback(() => {
+  function back() {
     const nextIndex = Math.max(0, stepIndex - 1);
     setStepIndex(nextIndex);
     void persist({ version: NEXORA_TOUR_VERSION, completed: false, skipped: false, last_step: nextIndex });
-  }, [persist, stepIndex]);
+  }
 
   const isSmall = typeof window !== "undefined" && window.matchMedia("(max-width: 700px)").matches;
   const position = useMemo(() => {
