@@ -53,6 +53,11 @@ export default function App() {
       if (!response.ok) throw new Error("API returned " + response.status);
       const data = await response.json() as Project[];
       setProjects(data);
+      const lastProjectId = localStorage.getItem("nexora:last-project");
+      if (!selected && lastProjectId && data.some(project => project.id === lastProjectId)) {
+        setSelected(lastProjectId);
+        void loadWorld(lastProjectId);
+      }
       setStatus("Foundry Core connected · " + data.length + " project(s)");
     } catch {
       setStatus("Preview ready · start Foundry Core to save and build projects");
@@ -83,6 +88,7 @@ export default function App() {
   useEffect(() => { void refresh(); }, []);
 
   function changeProject(projectId: string) {
+    localStorage.setItem("nexora:last-project", projectId);
     setSelected(projectId);
     setView("world");
     void loadWorld(projectId);
@@ -100,6 +106,7 @@ export default function App() {
       await refresh();
       setProjects((current) => current.some((item) => item.id === project.id) ? current : [project, ...current]);
       setSelected(project.id);
+      localStorage.setItem("nexora:last-project", project.id);
       const freshWorld = initialWorld(project.project.seed);
       worldRef.current = freshWorld; undoStack.current = []; redoStack.current = [];
       setWorld(freshWorld);
