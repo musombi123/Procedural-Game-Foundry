@@ -4,6 +4,7 @@ import MoviePipelinePanel from "./MoviePipelinePanel";
 import AssetCollectionCenter from "./AssetCollectionCenter";
 import InternalIDE from "./InternalIDE";
 import MonetizationCenter from "./MonetizationCenter";
+import StudioSponsorSlot from "./StudioSponsorSlot";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
@@ -191,6 +192,7 @@ export default function App() {
           {!projects.length && <div className="empty-state"><b>No projects yet</b><p>Create a world above. The viewport can also generate a local preview without the API.</p></div>}
         </div>
         <section className="launch-card"><div><small>SELECTED PROJECT</small><h3>{selectedProject?.project.name ?? "Choose a project"}</h3><p>Generate terrain, scene objects and a playable Godot project.</p></div><div className="launch-actions"><button className="button secondary" disabled={!selected} onClick={() => changeProject(selected)}>Open World Foundry</button><button className="button primary" disabled={busy || !selected} onClick={generateGame}>{busy ? "Working…" : "Build playable game →"}</button></div></section>
+        <StudioSponsorSlot />
         {selected && <><MoviePipelinePanel projectId={selected} api={API} /><AssetCollectionCenter projectId={selected} api={API} /></>}
       </> : view === "ide" ? (selectedProject ? <InternalIDE projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project from the workspace before launching the Internal IDE.</p></div>) : view === "monetization" ? (selectedProject ? <MonetizationCenter projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project before configuring its monetization.</p></div>) : <>
         <div className="editor-toolbar">
