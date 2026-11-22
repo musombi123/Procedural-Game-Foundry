@@ -3,6 +3,7 @@ import WorldEditor from "./WorldEditor";
 import MoviePipelinePanel from "./MoviePipelinePanel";
 import AssetCollectionCenter from "./AssetCollectionCenter";
 import InternalIDE from "./InternalIDE";
+import MonetizationCenter from "./MonetizationCenter";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
@@ -20,7 +21,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState("Lost Planet");
   const [selected, setSelected] = useState("");
-  const [view, setView] = useState<"workspace" | "world" | "scene" | "ide">("workspace");
+  const [view, setView] = useState<"workspace" | "world" | "scene" | "ide" | "monetization">("workspace");
   const [world, setWorld] = useState<WorldDocument>(initialWorld(784215));
   const [selectedObject, setSelectedObject] = useState("");
   const [placementType, setPlacementType] = useState<ObjectKind | null>(null);
@@ -162,14 +163,15 @@ export default function App() {
       <button className={view === "world" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("world"); }}><span>◈</span> World Foundry</button>
       <button className={view === "scene" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("scene"); }}><span>⬡</span> Scene Editor</button>
       <button className={view === "ide" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("ide")}><span>⌘</span> Internal IDE</button>
+      <button className={view === "monetization" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("monetization")}><span>◇</span> Monetization</button>
       <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
     </aside>
 
     <section className="main-pane">
       <header className="topbar">
-        <div><small>PROCEDURAL GAME FOUNDRY / {worldView ? (view === "world" ? "WORLD FOUNDRY" : "SCENE EDITOR") : "PROJECT WORKSPACE"}</small>
-          <h1>{view === "ide" ? "Edit the game itself." : worldView ? (view === "world" ? "Shape a living world." : "Build the scene.") : "Build worlds. Make games."}</h1>
-          <p>{view === "ide" ? "A local source workspace connected to your paired NEXORA computer." : worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
+        <div><small>PROCEDURAL GAME FOUNDRY / {view === "monetization" ? "CREATOR REVENUE" : view === "ide" ? "INTERNAL IDE" : worldView ? (view === "world" ? "WORLD FOUNDRY" : "SCENE EDITOR") : "PROJECT WORKSPACE"}</small>
+          <h1>{view === "ide" ? "Edit the game itself." : view === "monetization" ? "Turn play into value." : worldView ? (view === "world" ? "Shape a living world." : "Build the scene.") : "Build worlds. Make games."}</h1>
+          <p>{view === "ide" ? "A local source workspace connected to your paired NEXORA computer." : view === "monetization" ? "Configure optional revenue modules for your game, with privacy and platform requirements built in." : worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
         </div>
         <div className="top-actions"><span className="connection">{status}</span>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
       </header>
@@ -190,7 +192,7 @@ export default function App() {
         </div>
         <section className="launch-card"><div><small>SELECTED PROJECT</small><h3>{selectedProject?.project.name ?? "Choose a project"}</h3><p>Generate terrain, scene objects and a playable Godot project.</p></div><div className="launch-actions"><button className="button secondary" disabled={!selected} onClick={() => changeProject(selected)}>Open World Foundry</button><button className="button primary" disabled={busy || !selected} onClick={generateGame}>{busy ? "Working…" : "Build playable game →"}</button></div></section>
         {selected && <><MoviePipelinePanel projectId={selected} api={API} /><AssetCollectionCenter projectId={selected} api={API} /></>}
-      </> : view === "ide" ? (selectedProject ? <InternalIDE projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project from the workspace before launching the Internal IDE.</p></div>) : <>
+      </> : view === "ide" ? (selectedProject ? <InternalIDE projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project from the workspace before launching the Internal IDE.</p></div>) : view === "monetization" ? (selectedProject ? <MonetizationCenter projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project before configuring its monetization.</p></div>) : <>
         <div className="editor-toolbar">
           <div className="view-switch"><button className={view === "world" ? "selected" : ""} onClick={() => { setMode("edit"); setView("world"); }}>World Foundry</button><button className={view === "scene" ? "selected" : ""} onClick={() => { setMode("edit"); setView("scene"); }}>Scene Editor</button></div>
           <div className="toolbar-right"><span className="seed-tag">SEED {world.seed}</span>
