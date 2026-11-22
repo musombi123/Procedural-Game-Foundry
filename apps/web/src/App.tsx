@@ -232,7 +232,7 @@ export default function App() {
             <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
           </div><div className="planet-art"><span /></div>
         </section>
-        <PCConnectionCard />
+        <PCConnectionCard onConnected={() => { void refresh(); }} />
         <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
         <div className="project-grid">
           {projects.map((project) => <button key={project.id} className={selected === project.id ? "project-card chosen" : "project-card"} onClick={() => changeProject(project.id)}>
