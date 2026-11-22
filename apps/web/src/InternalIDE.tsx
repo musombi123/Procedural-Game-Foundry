@@ -5,7 +5,7 @@ type OpenFile = { path: string; content: string; sha256: string; size_bytes: num
 const LOCAL_AGENT = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "") + "/engine";
 
 export default function InternalIDE({ projectId, projectName }: { projectId: string; projectName: string }) {
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => sessionStorage.getItem("nexora:local-agent-token") ?? "");
   const [connected, setConnected] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [directory, setDirectory] = useState("game");
