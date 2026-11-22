@@ -149,6 +149,12 @@ class PaymentClaim(BaseModel):
     paid_amount_kes: int = Field(ge=1,le=250000)
     payer_phone: str = Field(min_length=9,max_length=16,pattern=r"^[+0-9]+$")
 
+class MerchantPaymentVerification(BaseModel):
+    """Independent transaction details copied from the merchant's received-payment record."""
+    model_config = ConfigDict(extra="forbid")
+    mpesa_receipt: str = Field(min_length=8,max_length=24,pattern=r"^[A-Za-z0-9]+$")
+    paid_amount_kes: int = Field(ge=1,le=250000)
+
 def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -957,7 +963,12 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         return {key:value for key,value in record.items() if key!="user_id"}
 
     @router.post("/api/v1/creator-flow/payments/{payment_id}/verify")
-    def verify_payment(payment_id: str, request: Request, x_nexora_payment_secret: str=Header(default="")):
+    def verify_payment(
+        payment_id: str,
+        payload: MerchantPaymentVerification,
+        request: Request,
+        x_nexora_payment_secret: str=Header(default=""),
+    ):
         secret=os.environ.get("NEXORA_PAYMENT_VERIFICATION_SECRET","")
         if not secret or x_nexora_payment_secret!=secret: raise HTTPException(403,"Payment reconciliation authority is required.")
         record=_find_payment(manager,payment_id)
@@ -965,8 +976,18 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         if record["status"]=="verified": return {"verified":True,"already_verified":True,"plan":record["plan"]}
         if _payment_expired(record): raise HTTPException(410,"This payment request has expired and cannot be verified.")
         if record["status"]!="claimed" or not record.get("receipt_code") or record.get("paid_amount_kes")!=record.get("amount_kes"):
-            raise HTTPException(409,"A matching customer receipt claim is required before reconciliation.")
+            raise HTTPException(409,"A customer receipt claim with the exact invoice amount is required before reconciliation.")
+        merchant_receipt=payload.mpesa_receipt.strip().upper()
+        customer_receipt=str(record["receipt_code"]).strip().upper()
+        if merchant_receipt != customer_receipt:
+            raise HTTPException(409,"The M-PESA code in the merchant received-payment record does not match the customer's submitted code.")
+        if payload.paid_amount_kes != int(record["amount_kes"]):
+            raise HTTPException(409,"The amount in the merchant received-payment record does not match the invoice.")
+        if _receipt_in_use(manager, merchant_receipt, payment_id):
+            raise HTTPException(409,"This M-PESA transaction code is already assigned to another payment.")
         record["status"]="verified"; record["verified_at"]=_utc()
+        record["merchant_receipt_code"]=merchant_receipt
+        record["merchant_paid_amount_kes"]=payload.paid_amount_kes
         _save_payment(manager,record)
         _activate_entitlement(manager,record["user_id"],record["plan"],record["reference"])
         return {"verified":True,"plan":record["plan"],"target_class":PLANS[record["plan"]]["target_class"]}
