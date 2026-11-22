@@ -1,6 +1,6 @@
 # NEXORA Studio Pro — Phases 0–9 execution tracker
 
-**Working branch:** `nexora-studio-pro-phases-0-9`  
+**Current working branch:** `nexora-studio-pro-phase-4` (Phase 1–3 baseline is in `main`)  
 **Base:** `main`  
 **Execution rule:** preserve the existing FastAPI + React + Blender + Godot + paired local-agent architecture. No duplicate asset database, no hosted media/game processing, and no paid infrastructure introduced by this work.
 
