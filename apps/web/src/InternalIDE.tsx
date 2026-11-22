@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { localAgentBase } from "./localAgentFetch";
 
 type Entry = { name: string; path: string; kind: "directory" | "file"; size_bytes: number; editable: boolean };
 type OpenFile = { path: string; content: string; sha256: string; size_bytes: number };
-const LOCAL_AGENT = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "") + "/engine";
+const LOCAL_AGENT = localAgentBase(import.meta.env.VITE_NEXORA_LOCAL_AGENT) + "/engine";
 
 export default function InternalIDE({ projectId, projectName }: { projectId: string; projectName: string }) {
   const [token, setToken] = useState(() => sessionStorage.getItem("nexora:local-agent-token") ?? "");
