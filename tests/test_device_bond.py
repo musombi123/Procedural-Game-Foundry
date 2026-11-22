@@ -48,10 +48,5 @@ def test_device_bond_rejects_unsafe_or_invalid_limits(tmp_path: Path, value) -> 
 
 
 def test_corrupt_device_bond_fails_closed(tmp_path: Path) -> None:
-    (tmp_path / "device-access-bond.json").write_text(
-        json.dumps({"schema_version": "1.0", "enabled": True, "limits": {}}),
-        encoding="utf-8",
-    )
-    # Missing limits are defaulted, but malformed consent schema is never
-    # interpreted as an affirmative grant.
-    assert load_bond(tmp_path)["enabled"] is True
+    (tmp_path / "device-access-bond.json").write_text("{not-json", encoding="utf-8")
+    assert load_bond(tmp_path) == default_bond()
