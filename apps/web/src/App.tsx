@@ -96,8 +96,8 @@ export default function App() {
       setWorld(initialWorld(project.project.seed));
       setLoadedProjectId(project.id);
       setSaveStatus("All changes saved");
-      setView("world");
-      setStatus("Project created · shape your world");
+      setView(returnToWorkspace ? "workspace" : "world");
+      setStatus("Project created · add your source video to begin");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Project creation failed");
     } finally { setBusy(false); }
@@ -213,7 +213,8 @@ export default function App() {
       <button className={view === "scene" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("scene"); }}><span>⬡</span> Scene Editor</button>
       <button className={view === "ide" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("ide")}><span>⌘</span> Internal IDE</button>
       <button data-tour="monetization" className={view === "monetization" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("monetization")}><span>◇</span> Monetization</button>
-      <button data-tour="help-nav" className="side-link" onClick={() => setShortcutsOpen(true)}><span>?</span> Help &amp; Shortcuts</button>\n      <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
+      <button data-tour="help-nav" className="side-link" onClick={() => setShortcutsOpen(true)}><span>?</span> Help &amp; Shortcuts</button>
+      <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
     </aside>
 
     <section className="main-pane">
@@ -232,7 +233,8 @@ export default function App() {
             <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
           </div><div className="planet-art"><span /></div>
         </section>
-        <PCConnectionCard onConnected={() => { void refresh(); }} />\n        {!selected && <div className="tour-upload-placeholder" data-tour="upload-video"><b>Ready to add your video?</b><p>Create a project first. The video upload panel appears inside the project workspace.</p><button className="button primary" disabled={busy} onClick={() => void createProject(true)}>＋ Create a project to add video</button></div>}
+        <PCConnectionCard onConnected={() => { void refresh(); }} />
+        {!selected && <div className="tour-upload-placeholder" data-tour="upload-video"><b>Ready to add your video?</b><p>Create a project first. The video upload panel appears inside the project workspace.</p><button className="button primary" disabled={busy} onClick={() => void createProject(true)}>＋ Create a project to add video</button></div>}
         <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
         <div className="project-grid">
           {projects.map((project) => <button key={project.id} className={selected === project.id ? "project-card chosen" : "project-card"} onClick={() => changeProject(project.id)}>
