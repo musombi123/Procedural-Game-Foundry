@@ -63,3 +63,52 @@
 .side-link:disabled{opacity:.35;cursor:not-allowed}
 @media(max-width:780px){.ide-header{flex-direction:column}.ide-connect{min-width:100%;width:100%}.ide-workbench{grid-template-columns:1fr}.ide-files{border-right:0;border-bottom:1px solid #263751}.ide-entry-list{max-height:210px}.ide-code{min-height:420px}.ide-footer{font-size:7px}}
 @media(max-width:440px){.ide-connect{grid-template-columns:1fr}.ide-connect label{grid-column:auto}.ide-connect .button{width:100%}.ide-editor-meta{font-size:7px}}
+
+
+/* NEXORA creator monetization workspace */
+.monetization-shell{display:grid;gap:15px;margin-top:20px}
+.monetization-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:23px;border:1px solid #2c456a;border-radius:15px;background:linear-gradient(115deg,#142440,#122e43 58%,#17213a)}
+.monetization-hero>div:first-child{max-width:530px}
+.monetization-hero small,.monetization-panel-heading small{font:9px "DM Mono",monospace;letter-spacing:1.1px;color:#8fb7f4}
+.monetization-hero h2{margin:10px 0;font-size:clamp(23px,3vw,34px);letter-spacing:-1px}
+.monetization-hero p,.monetization-panel-heading p{color:#9aabc4;font-size:10px;line-height:1.7}
+.monetization-hero p b{color:#dce8fc}
+.monetization-agent{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:8px;min-width:min(420px,48%);align-items:end}
+.monetization-agent label{grid-column:1/-1;color:#a4b8d5;font-size:9px}
+.monetization-agent input,.monetization-field input,.monetization-field select{min-width:0;width:100%;padding:10px 11px;border:1px solid #334d70;border-radius:7px;background:#0a1627;color:#e2ecff;font-size:10px;outline:none}
+.monetization-status{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid #253650;border-radius:8px;color:#91a6c4;font:9px "DM Mono",monospace}
+.monetization-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.monetization-card{min-width:0;padding:15px;border:1px solid #2a3d59;border-radius:11px;background:#0e1929}
+.monetization-card-top{display:flex;justify-content:space-between;align-items:center}
+.monetization-icon{display:grid;place-items:center;width:35px;height:35px;border:1px solid #38557d;border-radius:9px;background:#172b47;color:#9bc0ff;font-size:19px}
+.monetization-card h3{margin:13px 0 6px;color:#e0eaff;font-size:12px}
+.monetization-card p{min-height:58px;margin:0;color:#91a3bf;font-size:9px;line-height:1.65}
+.monetization-card>small{display:block;margin-top:11px;color:#7994ba;font:8px "DM Mono",monospace}
+.monetization-switch{position:relative;display:inline-flex;align-items:center;cursor:pointer}
+.monetization-switch input{position:absolute;opacity:0;width:1px;height:1px}
+.monetization-switch span{width:34px;height:19px;border:1px solid #435a79;border-radius:20px;background:#172338;transition:background .15s}
+.monetization-switch span:after{content:"";display:block;width:11px;height:11px;margin:3px;border-radius:50%;background:#8195b3;transition:transform .15s}
+.monetization-switch input:checked+span{background:#315a8c;border-color:#75a7f6}
+.monetization-switch input:checked+span:after{transform:translateX(15px);background:#dceaff}
+.monetization-switch input:disabled+span{opacity:.4}
+.monetization-panel{display:grid;gap:14px;padding:20px;border:1px solid #2b405e;border-radius:12px;background:#0c1727}
+.monetization-panel-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding-bottom:12px;border-bottom:1px solid #273851}
+.monetization-panel-heading h3{margin:6px 0;font-size:15px}
+.monetization-panel-heading p{margin:0}
+.monetization-field{display:grid;gap:6px;color:#aebfda;font-size:9px}
+.monetization-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.placement-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.placement-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px;border:1px solid #293c58;border-radius:8px;background:#101d30}
+.placement-row span{display:grid;gap:4px}
+.placement-row b{color:#d2def1;font-size:9px}
+.placement-row small{color:#8296b4;font-size:8px}
+.placement-row input{accent-color:#8eaff4;width:15px;height:15px}
+.monetization-consent{display:grid;gap:4px;padding:11px;border:1px solid #304866;border-radius:8px;background:#13243a}
+.monetization-consent b{color:#c8d9f2;font-size:9px}
+.monetization-consent span{color:#8ca4c7;font-size:8px}
+.monetization-disclaimer{padding:14px 16px;border:1px solid #3a3b4b;border-radius:9px;background:#111827}
+.monetization-disclaimer b{color:#e0d3ad;font-size:10px}
+.monetization-disclaimer p{margin:7px 0 0;color:#a1a8b8;font-size:9px;line-height:1.7}
+@media(max-width:1000px){.monetization-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:780px){.monetization-hero{flex-direction:column}.monetization-agent{min-width:100%;width:100%}.monetization-form-grid{grid-template-columns:1fr}.placement-list{grid-template-columns:1fr}}
+@media(max-width:440px){.monetization-agent{grid-template-columns:1fr}.monetization-agent label{grid-column:auto}.monetization-agent .button{width:100%}.monetization-grid{grid-template-columns:1fr}.monetization-card p{min-height:0}}
