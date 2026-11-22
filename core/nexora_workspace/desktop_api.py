@@ -82,7 +82,14 @@ def _owner(request: FastAPIRequest) -> str:
 
 
 def _safe_relative(raw: str) -> Path:
-    value = str(raw or "").replace("\\", "/").strip("/")
+    raw_value = str(raw or "").replace("\\", "/")
+    # Check absolute syntax before trimming separators; trimming first would
+    # turn "/outside.gd" into a seemingly harmless relative filename.
+    if raw_value.startswith("/") or (
+        len(raw_value) >= 3 and raw_value[1] == ":" and raw_value[2] == "/"
+    ):
+        raise HTTPException(400, "Invalid project-relative path.")
+    value = raw_value.strip("/")
     candidate = Path(value)
     if not value:
         return Path(".")
