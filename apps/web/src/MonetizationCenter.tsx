@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { localAgentBase } from "./localAgentFetch";
 
-const LOCAL_AGENT = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "") + "/engine";
+const LOCAL_AGENT = localAgentBase(import.meta.env.VITE_NEXORA_LOCAL_AGENT) + "/engine";
 const ADDONS = [
   { id: "analytics", name: "Game analytics", description: "Prepare a privacy-conscious local event schema for sessions, progression and retention.", status: "Local event schema" },
   { id: "rewarded_ads", name: "Rewarded ads", description: "Configure opt-in rewarded placements. A platform SDK is required before ads can be served.", status: "AdMob SDK required" },
