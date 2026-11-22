@@ -92,7 +92,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Stage update failed"); }
     finally { setBusy(false); }
   }
-  return <section style={{ marginTop: 24, padding: 22, border: "1px solid #2c3b50", borderRadius: 16, background: "#101a29", color: "#e8eef7" }}>
+  return <section data-tour="pipeline" style={{ marginTop: 24, padding: 22, border: "1px solid #2c3b50", borderRadius: 16, background: "#101a29", color: "#e8eef7" }}>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
       <div><small style={{ color: "#91a9c4", letterSpacing: 1.2 }}>NEW PRODUCTION WORKFLOW</small><h2 style={{ margin: "6px 0" }}>Movie → playable game</h2><p style={{ margin: 0, color: "#a9b8c9" }}>One player portrait + your story, an optional movie clip, or both. Seven review-gated stages.</p></div>
       <span style={{ fontSize: 12, color: "#9fb5ca" }}>LOCAL-FIRST · NO PAID APIs</span>
@@ -107,7 +107,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || !!pipeline.source_photo} onChange={event => void uploadInput("photo", event.target.files?.[0])} style={{ display: "block", marginTop: 9, maxWidth: "100%" }}/>
           <small style={{ display: "block", marginTop: 6, color: pipeline.source_photo ? "#7ec79c" : "#9fb0c4" }}>{pipeline.source_photo ? pipeline.source_photo.filename : "JPEG, PNG or WebP · max 20 MB"}</small>
         </label>
-        <label style={{ padding: 13, border: "1px dashed #49627d", borderRadius: 10, color: "#c5d4e4", fontSize: 13 }}>MOVIE VIDEO · FULL FILM OR CLIP
+        <label data-tour="upload-video" style={{ padding: 13, border: "1px dashed #49627d", borderRadius: 10, color: "#c5d4e4", fontSize: 13 }}>MOVIE VIDEO · FULL FILM OR CLIP
           <input type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-msvideo" disabled={busy || !!pipeline.source_video} onChange={event => void uploadInput("video", event.target.files?.[0])} style={{ display: "block", marginTop: 9, maxWidth: "100%" }}/>
           <small style={{ display: "block", marginTop: 6, color: pipeline.source_video ? "#7ec79c" : "#9fb0c4" }}>{pipeline.source_video ? pipeline.source_video.filename : "MP4, MOV, MKV, WebM or AVI · max 8 GB"}</small>
         </label>
