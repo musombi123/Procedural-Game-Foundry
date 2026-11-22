@@ -106,6 +106,32 @@ def _resolve_project_path(folder: Path, raw: str) -> Path:
     return target
 
 
+def _create_project_text_file(folder: Path, raw_path: str, content: str) -> dict:
+    """Create a new, bounded text source file inside an existing project directory."""
+    relative = _safe_relative(raw_path)
+    if relative == Path(".") or relative.name == "nexora_owner.json" or relative.suffix.lower() not in TEXT_EXTENSIONS:
+        raise HTTPException(415, "Choose a supported text source-file extension.")
+    encoded = content.encode("utf-8")
+    if len(encoded) > MAX_EDIT_BYTES:
+        raise HTTPException(413, "New source file exceeds the 2 MiB editor limit.")
+    target = _resolve_project_path(folder, raw_path)
+    if not target.parent.is_dir():
+        raise HTTPException(404, "The destination folder does not exist.")
+    try:
+        with target.open("xb") as stream:
+            stream.write(encoded)
+    except FileExistsError as exc:
+        raise HTTPException(409, "A file already exists at this path. Open it instead of overwriting it.") from exc
+    except OSError as exc:
+        raise HTTPException(400, "The source file could not be created in this project folder.") from exc
+    return {
+        "created": True,
+        "path": target.relative_to(folder.resolve()).as_posix(),
+        "size_bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
 def _snapshot_dir(manager: Any, pid: str) -> Path:
     root = Path(manager.root) / ".nexora-snapshots" / pid
     root.mkdir(parents=True, exist_ok=True)
@@ -375,6 +401,12 @@ class WorkspaceFileUpdate(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     content: str = Field(max_length=2 * 1024 * 1024)
     expected_sha256: str = Field(min_length=64, max_length=64)
+
+
+class WorkspaceFileCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1, max_length=1024)
+    content: str = Field(default="", max_length=2 * 1024 * 1024)
 
 
 class DesktopWorkspaceRequest(BaseModel):
@@ -703,6 +735,11 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
         temporary.replace(target)
         digest = hashlib.sha256(encoded).hexdigest()
         return {"saved": True, "sha256": digest, "size_bytes": len(encoded)}
+
+    @router.post("/api/v1/desktop/projects/{pid}/file", status_code=201)
+    def create_project_file(pid: str, payload: WorkspaceFileCreate, request: FastAPIRequest):
+        folder, definition, _ = _project(manager, pid, request)
+        return _create_project_text_file(folder, payload.path, payload.content)
 
     @router.get("/api/v1/desktop/projects/{pid}/snapshots")
     def list_project_snapshots(pid: str, request: FastAPIRequest):
