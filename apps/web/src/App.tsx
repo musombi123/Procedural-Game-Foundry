@@ -5,6 +5,7 @@ import AssetCollectionCenter from "./AssetCollectionCenter";
 import InternalIDE from "./InternalIDE";
 import MonetizationCenter from "./MonetizationCenter";
 import StudioSponsorSlot from "./StudioSponsorSlot";
+import NexoraGuidedTour from "./NexoraGuidedTour";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
@@ -32,6 +33,9 @@ export default function App() {
   const [mode, setMode] = useState<"edit" | "play">("edit");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Connecting to Foundry Core…");
+  const [tourOpen, setTourOpen] = useState(false);
+  const [tourReplay, setTourReplay] = useState(false);
+  const tourKey = "nexora_guided_tour_v1";
   const selectedProject = useMemo(() => projects.find((project) => project.id === selected), [projects, selected]);
   const activeObject = useMemo(() => world.objects.find((item) => item.id === selectedObject), [world.objects, selectedObject]);
 
@@ -61,6 +65,13 @@ export default function App() {
     }
   }
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    try { if (!localStorage.getItem(tourKey)) setTourOpen(true); } catch { /* tour still works for this session */ }
+  }, []);
+  function closeTour(result: "completed" | "skipped") {
+    try { localStorage.setItem(tourKey, JSON.stringify({ state: result, lastStep: 9, updatedAt: new Date().toISOString() })); } catch { /* storage may be disabled */ }
+    setTourOpen(false); setTourReplay(false);
+  }
 
   function changeProject(projectId: string) {
     setSelected(projectId);
@@ -165,6 +176,7 @@ export default function App() {
       <button className={view === "scene" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("scene"); }}><span>⬡</span> Scene Editor</button>
       <button className={view === "ide" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("ide")}><span>⌘</span> Internal IDE</button>
       <button className={view === "monetization" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("monetization")}><span>◇</span> Monetization</button>
+      <button className="side-link tour-help" data-tour="help" onClick={() => { setTourReplay(true); setTourOpen(true); }} aria-label="Help: replay guided tour">? Help · Take the tour</button>
       <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
     </aside>
 
@@ -174,11 +186,11 @@ export default function App() {
           <h1>{view === "ide" ? "Edit the game itself." : view === "monetization" ? "Turn play into value." : worldView ? (view === "world" ? "Shape a living world." : "Build the scene.") : "Build worlds. Make games."}</h1>
           <p>{view === "ide" ? "A local source workspace connected to your paired NEXORA computer." : view === "monetization" ? "Configure optional revenue modules for your game, with privacy and platform requirements built in." : worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
         </div>
-        <div className="top-actions"><span className="connection">{status}</span>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
+        <div className="top-actions"><span className="connection" data-tour="pc-connect">{status}</span>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
       </header>
 
       {view === "workspace" ? <>
-        <section className="welcome-card">
+        <section className="welcome-card" data-tour="welcome">
           <div><span className="eyebrow">FOUNDRY CORE · 0.2</span><h2>Your next universe<br/>starts here.</h2>
             <p>Build terrain from a seed, arrange the environment, then enter it through a first-person controller. No generative model or paid asset pipeline required.</p>
             <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
@@ -191,18 +203,18 @@ export default function App() {
           </button>)}
           {!projects.length && <div className="empty-state"><b>No projects yet</b><p>Create a world above. The viewport can also generate a local preview without the API.</p></div>}
         </div>
-        <section className="launch-card"><div><small>SELECTED PROJECT</small><h3>{selectedProject?.project.name ?? "Choose a project"}</h3><p>Generate terrain, scene objects and a playable Godot project.</p></div><div className="launch-actions"><button className="button secondary" disabled={!selected} onClick={() => changeProject(selected)}>Open World Foundry</button><button className="button primary" disabled={busy || !selected} onClick={generateGame}>{busy ? "Working…" : "Build playable game →"}</button></div></section>
+        <section className="launch-card" data-tour="export"><div><small>SELECTED PROJECT</small><h3>{selectedProject?.project.name ?? "Choose a project"}</h3><p>Generate terrain, scene objects and a playable Godot project.</p></div><div className="launch-actions"><button className="button secondary" disabled={!selected} onClick={() => changeProject(selected)}>Open World Foundry</button><button className="button primary" disabled={busy || !selected} onClick={generateGame}>{busy ? "Working…" : "Build playable game →"}</button></div></section>
         <StudioSponsorSlot />
-        {selected && <><MoviePipelinePanel projectId={selected} api={API} /><AssetCollectionCenter projectId={selected} api={API} /></>}
+        {selected && <><div data-tour="pipeline"><MoviePipelinePanel projectId={selected} api={API} /></div><div data-tour="assets"><AssetCollectionCenter projectId={selected} api={API} /></div></>}
       </> : view === "ide" ? (selectedProject ? <InternalIDE projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project from the workspace before launching the Internal IDE.</p></div>) : view === "monetization" ? (selectedProject ? <MonetizationCenter projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project before configuring its monetization.</p></div>) : <>
-        <div className="editor-toolbar">
+        <div className="editor-toolbar" data-tour="levels">
           <div className="view-switch"><button className={view === "world" ? "selected" : ""} onClick={() => { setMode("edit"); setView("world"); }}>World Foundry</button><button className={view === "scene" ? "selected" : ""} onClick={() => { setMode("edit"); setView("scene"); }}>Scene Editor</button></div>
           <div className="toolbar-right"><span className="seed-tag">SEED {world.seed}</span>
             {mode === "play" ? <button className="button danger" onClick={() => setMode("edit")}>■ Exit world</button> : <><button className="button secondary" onClick={generateGame} disabled={busy || !selected}>{busy ? "Building…" : "Build game"}</button><button className="button primary" onClick={() => { setPlacementType(null); setSculptMode(null); setMode("play"); }}>▶ Enter world</button></>}
           </div>
         </div>
         <div className="editor-layout">
-          <section className="viewport-column">
+          <section className="viewport-column" data-tour="preview">
             <WorldEditor seed={world.seed} width={world.world.width} depth={world.world.depth} amplitude={world.world.amplitude}
               frequency={world.world.frequency} waterLevel={world.water_level} fog={world.fog} sunAngle={world.sun_angle}
               resolution={world.world.resolution} terrainEdits={world.terrain_edits ?? []} sculptMode={sculptMode}
@@ -245,6 +257,7 @@ export default function App() {
         </div>
       </>}
       <footer className="app-footer">PGF · Model-free by design · Godot is the exported gameplay runtime</footer>
+    <NexoraGuidedTour open={tourOpen} onClose={closeTour} onStart={() => { setView("workspace"); void createProject(); }} />
     </section>
   </main>;
 }
