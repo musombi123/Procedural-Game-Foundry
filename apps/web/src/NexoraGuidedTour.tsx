@@ -11,6 +11,7 @@ export default function NexoraGuidedTour({ open, onClose, onStart }: Props) {
     const step = NEXORA_TOUR[index];
     const el = document.querySelector(step.target);
     if (el) {
+      (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
       const rect = el.getBoundingClientRect();
       setTargetBox(rect);
       el.classList.add("nexora-tour-highlight");
