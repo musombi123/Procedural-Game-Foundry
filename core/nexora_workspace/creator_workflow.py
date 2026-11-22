@@ -301,6 +301,25 @@ def _payment_expired(record: dict) -> bool:
     return datetime.now(timezone.utc) >= expiry
 
 
+def _merchant_payment_matches(record: dict, merchant_receipt: str, merchant_amount: int) -> bool:
+    """Compare the independent merchant-side transaction record with the customer claim."""
+    claimed = str(record.get("receipt_code") or "").strip().upper()
+    received = str(merchant_receipt or "").strip().upper()
+    try:
+        expected_amount = int(record.get("amount_kes"))
+        claimed_amount = int(record.get("paid_amount_kes"))
+        received_amount = int(merchant_amount)
+    except (TypeError, ValueError):
+        return False
+    return (
+        record.get("status") == "claimed"
+        and bool(claimed)
+        and received == claimed
+        and claimed_amount == expected_amount
+        and received_amount == expected_amount
+    )
+
+
 def _receipt_in_use(manager: Any, receipt_code: str, payment_id: str) -> bool:
     conn = _connect()
     if conn:
@@ -977,14 +996,11 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         if not record: raise HTTPException(404,"Payment request not found.")
         if record["status"]=="verified": return {"verified":True,"already_verified":True,"plan":record["plan"]}
         if _payment_expired(record): raise HTTPException(410,"This payment request has expired and cannot be verified.")
-        if record["status"]!="claimed" or not record.get("receipt_code") or record.get("paid_amount_kes")!=record.get("amount_kes"):
-            raise HTTPException(409,"A customer receipt claim with the exact invoice amount is required before reconciliation.")
         merchant_receipt=payload.mpesa_receipt.strip().upper()
-        customer_receipt=str(record["receipt_code"]).strip().upper()
-        if merchant_receipt != customer_receipt:
-            raise HTTPException(409,"The M-PESA code in the merchant received-payment record does not match the customer's submitted code.")
-        if payload.paid_amount_kes != int(record["amount_kes"]):
-            raise HTTPException(409,"The amount in the merchant received-payment record does not match the invoice.")
+        if not _merchant_payment_matches(record, merchant_receipt, payload.paid_amount_kes):
+            if merchant_receipt != str(record.get("receipt_code") or "").strip().upper():
+                raise HTTPException(409,"The M-PESA code in the merchant received-payment record does not match the customer's submitted code.")
+            raise HTTPException(409,"The amount or claimed payment status in the merchant received-payment record does not match the invoice.")
         if _receipt_in_use(manager, merchant_receipt, payment_id):
             raise HTTPException(409,"This M-PESA transaction code is already assigned to another payment.")
         record["status"]="verified"; record["verified_at"]=_utc()
