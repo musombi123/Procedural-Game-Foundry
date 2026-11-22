@@ -52,6 +52,7 @@ export default function PCConnectionCard({ onConnected }: { onConnected?: () => 
       setProfile({ ...(body as Profile), readiness: checks.length ? Math.round(passCount / checks.length * 100) : null });
       setState("connected");
       sessionStorage.setItem("nexora:local-agent-token", token.trim());
+      window.dispatchEvent(new Event("nexora:local-agent-connected"));
       setMessage(readinessBody.summary ?? "PC connected for this browser session. Hardware profile loaded.");
       onConnected?.();
     } catch (error) {
