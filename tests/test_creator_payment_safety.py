@@ -27,6 +27,7 @@ def test_legacy_payment_uses_created_at_plus_24_hours() -> None:
 def test_missing_or_invalid_expiry_fails_closed() -> None:
     assert _payment_expired({}) is True
     assert _payment_expired({"expires_at": "not-a-date"}) is True
+    assert _payment_expired({"created_at": "not-a-date"}) is True
 
 
 def test_receipt_code_cannot_be_reused_by_another_local_payment(
