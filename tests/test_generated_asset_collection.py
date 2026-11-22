@@ -38,6 +38,8 @@ def test_registered_and_generated_assets_share_one_collection(tmp_path):
 
     rows = _asset_rows(project)
 
-    assert {row["id"] for row in rows} == {"outpost-1234", rows[1]["id"] if rows[0]["id"] == "outpost-1234" else rows[0]["id"]}
     assert len(rows) == 2
-    assert {row["origin"] for row in rows} == {"project-library", "movie-pipeline"}
+    by_origin = {row["origin"]: row for row in rows}
+    assert by_origin["project-library"]["id"] == "outpost-1234"
+    assert by_origin["movie-pipeline"]["kind"] == "environment"
+    assert by_origin["movie-pipeline"]["filename"] == "environment.glb"
