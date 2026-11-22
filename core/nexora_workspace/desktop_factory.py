@@ -662,6 +662,63 @@ def _publisher_readiness(profile: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+LEVEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+LEVEL_DIFFICULTIES = {"story", "easy", "normal", "hard", "expert"}
+LEVEL_STATES = {"draft", "testing", "approved"}
+
+
+def _levels_path(folder: Path) -> Path:
+    return folder / ".nexora" / "levels.json"
+
+
+def validate_level_manifest(payload: Any) -> dict[str, Any]:
+    """Validate an ordered, project-local multi-level manifest without touching assets."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("levels"), list):
+        raise ValueError("A levels array is required.")
+    supplied = payload["levels"]
+    if not supplied or len(supplied) > 100:
+        raise ValueError("A project must contain between 1 and 100 levels.")
+    normalized = []
+    seen: set[str] = set()
+    for index, raw in enumerate(supplied, start=1):
+        if not isinstance(raw, dict):
+            raise ValueError(f"Level {index} must be an object.")
+        level_id = str(raw.get("id") or "").strip()
+        title = str(raw.get("title") or "").strip()
+        if not LEVEL_ID_RE.fullmatch(level_id):
+            raise ValueError(f"Level {index} has an invalid ID.")
+        if level_id in seen:
+            raise ValueError("Level IDs must be unique.")
+        seen.add(level_id)
+        if not title or len(title) > 80:
+            raise ValueError(f"Level {index} title must contain 1–80 characters.")
+        difficulty = str(raw.get("difficulty") or "normal").lower()
+        state = str(raw.get("state") or "draft").lower()
+        if difficulty not in LEVEL_DIFFICULTIES:
+            raise ValueError(f"Level {index} has an unsupported difficulty.")
+        if state not in LEVEL_STATES:
+            raise ValueError(f"Level {index} has an unsupported state.")
+        asset_ids = raw.get("shared_asset_ids", [])
+        if not isinstance(asset_ids, list) or len(asset_ids) > 200:
+            raise ValueError(f"Level {index} shared_asset_ids must be a list of at most 200 IDs.")
+        clean_assets = []
+        for asset_id in asset_ids:
+            value = str(asset_id).strip()
+            if not LEVEL_ID_RE.fullmatch(value):
+                raise ValueError(f"Level {index} contains an invalid shared asset ID.")
+            if value not in clean_assets:
+                clean_assets.append(value)
+        normalized.append({
+            "id": level_id,
+            "title": title,
+            "order": index,
+            "difficulty": difficulty,
+            "state": state,
+            "shared_asset_ids": clean_assets,
+        })
+    return {"schema_version": "1.0", "levels": normalized, "level_count": len(normalized)}
+
+
 def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     """Register local-only NEXORA desktop factory routes on the local Foundry app."""
     router = APIRouter(prefix="/api/v1/desktop", tags=["NEXORA Desktop Factory"])
@@ -729,6 +786,34 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "owner_account_id": _owner_id(request),
         })
         return {"saved": True, "workspace_root": str(resolved), "previous_root": previous}
+
+    @router.get("/projects/{pid}/levels")
+    def list_project_levels(pid: str, request: Request):
+        folder = _project_folder(manager, pid, request)
+        path = _levels_path(folder)
+        if not path.is_file():
+            return validate_level_manifest({"levels": [{
+                "id": "level-1", "title": "Level 1", "difficulty": "normal",
+                "state": "draft", "shared_asset_ids": [],
+            }]})
+        try:
+            return validate_level_manifest(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(500, "The local level manifest is unreadable or invalid.") from exc
+
+    @router.put("/projects/{pid}/levels")
+    def save_project_levels(pid: str, payload: dict, request: Request):
+        folder = _project_folder(manager, pid, request)
+        try:
+            manifest = validate_level_manifest(payload)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        path = _levels_path(folder)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+        return {"saved": True, **manifest}
 
     @router.post("/projects/{pid}/initialize")
     def initialize_project(pid: str, request: Request):

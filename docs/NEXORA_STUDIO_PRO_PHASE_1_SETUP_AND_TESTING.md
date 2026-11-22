@@ -8,7 +8,9 @@ Phase 1 covers the asset collection path, local Device Access Bond foundation, e
 - `apps/web/src/AssetCollectionCenter.tsx` — asset collection loading/error/empty states, re-scan, search, filters, upload, preview, used-in-level labels, grid/list views.
 - `services/worker/device_bond.py` — local-only consent policy, disabled by default, persistent limits and revocation.
 - `services/worker/local_agent.py` — authenticated GET/PUT endpoints for the local Device Access Bond.
-- `core/nexora_workspace/creator_workflow.py` — persist 24-hour Pochi invoice expiry, reject expired claims/verifications, and reject reused receipt codes.
+- `core/nexora_workspace/creator_workflow.py` — persist 24-hour Pochi invoice expiry, reject expired claims/verifications and reused receipt codes, and require the privileged reconciler to submit the independent merchant-side M-Pesa receipt code and amount. The merchant code must exactly match the customer's submitted code before entitlement activation.
+- `core/nexora_workspace/desktop_factory.py`, `core/nexora_workspace/desktop_api.py` — project-local ordered Level Manager manifest API.
+- `services/worker/workload_guard.py` — fail-closed Device Access Bond check before local production workload preflight.
 - `tests/unit/test_workspace_asset_collection.py`, `tests/test_device_bond.py`, `tests/test_creator_payment_safety.py` — regression coverage.
 - `docs/NEXORA_STUDIO_PRO_PHASES_0_9_TRACKER.md` — implementation and acceptance status.
 
@@ -18,7 +20,7 @@ From the repository root:
 
 ```powershell
 python -m pip install -e ".[dev]"
-pytest -q tests/unit/test_workspace_asset_collection.py tests/test_device_bond.py tests/test_creator_payment_safety.py
+pytest -q tests/unit/test_workspace_asset_collection.py tests/test_device_bond.py tests/test_creator_payment_safety.py tests/test_local_compute_policy.py tests/test_level_manager.py
 pytest -q
 ```
 
@@ -64,7 +66,8 @@ Revoke permission by sending `enabled = $false`. The local record is stored in t
 2. Submit the exact amount and a receipt code before expiry; the payment must remain claimed/pending.
 3. Submit the same receipt code on a second payment; expect HTTP 409.
 4. Attempt to claim or verify an expired payment; expect HTTP 410.
-5. Verify only after reconciling the incoming transaction in the Pochi merchant record; entitlement activates only after verification.
+5. The privileged reconciler must send the M-Pesa code and amount copied from the merchant's own received-payment record in the JSON body, for example `{\"mpesa_receipt\":\"QWE123456\",\"paid_amount_kes\":499}`. The exact normalized code and amount must match the customer claim and invoice; otherwise verification returns HTTP 409 and access stays locked.
+6. Verify only within the 24-hour expiry period. Entitlement activates only after both sides match and the privileged verification succeeds.
 
 Production still requires `NEXORA_DATABASE_URL`, `NEXORA_POCHI_MERCHANT_NUMBER`, `NEXORA_PLAN_PRICES_KES` and `NEXORA_PAYMENT_VERIFICATION_SECRET` to be configured privately on the NEXORA API service.
 
@@ -74,3 +77,15 @@ Production still requires `NEXORA_DATABASE_URL`, `NEXORA_POCHI_MERCHANT_NUMBER`,
 - Export-specific price quotes, bundle pricing, signed single-use export tokens and admin reconciliation UI remain.
 - The asset API fix has regression tests, but a browser-based test on a real generated project is still required.
 - The full Phase 1 suite must pass on the current branch before Phase 2 starts.
+
+
+## Phase 2/3 local API smoke checks
+
+After pairing the Local Agent and opening a project, the local desktop API exposes:
+
+- `GET /api/v1/desktop/projects/{project_id}/levels` — returns the default Level 1 manifest when none has been saved.
+- `PUT /api/v1/desktop/projects/{project_id}/levels` — saves an ordered manifest with 1–100 unique levels, difficulty, state and shared asset IDs. Data is stored locally in the project's `.nexora/levels.json`.
+
+The Level Manager API is a backend foundation; the interactive Level Manager screen and multi-level export integration are not yet complete.
+
+The Device Access Bond must be enabled on the paired computer before local production workload preflight succeeds. Revoking the bond blocks subsequent production job starts. The current implementation returns the selected resource ceilings to the workload caller; live CPU/RAM/GPU throttling and pause/resume controls are still pending.

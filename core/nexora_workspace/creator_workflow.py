@@ -149,6 +149,12 @@ class PaymentClaim(BaseModel):
     paid_amount_kes: int = Field(ge=1,le=250000)
     payer_phone: str = Field(min_length=9,max_length=16,pattern=r"^[+0-9]+$")
 
+class MerchantPaymentVerification(BaseModel):
+    """Independent transaction details copied from the merchant's received-payment record."""
+    model_config = ConfigDict(extra="forbid")
+    mpesa_receipt: str = Field(min_length=8,max_length=24,pattern=r"^[A-Za-z0-9]+$")
+    paid_amount_kes: int = Field(ge=1,le=250000)
+
 def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -237,6 +243,8 @@ def _ensure_billing_schema(conn) -> None:
         )
         """)
         cur.execute("ALTER TABLE nexora_creator_payments ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ")
+        cur.execute("ALTER TABLE nexora_creator_payments ADD COLUMN IF NOT EXISTS merchant_receipt_code TEXT")
+        cur.execute("ALTER TABLE nexora_creator_payments ADD COLUMN IF NOT EXISTS merchant_paid_amount_kes INTEGER")
         cur.execute("""
         CREATE TABLE IF NOT EXISTS nexora_creator_entitlements (
           user_id TEXT PRIMARY KEY, plan TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
@@ -267,11 +275,11 @@ def _find_payment(manager: Any, payment_id: str) -> dict | None:
     if conn:
         _ensure_billing_schema(conn)
         with conn.cursor() as cur:
-            cur.execute("SELECT payment_id,reference,user_id,project_id,plan,amount_kes,status,payer_phone,receipt_code,paid_amount_kes,expires_at,created_at,claimed_at,verified_at FROM nexora_creator_payments WHERE payment_id=%s",(payment_id,))
+            cur.execute("SELECT payment_id,reference,user_id,project_id,plan,amount_kes,status,payer_phone,receipt_code,paid_amount_kes,expires_at,created_at,claimed_at,verified_at,merchant_receipt_code,merchant_paid_amount_kes FROM nexora_creator_payments WHERE payment_id=%s",(payment_id,))
             row=cur.fetchone()
         conn.close()
         if not row: return None
-        keys=["payment_id","reference","user_id","project_id","plan","amount_kes","status","payer_phone","receipt_code","paid_amount_kes","expires_at","created_at","claimed_at","verified_at"]
+        keys=["payment_id","reference","user_id","project_id","plan","amount_kes","status","payer_phone","receipt_code","paid_amount_kes","expires_at","created_at","claimed_at","verified_at","merchant_receipt_code","merchant_paid_amount_kes"]
         return dict(zip(keys,[value.isoformat() if hasattr(value,"isoformat") else value for value in row]))
     path=_json_payments(manager)
     data=json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"payments":[]}
@@ -291,6 +299,25 @@ def _payment_expired(record: dict) -> bool:
     if expiry.tzinfo is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
     return datetime.now(timezone.utc) >= expiry
+
+
+def _merchant_payment_matches(record: dict, merchant_receipt: str, merchant_amount: int) -> bool:
+    """Compare the independent merchant-side transaction record with the customer claim."""
+    claimed = str(record.get("receipt_code") or "").strip().upper()
+    received = str(merchant_receipt or "").strip().upper()
+    try:
+        expected_amount = int(record.get("amount_kes"))
+        claimed_amount = int(record.get("paid_amount_kes"))
+        received_amount = int(merchant_amount)
+    except (TypeError, ValueError):
+        return False
+    return (
+        record.get("status") == "claimed"
+        and bool(claimed)
+        and received == claimed
+        and claimed_amount == expected_amount
+        and received_amount == expected_amount
+    )
 
 
 def _receipt_in_use(manager: Any, receipt_code: str, payment_id: str) -> bool:
@@ -323,7 +350,7 @@ def _save_payment(manager: Any, record: dict, *, create: bool=False) -> dict:
                 cur.execute("""INSERT INTO nexora_creator_payments(payment_id,reference,user_id,project_id,plan,amount_kes,payer_phone,status,expires_at)
                 VALUES(%s,%s,%s,%s,%s,%s,%s,'pending',%s)""",(record["payment_id"],record["reference"],record["user_id"],record.get("project_id"),record["plan"],record["amount_kes"],record["payer_phone"],record.get("expires_at")))
             else:
-                cur.execute("""UPDATE nexora_creator_payments SET status=%s,receipt_code=%s,paid_amount_kes=%s,claimed_at=NOW(),verified_at=CASE WHEN %s='verified' THEN NOW() ELSE verified_at END WHERE payment_id=%s""",(record["status"],record.get("receipt_code"),record.get("paid_amount_kes"),record["status"],record["payment_id"]))
+                cur.execute("""UPDATE nexora_creator_payments SET status=%s,receipt_code=%s,paid_amount_kes=%s,merchant_receipt_code=%s,merchant_paid_amount_kes=%s,claimed_at=CASE WHEN %s='claimed' THEN NOW() ELSE claimed_at END,verified_at=CASE WHEN %s='verified' THEN NOW() ELSE verified_at END WHERE payment_id=%s""",(record["status"],record.get("receipt_code"),record.get("paid_amount_kes"),record.get("merchant_receipt_code"),record.get("merchant_paid_amount_kes"),record["status"],record["status"],record["payment_id"]))
         conn.close()
         return record
     path=_json_payments(manager)
@@ -957,16 +984,28 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
         return {key:value for key,value in record.items() if key!="user_id"}
 
     @router.post("/api/v1/creator-flow/payments/{payment_id}/verify")
-    def verify_payment(payment_id: str, request: Request, x_nexora_payment_secret: str=Header(default="")):
+    def verify_payment(
+        payment_id: str,
+        payload: MerchantPaymentVerification,
+        request: Request,
+        x_nexora_payment_secret: str=Header(default=""),
+    ):
         secret=os.environ.get("NEXORA_PAYMENT_VERIFICATION_SECRET","")
         if not secret or x_nexora_payment_secret!=secret: raise HTTPException(403,"Payment reconciliation authority is required.")
         record=_find_payment(manager,payment_id)
         if not record: raise HTTPException(404,"Payment request not found.")
         if record["status"]=="verified": return {"verified":True,"already_verified":True,"plan":record["plan"]}
         if _payment_expired(record): raise HTTPException(410,"This payment request has expired and cannot be verified.")
-        if record["status"]!="claimed" or not record.get("receipt_code") or record.get("paid_amount_kes")!=record.get("amount_kes"):
-            raise HTTPException(409,"A matching customer receipt claim is required before reconciliation.")
+        merchant_receipt=payload.mpesa_receipt.strip().upper()
+        if not _merchant_payment_matches(record, merchant_receipt, payload.paid_amount_kes):
+            if merchant_receipt != str(record.get("receipt_code") or "").strip().upper():
+                raise HTTPException(409,"The M-PESA code in the merchant received-payment record does not match the customer's submitted code.")
+            raise HTTPException(409,"The amount or claimed payment status in the merchant received-payment record does not match the invoice.")
+        if _receipt_in_use(manager, merchant_receipt, payment_id):
+            raise HTTPException(409,"This M-PESA transaction code is already assigned to another payment.")
         record["status"]="verified"; record["verified_at"]=_utc()
+        record["merchant_receipt_code"]=merchant_receipt
+        record["merchant_paid_amount_kes"]=payload.paid_amount_kes
         _save_payment(manager,record)
         _activate_entitlement(manager,record["user_id"],record["plan"],record["reference"])
         return {"verified":True,"plan":record["plan"],"target_class":PLANS[record["plan"]]["target_class"]}
