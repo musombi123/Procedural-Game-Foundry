@@ -12,7 +12,7 @@ import ShortcutsHelp from "./ShortcutsHelp";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
-const API = (import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8765/engine").replace(/\\/$/, "");
+const API = (import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8765/engine").replace(/\/$/, "");
 const initialWorld = (seed: number): WorldDocument => ({
   seed,
   world: { width: 96, depth: 96, resolution: 64, amplitude: 9, frequency: 0.055, biomes: ["rocky-desert", "alien-forest"], weather: true },
@@ -231,7 +231,8 @@ export default function App() {
             <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
           </div><div className="planet-art"><span /></div>
         </section>
-        <PCConnectionCard />\n        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
+        <PCConnectionCard />
+        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
         <div className="project-grid">
           {projects.map((project) => <button key={project.id} className={selected === project.id ? "project-card chosen" : "project-card"} onClick={() => changeProject(project.id)}>
             <span className="project-icon">◉</span><b>{project.project.name}</b><small>{project.project.genre} · {project.project.dimension}D · seed {project.project.seed}</small><span className="card-open">Open project →</span>
@@ -291,7 +292,10 @@ export default function App() {
           </aside>
         </div>
       </>}
-      <footer className="app-footer">NEXORA · Local-first generation · Godot is the exported gameplay runtime</footer>\n      <GuidedTour onStart={() => { if (!selected) void createProject(); else setView("workspace"); }} />\n      {paletteOpen && <CommandPalette selected={Boolean(selected)} onNavigate={next => { setView(next); if (next === "world" || next === "scene") setMode("edit"); }} onHelp={() => setShortcutsOpen(true)} onClose={() => setPaletteOpen(false)} />}\n      {shortcutsOpen && <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />}
+      <footer className="app-footer">NEXORA · Local-first generation · Godot is the exported gameplay runtime</footer>
+      <GuidedTour onStart={() => { if (!selected) void createProject(); else setView("workspace"); }} />
+      {paletteOpen && <CommandPalette selected={Boolean(selected)} onNavigate={next => { setView(next); if (next === "world" || next === "scene") setMode("edit"); }} onHelp={() => setShortcutsOpen(true)} onClose={() => setPaletteOpen(false)} />}
+      {shortcutsOpen && <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />}
     </section>
   </main>;
 }
