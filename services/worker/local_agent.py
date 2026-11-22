@@ -96,6 +96,27 @@ async def loopback_and_origin_guard(request: Request, call_next):
     }
     if host and host not in allowed_hosts:
         return JSONResponse({"detail": "Invalid local agent Host header."}, status_code=403)
+    # Browser calls to the mounted local engine present the short-lived
+    # Local Agent pairing token. Translate it to the paired cloud credential
+    # only inside this loopback process so the engine's normal account
+    # middleware can enforce project ownership. Never expose the cloud token
+    # back to the browser or persist it to disk here.
+    if request.url.path == "/engine" or request.url.path.startswith("/engine/"):
+        authorization = request.headers.get("authorization", "")
+        if authorization.lower().startswith("bearer "):
+            local_token = authorization.split(" ", 1)[1].strip()
+            principal = _authority().resolve(local_token)
+            if principal:
+                if not principal.cloud_access_token:
+                    return JSONResponse({"detail": "This paired session has no cloud account credential. Pair again."}, status_code=401)
+                rewritten = []
+                for key, value in request.scope.get("headers", []):
+                    if key.lower() == b"authorization":
+                        rewritten.append((key, ("Bearer " + principal.cloud_access_token).encode("latin-1")))
+                    else:
+                        rewritten.append((key, value))
+                request.scope["headers"] = rewritten
+
     origin = request.headers.get("origin")
     # Google returns the PKCE authorization response as a top-level browser
     # navigation. Its cross-site Origin must not be treated as an API CORS
