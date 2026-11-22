@@ -277,7 +277,7 @@ export default function App() {
         <section className="welcome-card" data-tour="workspace-home">
           <div><span className="eyebrow">FOUNDRY CORE · 0.2</span><h2>Your next universe<br/>starts here.</h2>
             <p>Build terrain from a seed, arrange the environment, then enter it through a first-person controller. No generative model or paid asset pipeline required.</p>
-            <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
+            <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={() => void createProject()}>＋ New project</button></div>
           </div><div className="planet-art"><span /></div>
         </section>
         <PCConnectionCard onConnected={() => { void refresh(); }} />
