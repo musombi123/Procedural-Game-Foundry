@@ -1,3 +1,4 @@
+import pytest
 from core.execution_policy import is_local_compute_only_request, local_compute_block_payload
 from services.worker.local_security import PairingAuthority
 from services.worker.system_profile import check_requirements
@@ -129,3 +130,33 @@ def test_image_to_3d_is_blocked_when_gpu_vram_is_busy():
         item["name"] == "Available GPU memory" and item["status"] == "fail"
         for item in result["checks"]
     )
+
+
+
+def test_local_workload_requires_device_access_bond(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    from services.worker.workload_guard import require_device_profile
+
+    monkeypatch.setenv("NEXORA_LOCAL_AGENT", "true")
+    monkeypatch.setenv("NEXORA_LOCAL_AGENT_DATA", str(tmp_path))
+    with pytest.raises(HTTPException) as error:
+        require_device_profile("editor_2d")
+    assert error.value.status_code == 403
+    assert error.value.detail["code"] == "DEVICE_ACCESS_BOND_REQUIRED"
+
+
+def test_enabled_device_bond_is_attached_to_local_preflight(tmp_path, monkeypatch):
+    from services.worker.device_bond import save_bond
+    import services.worker.workload_guard as guard
+
+    monkeypatch.setenv("NEXORA_LOCAL_AGENT", "true")
+    monkeypatch.setenv("NEXORA_LOCAL_AGENT_DATA", str(tmp_path))
+    save_bond(tmp_path, enabled=True, cpu_percent=60, ram_percent=65, gpu_percent=70)
+    monkeypatch.setattr(guard, "collect_system_profile", lambda: {
+        "machine": {"logical_cpu_count": 4, "ram_total_gib": 8, "disk_free_gib": 20},
+        "gpu": {"primary": None},
+        "tools": {"godot": {"available": True}},
+    })
+    result = guard.require_device_profile("editor_2d")
+    assert result["device_access_bond"]["enabled"] is True
+    assert result["device_access_bond"]["limits"]["cpu_percent"] == 60
