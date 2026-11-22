@@ -5,10 +5,14 @@ import AssetCollectionCenter from "./AssetCollectionCenter";
 import InternalIDE from "./InternalIDE";
 import MonetizationCenter from "./MonetizationCenter";
 import StudioSponsorSlot from "./StudioSponsorSlot";
+import GuidedTour from "./GuidedTour";
+import PCConnectionCard from "./PCConnectionCard";
+import CommandPalette from "./CommandPalette";
+import ShortcutsHelp from "./ShortcutsHelp";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
-const API = import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8000";
+const API = (import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8765/engine").replace(/\\/$/, "");
 const initialWorld = (seed: number): WorldDocument => ({
   seed,
   world: { width: 96, depth: 96, resolution: 64, amplitude: 9, frequency: 0.055, biomes: ["rocky-desert", "alien-forest"], weather: true },
@@ -31,7 +35,11 @@ export default function App() {
   const [brushStrength, setBrushStrength] = useState(2.5);
   const [mode, setMode] = useState<"edit" | "play">("edit");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("Connecting to Foundry Core…");
+  const [status, setStatus] = useState("Connecting to local Foundry Core…");
+  const [loadedProjectId, setLoadedProjectId] = useState("");
+  const [saveStatus, setSaveStatus] = useState("All changes saved");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const selectedProject = useMemo(() => projects.find((project) => project.id === selected), [projects, selected]);
   const activeObject = useMemo(() => world.objects.find((item) => item.id === selectedObject), [world.objects, selectedObject]);
 
@@ -52,11 +60,15 @@ export default function App() {
       if (!response.ok) throw new Error("World load unavailable");
       const document = await response.json() as WorldDocument;
       setWorld({ ...document, terrain_edits: document.terrain_edits ?? [] });
+      setLoadedProjectId(projectId);
+      setSaveStatus("All changes saved");
       setSelectedObject("");
       setStatus("World loaded · seed " + document.seed);
     } catch {
       const project = projects.find((item) => item.id === projectId);
       setWorld(initialWorld(project?.project.seed ?? 784215));
+      setLoadedProjectId(projectId);
+      setSaveStatus("Offline · local recovery copy only");
       setStatus("Local preview active · API unavailable");
     }
   }
@@ -81,12 +93,47 @@ export default function App() {
       setProjects((current) => current.some((item) => item.id === project.id) ? current : [project, ...current]);
       setSelected(project.id);
       setWorld(initialWorld(project.project.seed));
+      setLoadedProjectId(project.id);
+      setSaveStatus("All changes saved");
       setView("world");
       setStatus("Project created · shape your world");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Project creation failed");
     } finally { setBusy(false); }
   }
+  useEffect(() => {
+    if (!selected || loadedProjectId !== selected) return;
+    const snapshot = JSON.stringify(world);
+    try { localStorage.setItem("nexora:world-recovery:" + selected, snapshot); } catch { /* local cache is best effort */ }
+    setSaveStatus("Saving changes…");
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(API + "/api/projects/" + encodeURIComponent(selected) + "/world", {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: snapshot
+        });
+        if (!response.ok) throw new Error("Local project save failed");
+        setSaveStatus("All changes saved");
+      } catch {
+        setSaveStatus("Recovery copy saved in this browser · reconnect to sync to the PC project folder");
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [selected, loadedProjectId, world]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault(); setPaletteOpen(value => !value);
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault(); void saveWorld();
+      } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault(); setView("world"); setMode("play");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   function updateWorld(patch: WorldPatch) {
     setWorld((current) => ({ ...current, ...patch, world: { ...current.world, ...(patch.world ?? {}) } }));
   }
@@ -164,7 +211,7 @@ export default function App() {
       <button className={view === "world" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("world"); }}><span>◈</span> World Foundry</button>
       <button className={view === "scene" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("scene"); }}><span>⬡</span> Scene Editor</button>
       <button className={view === "ide" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("ide")}><span>⌘</span> Internal IDE</button>
-      <button className={view === "monetization" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("monetization")}><span>◇</span> Monetization</button>
+      <button data-tour="monetization" className={view === "monetization" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("monetization")}><span>◇</span> Monetization</button>
       <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
     </aside>
 
@@ -174,17 +221,17 @@ export default function App() {
           <h1>{view === "ide" ? "Edit the game itself." : view === "monetization" ? "Turn play into value." : worldView ? (view === "world" ? "Shape a living world." : "Build the scene.") : "Build worlds. Make games."}</h1>
           <p>{view === "ide" ? "A local source workspace connected to your paired NEXORA computer." : view === "monetization" ? "Configure optional revenue modules for your game, with privacy and platform requirements built in." : worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
         </div>
-        <div className="top-actions"><span className="connection">{status}</span>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
+        <div className="top-actions"><span className="connection">{status} · {saveStatus}</span><button className="button secondary" onClick={() => setShortcutsOpen(true)}>Shortcuts</button>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
       </header>
 
       {view === "workspace" ? <>
-        <section className="welcome-card">
+        <section className="welcome-card" data-tour="workspace-home">
           <div><span className="eyebrow">FOUNDRY CORE · 0.2</span><h2>Your next universe<br/>starts here.</h2>
             <p>Build terrain from a seed, arrange the environment, then enter it through a first-person controller. No generative model or paid asset pipeline required.</p>
             <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
           </div><div className="planet-art"><span /></div>
         </section>
-        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
+        <PCConnectionCard />\n        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
         <div className="project-grid">
           {projects.map((project) => <button key={project.id} className={selected === project.id ? "project-card chosen" : "project-card"} onClick={() => changeProject(project.id)}>
             <span className="project-icon">◉</span><b>{project.project.name}</b><small>{project.project.genre} · {project.project.dimension}D · seed {project.project.seed}</small><span className="card-open">Open project →</span>
@@ -195,14 +242,14 @@ export default function App() {
         <StudioSponsorSlot />
         {selected && <><MoviePipelinePanel projectId={selected} api={API} /><AssetCollectionCenter projectId={selected} api={API} /></>}
       </> : view === "ide" ? (selectedProject ? <InternalIDE projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project from the workspace before launching the Internal IDE.</p></div>) : view === "monetization" ? (selectedProject ? <MonetizationCenter projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project before configuring its monetization.</p></div>) : <>
-        <div className="editor-toolbar">
+        <div className="editor-toolbar" data-tour="levels">
           <div className="view-switch"><button className={view === "world" ? "selected" : ""} onClick={() => { setMode("edit"); setView("world"); }}>World Foundry</button><button className={view === "scene" ? "selected" : ""} onClick={() => { setMode("edit"); setView("scene"); }}>Scene Editor</button></div>
           <div className="toolbar-right"><span className="seed-tag">SEED {world.seed}</span>
             {mode === "play" ? <button className="button danger" onClick={() => setMode("edit")}>■ Exit world</button> : <><button className="button secondary" onClick={generateGame} disabled={busy || !selected}>{busy ? "Building…" : "Build game"}</button><button className="button primary" onClick={() => { setPlacementType(null); setSculptMode(null); setMode("play"); }}>▶ Enter world</button></>}
           </div>
         </div>
         <div className="editor-layout">
-          <section className="viewport-column">
+          <section className="viewport-column" data-tour="preview">
             <WorldEditor seed={world.seed} width={world.world.width} depth={world.world.depth} amplitude={world.world.amplitude}
               frequency={world.world.frequency} waterLevel={world.water_level} fog={world.fog} sunAngle={world.sun_angle}
               resolution={world.world.resolution} terrainEdits={world.terrain_edits ?? []} sculptMode={sculptMode}
@@ -244,7 +291,7 @@ export default function App() {
           </aside>
         </div>
       </>}
-      <footer className="app-footer">PGF · Model-free by design · Godot is the exported gameplay runtime</footer>
+      <footer className="app-footer">NEXORA · Local-first generation · Godot is the exported gameplay runtime</footer>\n      <GuidedTour onStart={() => { if (!selected) void createProject(); else setView("workspace"); }} />\n      {paletteOpen && <CommandPalette selected={Boolean(selected)} onNavigate={next => { setView(next); if (next === "world" || next === "scene") setMode("edit"); }} onHelp={() => setShortcutsOpen(true)} onClose={() => setPaletteOpen(false)} />}\n      {shortcutsOpen && <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />}
     </section>
   </main>;
 }
