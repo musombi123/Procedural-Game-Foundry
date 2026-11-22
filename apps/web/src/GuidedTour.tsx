@@ -7,6 +7,8 @@ type Props = { onStart?: () => void };
 const LOCAL_KEY = "nexora:guided-tour:v1";
 const API = localAgentBase(import.meta.env.VITE_NEXORA_LOCAL_AGENT);
 const TOKEN_KEY = "nexora:local-agent-token";
+const ACCOUNT_TOKEN_KEY = "nexora_access_token";
+const ACCOUNT_API = (import.meta.env.VITE_NEXORA_ACCOUNT_API ?? "https://nexora-foundry-api.onrender.com").replace(/\/$/, "");
 
 function readLocal(): TourRecord {
   try {
@@ -28,10 +30,13 @@ export default function GuidedTour({ onStart }: Props) {
   const persist = useCallback(async (next: TourRecord) => {
     setRecord(next);
     localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
-    const token = sessionStorage.getItem(TOKEN_KEY) ?? "";
-    if (!token) return;
+    const localToken = sessionStorage.getItem(TOKEN_KEY) ?? "";
+    const accountToken = localStorage.getItem(ACCOUNT_TOKEN_KEY) ?? "";
+    const token = localToken || accountToken;
+    const endpoint = localToken ? API + "/profile/tour" : accountToken ? ACCOUNT_API + "/api/v1/profile/tour" : "";
+    if (!token || !endpoint) return;
     try {
-      await fetch(API + "/profile/tour", {
+      await fetch(endpoint, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
         body: JSON.stringify(next)
@@ -49,13 +54,16 @@ export default function GuidedTour({ onStart }: Props) {
   useEffect(() => {
     let cancelled = false;
     const loadAccountProgress = async () => {
-      const token = sessionStorage.getItem(TOKEN_KEY) ?? "";
-      if (!token) {
+      const localToken = sessionStorage.getItem(TOKEN_KEY) ?? "";
+      const accountToken = localStorage.getItem(ACCOUNT_TOKEN_KEY) ?? "";
+      const token = localToken || accountToken;
+      const endpoint = localToken ? API + "/profile/tour" : accountToken ? ACCOUNT_API + "/api/v1/profile/tour" : "";
+      if (!token || !endpoint) {
         if (!record.completed && !record.skipped) begin(false);
         return;
       }
       try {
-        const response = await fetch(API + "/profile/tour", { headers: { Authorization: "Bearer " + token } });
+        const response = await fetch(endpoint, { headers: { Authorization: "Bearer " + token } });
         if (!response.ok) throw new Error("Account tour profile is not available");
         const payload = await response.json();
         const remote = payload.tour as TourRecord | undefined;
