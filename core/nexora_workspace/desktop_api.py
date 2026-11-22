@@ -115,9 +115,10 @@ def _create_project_text_file(folder: Path, raw_path: str, content: str) -> dict
     if len(encoded) > MAX_EDIT_BYTES:
         raise HTTPException(413, "New source file exceeds the 2 MiB editor limit.")
     target = _resolve_project_path(folder, raw_path)
-    if not target.parent.is_dir():
-        raise HTTPException(404, "The destination folder does not exist.")
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Re-resolve after directory creation and re-check the project boundary.
+        target = _resolve_project_path(folder, raw_path)
         with target.open("xb") as stream:
             stream.write(encoded)
     except FileExistsError as exc:
