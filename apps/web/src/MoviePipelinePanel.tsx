@@ -108,7 +108,7 @@ export default function MoviePipelinePanel({ projectId, api }: Props) {
           <small style={{ display: "block", marginTop: 6, color: pipeline.source_photo ? "#7ec79c" : "#9fb0c4" }}>{pipeline.source_photo ? pipeline.source_photo.filename : "JPEG, PNG or WebP · max 20 MB"}</small>
         </label>
         <label style={{ padding: 13, border: "1px dashed #49627d", borderRadius: 10, color: "#c5d4e4", fontSize: 13 }}>MOVIE VIDEO · FULL FILM OR CLIP
-          <input type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-msvideo" disabled={busy || !!pipeline.source_video} onChange={event => void uploadInput("video", event.target.files?.[0])} style={{ display: "block", marginTop: 9, maxWidth: "100%" }}/>
+          <input data-tour="video-upload" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-msvideo" disabled={busy || !!pipeline.source_video} onChange={event => void uploadInput("video", event.target.files?.[0])} style={{ display: "block", marginTop: 9, maxWidth: "100%" }}/>
           <small style={{ display: "block", marginTop: 6, color: pipeline.source_video ? "#7ec79c" : "#9fb0c4" }}>{pipeline.source_video ? pipeline.source_video.filename : "MP4, MOV, MKV, WebM or AVI · max 8 GB"}</small>
         </label>
       </div>
