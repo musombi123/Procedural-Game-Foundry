@@ -200,7 +200,15 @@ def build(args):
     # Build authored idle and walk cycles; store both as NLA strips for GLB export.
     rig.animation_data_create()
     idle=bpy.data.actions.new("PGF_Idle")
+    # Blender 4.4+ actions are slotted. Create the Object slot explicitly
+    # before inserting keys; relying on implicit slot creation can leave
+    # animation_data.action_slot unset on Blender 5.0's bundled glTF exporter.
+    idle_slot = None
+    if hasattr(idle, "slots"):
+        idle_slot = idle.slots.new("OBJECT", "PGF_Idle_Object")
     rig.animation_data.action=idle
+    if idle_slot is not None and hasattr(rig.animation_data, "action_slot"):
+        rig.animation_data.action_slot = idle_slot
     for frame,breath in ((1,0.0),(12,.025),(24,0.0)):
         spine=rig.pose.bones["spine"]; spine.rotation_mode="XYZ"; spine.rotation_euler=(breath,0,0)
         spine.keyframe_insert(data_path="rotation_euler",frame=frame,group="spine")
@@ -217,7 +225,12 @@ def build(args):
         strip.action_slot=idle_slot
 
     walk=bpy.data.actions.new("PGF_Walk")
+    walk_slot = None
+    if hasattr(walk, "slots"):
+        walk_slot = walk.slots.new("OBJECT", "PGF_Walk_Object")
     rig.animation_data.action=walk
+    if walk_slot is not None and hasattr(rig.animation_data, "action_slot"):
+        rig.animation_data.action_slot = walk_slot
     for frame,phase in ((1,0),(7,math.pi/2),(13,math.pi),(19,3*math.pi/2),(25,2*math.pi)):
         for name,offset in (("upper_arm.L",0),("upper_arm.R",math.pi),("thigh.L",math.pi),("thigh.R",0)):
             pose=rig.pose.bones[name]; pose.rotation_mode="XYZ"
