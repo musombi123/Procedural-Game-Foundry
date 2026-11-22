@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { localAgentBase, localAgentFetch } from "./localAgentFetch";
 import WorldEditor from "./WorldEditor";
 import MoviePipelinePanel from "./MoviePipelinePanel";
 import AssetCollectionCenter from "./AssetCollectionCenter";
 import InternalIDE from "./InternalIDE";
 import MonetizationCenter from "./MonetizationCenter";
 import StudioSponsorSlot from "./StudioSponsorSlot";
-import NexoraGuidedTour from "./NexoraGuidedTour";
+import GuidedTour from "./GuidedTour";
+import PCConnectionCard from "./PCConnectionCard";
+import CommandPalette from "./CommandPalette";
+import ShortcutsHelp from "./ShortcutsHelp";
 import type { ObjectKind, SceneObject, TerrainEdit, WorldDocument } from "./types";
 
 type Project = { id: string; project: { name: string; genre: string; dimension: string; seed: number } };
-const API = import.meta.env.VITE_PGF_API ?? "http://127.0.0.1:8000";
+const API = localAgentBase(import.meta.env.VITE_PGF_API, "http://127.0.0.1:8765/engine");
 const initialWorld = (seed: number): WorldDocument => ({
   seed,
   world: { width: 96, depth: 96, resolution: 64, amplitude: 9, frequency: 0.055, biomes: ["rocky-desert", "alien-forest"], weather: true },
@@ -25,6 +29,9 @@ export default function App() {
   const [selected, setSelected] = useState("");
   const [view, setView] = useState<"workspace" | "world" | "scene" | "ide" | "monetization">("workspace");
   const [world, setWorld] = useState<WorldDocument>(initialWorld(784215));
+  const worldRef = useRef(world);
+  const undoStack = useRef<WorldDocument[]>([]);
+  const redoStack = useRef<WorldDocument[]>([]);
   const [selectedObject, setSelectedObject] = useState("");
   const [placementType, setPlacementType] = useState<ObjectKind | null>(null);
   const [sculptMode, setSculptMode] = useState<TerrainEdit["operation"] | null>(null);
@@ -32,74 +39,179 @@ export default function App() {
   const [brushStrength, setBrushStrength] = useState(2.5);
   const [mode, setMode] = useState<"edit" | "play">("edit");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("Connecting to Foundry Core…");
-  const [tourOpen, setTourOpen] = useState(false);
-  const [tourReplay, setTourReplay] = useState(false);
-  const tourKey = "nexora_guided_tour_v1";
+  const [status, setStatus] = useState("Connecting to local Foundry Core…");
+  const [loadedProjectId, setLoadedProjectId] = useState("");
+  const [saveStatus, setSaveStatus] = useState("All changes saved");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const selectedProject = useMemo(() => projects.find((project) => project.id === selected), [projects, selected]);
   const activeObject = useMemo(() => world.objects.find((item) => item.id === selectedObject), [world.objects, selectedObject]);
 
-  async function refresh() {
+  async function refresh(restoreLast = true) {
     try {
-      const response = await fetch(API + "/api/projects");
+      const response = await localAgentFetch(API + "/api/projects");
       if (!response.ok) throw new Error("API returned " + response.status);
       const data = await response.json() as Project[];
       setProjects(data);
+      const lastProjectId = localStorage.getItem("nexora:last-project");
+      if (restoreLast && !selected && lastProjectId && data.some(project => project.id === lastProjectId)) {
+        setSelected(lastProjectId);
+        void loadWorld(lastProjectId);
+      }
       setStatus("Foundry Core connected · " + data.length + " project(s)");
     } catch {
       setStatus("Preview ready · start Foundry Core to save and build projects");
     }
   }
   async function loadWorld(projectId: string) {
+    const cacheKey = "nexora:world-recovery:" + projectId;
+    let cachedDocument: WorldDocument | null = null;
+    let cachedDirty = false;
     try {
-      const response = await fetch(API + "/api/projects/" + projectId + "/world");
+      const cachedRaw = localStorage.getItem(cacheKey);
+      if (cachedRaw) {
+        const parsed = JSON.parse(cachedRaw);
+        if (parsed && typeof parsed === "object" && parsed.document) {
+          cachedDocument = parsed.document as WorldDocument;
+          cachedDirty = parsed.dirty === true;
+        } else if (parsed && typeof parsed === "object" && "world" in parsed) {
+          cachedDocument = parsed as WorldDocument;
+        }
+      }
+    } catch { /* ignore corrupt browser cache and use the project file */ }
+    if (cachedDocument && cachedDirty) {
+      worldRef.current = cachedDocument; undoStack.current = []; redoStack.current = [];
+      setWorld(cachedDocument);
+      setLoadedProjectId(projectId);
+      setSaveStatus("Recovered unsynced local draft · syncing to PC");
+      setSelectedObject("");
+      setStatus("Restored the latest unsynced browser copy");
+      return;
+    }
+    try {
+      const response = await localAgentFetch(API + "/api/projects/" + projectId + "/world");
       if (!response.ok) throw new Error("World load unavailable");
       const document = await response.json() as WorldDocument;
-      setWorld({ ...document, terrain_edits: document.terrain_edits ?? [] });
+      const restored = { ...document, terrain_edits: document.terrain_edits ?? [] };
+      worldRef.current = restored; undoStack.current = []; redoStack.current = [];
+      setWorld(restored);
+      setLoadedProjectId(projectId);
+      setSaveStatus("All changes saved");
       setSelectedObject("");
       setStatus("World loaded · seed " + document.seed);
     } catch {
       const project = projects.find((item) => item.id === projectId);
-      setWorld(initialWorld(project?.project.seed ?? 784215));
-      setStatus("Local preview active · API unavailable");
+      const fallback = cachedDocument ?? initialWorld(project?.project.seed ?? 784215);
+      worldRef.current = fallback; undoStack.current = []; redoStack.current = [];
+      setWorld(fallback);
+      setLoadedProjectId(projectId);
+      setSaveStatus(cachedDocument ? "Recovered local draft · reconnect to sync" : "Offline · no recovery copy found");
+      setStatus(cachedDocument ? "Recovered this project's latest browser copy" : "Local preview active · API unavailable");
     }
   }
   useEffect(() => { void refresh(); }, []);
-  useEffect(() => {
-    try { if (!localStorage.getItem(tourKey)) setTourOpen(true); } catch { /* tour still works for this session */ }
-  }, []);
-  function closeTour(result: "completed" | "skipped") {
-    try { localStorage.setItem(tourKey, JSON.stringify({ state: result, lastStep: 9, updatedAt: new Date().toISOString() })); } catch { /* storage may be disabled */ }
-    setTourOpen(false); setTourReplay(false);
-  }
 
   function changeProject(projectId: string) {
+    localStorage.setItem("nexora:last-project", projectId);
     setSelected(projectId);
     setView("world");
     void loadWorld(projectId);
   }
-  async function createProject() {
+  async function createProject(returnToWorkspace = false) {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      const response = await fetch(API + "/api/projects", {
+      const response = await localAgentFetch(API + "/api/projects", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, genre: "science-fiction", dimension: "3d", seed: Math.floor(Math.random() * 1000000) })
       });
       if (!response.ok) throw new Error((await response.json()).detail ?? "Project creation failed");
       const project = await response.json() as Project;
-      await refresh();
+      await refresh(false);
       setProjects((current) => current.some((item) => item.id === project.id) ? current : [project, ...current]);
       setSelected(project.id);
-      setWorld(initialWorld(project.project.seed));
-      setView("world");
-      setStatus("Project created · shape your world");
+      localStorage.setItem("nexora:last-project", project.id);
+      const freshWorld = initialWorld(project.project.seed);
+      worldRef.current = freshWorld; undoStack.current = []; redoStack.current = [];
+      setWorld(freshWorld);
+      setLoadedProjectId(project.id);
+      setSaveStatus("All changes saved");
+      setView(returnToWorkspace ? "workspace" : "world");
+      setStatus("Project created · add your source video to begin");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Project creation failed");
     } finally { setBusy(false); }
   }
+  useEffect(() => {
+    if (!selected || loadedProjectId !== selected) return;
+    const snapshot = JSON.stringify(world);
+    const cacheKey = "nexora:world-recovery:" + selected;
+    try { localStorage.setItem(cacheKey, JSON.stringify({ document: world, updated_at: Date.now(), dirty: true })); } catch { /* local cache is best effort */ }
+    setSaveStatus("Saving changes…");
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await localAgentFetch(API + "/api/projects/" + encodeURIComponent(selected) + "/world", {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: snapshot
+        });
+        if (!response.ok) throw new Error("Local project save failed");
+        if (JSON.stringify(worldRef.current) === snapshot) {
+          try { localStorage.setItem(cacheKey, JSON.stringify({ document: world, updated_at: Date.now(), dirty: false })); } catch { /* local cache is best effort */ }
+          setSaveStatus("All changes saved");
+        }
+      } catch {
+        if (JSON.stringify(worldRef.current) === snapshot) setSaveStatus("Recovery copy saved in this browser · reconnect to sync to the PC project folder");
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [selected, loadedProjectId, world]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault(); setPaletteOpen(value => !value);
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault(); if (event.shiftKey) redoWorld(); else undoWorld();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+        event.preventDefault(); redoWorld();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault(); void saveWorld();
+      } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault(); setView("world"); setMode("play");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  function commitWorld(update: WorldDocument | ((current: WorldDocument) => WorldDocument)) {
+    const current = worldRef.current;
+    const next = typeof update === "function" ? update(current) : update;
+    if (JSON.stringify(current) === JSON.stringify(next)) return;
+    undoStack.current.push(current);
+    if (undoStack.current.length > 100) undoStack.current.shift();
+    redoStack.current = [];
+    worldRef.current = next;
+    setWorld(next);
+  }
+
+  function undoWorld() {
+    const previous = undoStack.current.pop();
+    if (!previous) return;
+    redoStack.current.push(worldRef.current);
+    worldRef.current = previous;
+    setWorld(previous);
+  }
+
+  function redoWorld() {
+    const next = redoStack.current.pop();
+    if (!next) return;
+    undoStack.current.push(worldRef.current);
+    worldRef.current = next;
+    setWorld(next);
+  }
+
   function updateWorld(patch: WorldPatch) {
-    setWorld((current) => ({ ...current, ...patch, world: { ...current.world, ...(patch.world ?? {}) } }));
+    commitWorld((current) => ({ ...current, ...patch, world: { ...current.world, ...(patch.world ?? {}) } }));
   }
   function placeObject(kind: ObjectKind, x: number, z: number) {
     const item: SceneObject = {
@@ -108,30 +220,34 @@ export default function App() {
       kind, x: Math.round(x * 10) / 10, y: 0, z: Math.round(z * 10) / 10,
       rotation: 0, scale: 1, color: colors[kind]
     };
-    setWorld((current) => ({ ...current, objects: [...current.objects, item] }));
+    commitWorld((current) => ({ ...current, objects: [...current.objects, item] }));
     setSelectedObject(item.id);
     setPlacementType(null);
     setStatus(item.name + " placed · scene updated");
   }
   function updateObject(patch: Partial<SceneObject>) {
     if (!selectedObject) return;
-    setWorld((current) => ({ ...current, objects: current.objects.map((item) => item.id === selectedObject ? { ...item, ...patch } : item) }));
+    commitWorld((current) => ({ ...current, objects: current.objects.map((item) => item.id === selectedObject ? { ...item, ...patch } : item) }));
   }
   function sculptTerrain(x: number, z: number) {
     const edit: TerrainEdit = { id: "sculpt-" + Math.random().toString(36).slice(2, 10), operation: sculptMode ?? "raise", x: Math.round(x*10)/10, z: Math.round(z*10)/10, radius: brushRadius, strength: brushStrength };
-    setWorld((current) => ({ ...current, terrain_edits: [...(current.terrain_edits ?? []), edit] }));
+    commitWorld((current) => ({ ...current, terrain_edits: [...(current.terrain_edits ?? []), edit] }));
     setStatus(edit.operation + " stroke applied · terrain updated");
   }
   async function saveWorld() {
     if (!selected) { setStatus("Create or select a project before saving this world"); return; }
     setBusy(true);
     try {
-      const response = await fetch(API + "/api/projects/" + selected + "/world", {
+      const response = await localAgentFetch(API + "/api/projects/" + selected + "/world", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(world)
       });
       if (!response.ok) throw new Error((await response.json()).detail ?? "Save failed");
+      try { localStorage.setItem("nexora:world-recovery:" + selected, JSON.stringify({ document: world, updated_at: Date.now(), dirty: false })); } catch { /* local cache is best effort */ }
+      setSaveStatus("All changes saved");
       setStatus("Scene saved · " + world.objects.length + " placed object(s)");
     } catch {
+      try { localStorage.setItem("nexora:world-recovery:" + selected, JSON.stringify({ document: world, updated_at: Date.now(), dirty: true })); } catch { /* recovery cache unavailable */ }
+      setSaveStatus("Recovery copy saved in this browser · reconnect to sync to the PC project folder");
       setStatus("Preview updated locally · Foundry API is required to persist this scene");
     } finally { setBusy(false); }
   }
@@ -139,17 +255,17 @@ export default function App() {
     if (!selected) { setStatus("Create or select a project first"); return; }
     setBusy(true);
     try {
-      const saveResponse = await fetch(API + "/api/projects/" + selected + "/world", {
+      const saveResponse = await localAgentFetch(API + "/api/projects/" + selected + "/world", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(world)
       });
       if (!saveResponse.ok) throw new Error("Could not save the scene before generation");
-      const response = await fetch(API + "/api/projects/" + selected + "/generate", { method: "POST" });
+      const response = await localAgentFetch(API + "/api/projects/" + selected + "/generate", { method: "POST" });
       if (!response.ok) throw new Error("Generation request failed");
       const job = await response.json() as { id: string };
       let done = false;
       while (!done) {
         await new Promise((resolve) => window.setTimeout(resolve, 850));
-        const current = await (await fetch(API + "/api/jobs/" + job.id)).json();
+        const current = await (await localAgentFetch(API + "/api/jobs/" + job.id)).json();
         setStatus(current.progress + "% · " + current.message);
         if (["COMPLETED", "FAILED"].includes(current.state)) {
           done = true;
@@ -172,11 +288,11 @@ export default function App() {
       </a>
       <div className="side-label">WORKSPACE</div>
       <button className={view === "workspace" ? "side-link active" : "side-link"} onClick={() => setView("workspace")}><span>▦</span> Overview</button>
-      <button className={view === "world" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("world"); }}><span>◈</span> World Foundry</button>
+      <button data-tour="world-nav" className={view === "world" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("world"); }}><span>◈</span> World Foundry</button>
       <button className={view === "scene" ? "side-link active" : "side-link"} onClick={() => { setMode("edit"); setView("scene"); }}><span>⬡</span> Scene Editor</button>
       <button className={view === "ide" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("ide")}><span>⌘</span> Internal IDE</button>
-      <button className={view === "monetization" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("monetization")}><span>◇</span> Monetization</button>
-      <button className="side-link tour-help" data-tour="help" onClick={() => { setTourReplay(true); setTourOpen(true); }} aria-label="Help: replay guided tour">? Help · Take the tour</button>
+      <button data-tour="monetization" className={view === "monetization" ? "side-link active" : "side-link"} disabled={!selected} onClick={() => setView("monetization")}><span>◇</span> Monetization</button>
+      <button data-tour="help-nav" className="side-link" onClick={() => setShortcutsOpen(true)}><span>?</span> Help &amp; Shortcuts</button>
       <div className="sidebar-bottom"><span className="status-led" /> MODEL-FREE ENGINE <small>LOCAL-FIRST GENERATION</small></div>
     </aside>
 
@@ -186,26 +302,28 @@ export default function App() {
           <h1>{view === "ide" ? "Edit the game itself." : view === "monetization" ? "Turn play into value." : worldView ? (view === "world" ? "Shape a living world." : "Build the scene.") : "Build worlds. Make games."}</h1>
           <p>{view === "ide" ? "A local source workspace connected to your paired NEXORA computer." : view === "monetization" ? "Configure optional revenue modules for your game, with privacy and platform requirements built in." : worldView ? "A shared live viewport for terrain generation, environment authoring and scene composition." : "Deterministic creation tools for real, playable 2D and 3D games."}</p>
         </div>
-        <div className="top-actions"><span className="connection" data-tour="pc-connect">{status}</span>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
+        <div className="top-actions"><span className="connection">{status} · {saveStatus}</span>{worldView && <><button className="button secondary" disabled={!undoStack.current.length} onClick={undoWorld} aria-label="Undo last scene edit">Undo</button><button className="button secondary" disabled={!redoStack.current.length} onClick={redoWorld} aria-label="Redo scene edit">Redo</button></>}<button className="button secondary" onClick={() => setShortcutsOpen(true)}>Shortcuts</button>{worldView && <button className="button secondary" disabled={busy} onClick={saveWorld}>Save scene</button>}</div>
       </header>
 
       {view === "workspace" ? <>
-        <section className="welcome-card" data-tour="welcome">
+        <section className="welcome-card" data-tour="workspace-home">
           <div><span className="eyebrow">FOUNDRY CORE · 0.2</span><h2>Your next universe<br/>starts here.</h2>
             <p>Build terrain from a seed, arrange the environment, then enter it through a first-person controller. No generative model or paid asset pipeline required.</p>
-            <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={createProject}>＋ New project</button></div>
+            <div className="create-row"><input value={name} onChange={(event) => setName(event.target.value)} aria-label="Project name" placeholder="Project name"/><button className="button primary" disabled={busy || !name.trim()} onClick={() => void createProject()}>＋ New project</button></div>
           </div><div className="planet-art"><span /></div>
         </section>
-        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={refresh}>↻ Refresh</button></div>
+        <PCConnectionCard onConnected={() => { void refresh(); }} />
+        {!selected && <div className="tour-upload-placeholder" data-tour="upload-video"><b>Ready to add your video?</b><p>Create a project first. The video upload panel appears inside the project workspace.</p><button className="button primary" disabled={busy} onClick={() => void createProject(true)}>＋ Create a project to add video</button></div>}
+        <div className="section-heading"><div><small>YOUR WORK</small><h2>Projects</h2></div><button className="button secondary" onClick={() => void refresh()}>↻ Refresh</button></div>
         <div className="project-grid">
           {projects.map((project) => <button key={project.id} className={selected === project.id ? "project-card chosen" : "project-card"} onClick={() => changeProject(project.id)}>
             <span className="project-icon">◉</span><b>{project.project.name}</b><small>{project.project.genre} · {project.project.dimension}D · seed {project.project.seed}</small><span className="card-open">Open project →</span>
           </button>)}
           {!projects.length && <div className="empty-state"><b>No projects yet</b><p>Create a world above. The viewport can also generate a local preview without the API.</p></div>}
         </div>
-        <section className="launch-card" data-tour="export"><div><small>SELECTED PROJECT</small><h3>{selectedProject?.project.name ?? "Choose a project"}</h3><p>Generate terrain, scene objects and a playable Godot project.</p></div><div className="launch-actions"><button className="button secondary" disabled={!selected} onClick={() => changeProject(selected)}>Open World Foundry</button><button className="button primary" disabled={busy || !selected} onClick={generateGame}>{busy ? "Working…" : "Build playable game →"}</button></div></section>
+        <section className="launch-card"><div><small>SELECTED PROJECT</small><h3>{selectedProject?.project.name ?? "Choose a project"}</h3><p>Generate terrain, scene objects and a playable Godot project.</p></div><div className="launch-actions"><button className="button secondary" disabled={!selected} onClick={() => changeProject(selected)}>Open World Foundry</button><button className="button primary" disabled={busy || !selected} onClick={generateGame}>{busy ? "Working…" : "Build playable game →"}</button></div></section>
         <StudioSponsorSlot />
-        {selected && <><div data-tour="pipeline"><MoviePipelinePanel projectId={selected} api={API} /></div><div data-tour="assets"><AssetCollectionCenter projectId={selected} api={API} /></div></>}
+        {selected && <><MoviePipelinePanel projectId={selected} api={API} /><AssetCollectionCenter projectId={selected} api={API} /></>}
       </> : view === "ide" ? (selectedProject ? <InternalIDE projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project from the workspace before launching the Internal IDE.</p></div>) : view === "monetization" ? (selectedProject ? <MonetizationCenter projectId={selectedProject.id} projectName={selectedProject.project.name} /> : <div className="empty-state"><b>Select a project first</b><p>Open a project before configuring its monetization.</p></div>) : <>
         <div className="editor-toolbar" data-tour="levels">
           <div className="view-switch"><button className={view === "world" ? "selected" : ""} onClick={() => { setMode("edit"); setView("world"); }}>World Foundry</button><button className={view === "scene" ? "selected" : ""} onClick={() => { setMode("edit"); setView("scene"); }}>Scene Editor</button></div>
@@ -245,19 +363,21 @@ export default function App() {
               <div className="object-list">{world.objects.map((item) => <button key={item.id} className={selectedObject === item.id ? "object-row active" : "object-row"} onClick={() => { setSelectedObject(item.id); setPlacementType(null); }}><span className="object-swatch" style={{ background: item.color }}/><span><b>{item.name}</b><small>{item.kind} · {item.x.toFixed(1)}, {item.z.toFixed(1)}</small></span><i>›</i></button>)}
                 {!world.objects.length && <p className="list-empty">Your scene is empty. Pick an asset and click the terrain to place it.</p>}</div>
               {activeObject && <div className="object-inspector">
-                <div className="object-list-title"><b>{activeObject.name}</b><button onClick={() => { setWorld((current) => ({ ...current, objects: current.objects.filter((item) => item.id !== activeObject.id) })); setSelectedObject(""); }}>Delete</button></div>
+                <div className="object-list-title"><b>{activeObject.name}</b><button onClick={() => { commitWorld((current) => ({ ...current, objects: current.objects.filter((item) => item.id !== activeObject.id) })); setSelectedObject(""); }}>Delete</button></div>
                 <label className="field-label">Position X <b>{activeObject.x.toFixed(1)}</b><input type="range" min={-world.world.width / 2 + 2} max={world.world.width / 2 - 2} step=".5" value={activeObject.x} onChange={(event) => updateObject({ x: Number(event.target.value) })}/></label>
                 <label className="field-label">Position Z <b>{activeObject.z.toFixed(1)}</b><input type="range" min={-world.world.depth / 2 + 2} max={world.world.depth / 2 - 2} step=".5" value={activeObject.z} onChange={(event) => updateObject({ z: Number(event.target.value) })}/></label>
                 <label className="field-label">Scale <b>{activeObject.scale.toFixed(2)}×</b><input type="range" min=".25" max="3" step=".05" value={activeObject.scale} onChange={(event) => updateObject({ scale: Number(event.target.value) })}/></label>
                 <div className="rotate-row"><span>Rotation</span><button onClick={() => rotateSelected(-15)}>−15°</button><b>{activeObject.rotation}°</b><button onClick={() => rotateSelected(15)}>＋15°</button></div>
-                <button className="button secondary full-width" onClick={() => { const duplicate = { ...activeObject, id: "obj-" + Math.random().toString(36).slice(2, 10), name: activeObject.name + " copy", x: activeObject.x + 3, z: activeObject.z + 3 }; setWorld((current) => ({ ...current, objects: [...current.objects, duplicate] })); setSelectedObject(duplicate.id); }}>Duplicate object</button>
+                <button className="button secondary full-width" onClick={() => { const duplicate = { ...activeObject, id: "obj-" + Math.random().toString(36).slice(2, 10), name: activeObject.name + " copy", x: activeObject.x + 3, z: activeObject.z + 3 }; commitWorld((current) => ({ ...current, objects: [...current.objects, duplicate] })); setSelectedObject(duplicate.id); }}>Duplicate object</button>
               </div>}
             </>}
           </aside>
         </div>
       </>}
-      <footer className="app-footer">PGF · Model-free by design · Godot is the exported gameplay runtime</footer>
-    <NexoraGuidedTour open={tourOpen} onClose={closeTour} onStart={() => { setView("workspace"); void createProject(); }} />
+      <footer className="app-footer">NEXORA · Local-first generation · Godot is the exported gameplay runtime</footer>
+      <GuidedTour onStart={() => { if (!selected) void createProject(true); else setView("workspace"); }} />
+      {paletteOpen && <CommandPalette selected={Boolean(selected)} onNavigate={next => { setView(next); if (next === "world" || next === "scene") setMode("edit"); }} onHelp={() => setShortcutsOpen(true)} onClose={() => setPaletteOpen(false)} />}
+      {shortcutsOpen && <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />}
     </section>
   </main>;
 }
