@@ -39,7 +39,7 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from services.worker.local_security import PairingAuthority, get_pairing_authority
+from services.worker.local_security import PairingAuthority, get_pairing_authority, get_cloud_access_token
 from services.worker.system_profile import check_requirements, collect_system_profile
 from services.worker.local_workspace import load_workspace_root, register_local_workspace_routes
 
@@ -96,27 +96,9 @@ async def loopback_and_origin_guard(request: Request, call_next):
     }
     if host and host not in allowed_hosts:
         return JSONResponse({"detail": "Invalid local agent Host header."}, status_code=403)
-    # Browser calls to the mounted local engine present the short-lived
-    # Local Agent pairing token. Translate it to the paired cloud credential
-    # only inside this loopback process so the engine's normal account
-    # middleware can enforce project ownership. Never expose the cloud token
-    # back to the browser or persist it to disk here.
-    if request.url.path == "/engine" or request.url.path.startswith("/engine/"):
-        authorization = request.headers.get("authorization", "")
-        if authorization.lower().startswith("bearer "):
-            local_token = authorization.split(" ", 1)[1].strip()
-            principal = _authority().resolve(local_token)
-            if principal:
-                if not principal.cloud_access_token:
-                    return JSONResponse({"detail": "This paired session has no cloud account credential. Pair again."}, status_code=401)
-                rewritten = []
-                for key, value in request.scope.get("headers", []):
-                    if key.lower() == b"authorization":
-                        rewritten.append((key, ("Bearer " + principal.cloud_access_token).encode("latin-1")))
-                    else:
-                        rewritten.append((key, value))
-                request.scope["headers"] = rewritten
-
+    # Keep the short-lived Local Agent token intact for the mounted engine.
+    # The engine validates it against the same in-memory PairingAuthority;
+    # cloud account credentials are used only by explicit account-proxy routes.
     origin = request.headers.get("origin")
     # Google returns the PKCE authorization response as a top-level browser
     # navigation. Its cross-site Origin must not be treated as an API CORS
@@ -131,6 +113,13 @@ async def loopback_and_origin_guard(request: Request, call_next):
 class PairRequest(BaseModel):
     code: str = Field(min_length=8, max_length=8, pattern=r"^[0-9]{8}$")
     account_access_token: str = Field(min_length=20, max_length=4096)
+
+
+class TourProgressRequest(BaseModel):
+    version: int = Field(default=1, ge=1, le=100)
+    completed: bool = False
+    skipped: bool = False
+    last_step: int = Field(default=0, ge=0, le=100)
 
 
 class RequirementsRequest(BaseModel):
@@ -338,6 +327,43 @@ def disconnect(user_id: str = Depends(_require_paired), authorization: str | Non
     token = (authorization or "").split(" ", 1)[-1].strip()
     _authority().revoke(token)
     return {"disconnected": True}
+
+
+def _proxy_account_tour(user_id: str, method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    token = get_cloud_access_token(user_id)
+    if not token:
+        raise HTTPException(401, "This paired PC session has no active NEXORA account session. Sign in and pair again.")
+    base = os.environ.get("NEXORA_CLOUD_API_URL", "https://nexora-foundry-api.onrender.com").rstrip("/")
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = UrlRequest(
+        base + "/api/v1/profile/tour",
+        data=body,
+        headers={"Authorization": "Bearer " + token, "Accept": "application/json", "Content-Type": "application/json"},
+        method=method,
+    )
+    try:
+        with urlopen(request, timeout=12) as response:
+            return json.loads(response.read(128 * 1024).decode("utf-8"))
+    except HTTPError as exc:
+        detail = "NEXORA account service rejected the tour profile request."
+        try:
+            error_body = json.loads(exc.read(16 * 1024).decode("utf-8"))
+            detail = str(error_body.get("detail") or detail)
+        except (ValueError, OSError):
+            pass
+        raise HTTPException(exc.code, detail) from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        raise HTTPException(503, "Could not sync tour progress with your NEXORA account. Your browser copy is retained.") from exc
+
+
+@app.get("/profile/tour")
+def read_account_tour(user_id: str = Depends(_require_paired)):
+    return _proxy_account_tour(user_id, "GET")
+
+
+@app.put("/profile/tour")
+def write_account_tour(payload: TourProgressRequest, user_id: str = Depends(_require_paired)):
+    return _proxy_account_tour(user_id, "PUT", payload.model_dump())
 
 
 @app.get("/system/capabilities")
