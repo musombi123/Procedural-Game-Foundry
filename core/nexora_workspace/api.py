@@ -1269,8 +1269,16 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
             artifact_file=folder/"workspace_jobs"/f"{job.id}.json"
             try:
                 artifact_data=json.loads(artifact_file.read_text(encoding="utf-8")) if artifact_file.is_file() else {}
-                data["artifacts"]=artifact_data.get("artifacts",[]) if isinstance(artifact_data,dict) else []
-            except (OSError,ValueError):
+                artifacts=artifact_data.get("artifacts",[]) if isinstance(artifact_data,dict) else []
+                data["artifacts"]=[
+                    {
+                        **item,
+                        "download_url": f"/api/v1/workspace/jobs/{job.id}/artifacts/{item['id']}/download",
+                    }
+                    for item in artifacts
+                    if isinstance(item,dict) and item.get("id")
+                ]
+            except (OSError,ValueError,TypeError):
                 data["artifacts"]=[]
             records.append(data)
         return {"jobs":records}
