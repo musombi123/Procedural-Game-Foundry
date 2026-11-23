@@ -886,7 +886,7 @@ def _queue_creator_step(pid: str, folder: Path, owner_id: str, step: str, backgr
     workflow=_load_workflow(folder)
     _assert_entitled(manager,owner_id,workflow.plan)
     _validate_plan(workflow)
-    job=jobs.add(Job.create(pid))
+    job=jobs.add(Job.create(pid, kind="creator." + step))
     job_root=folder/"workspace_jobs"
     job_root.mkdir(exist_ok=True)
     (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner_id},indent=2),encoding="utf-8")
@@ -924,7 +924,7 @@ def register_creator_workflow_routes(app: Any, manager: Any, jobs: Any) -> None:
             raise HTTPException(503,"Image-to-3D GPU worker is not configured. Install the MIT-licensed TripoSR worker and set NEXORA_TRIPOSR_ROOT; image files are never passed off as generated meshes.")
         if suffix not in IMAGE_EXTENSIONS|MODEL_EXTENSIONS: raise HTTPException(415,"Only image or 3D model assets can be converted.")
         if suffix in MODEL_EXTENSIONS and not shutil.which("blender"): raise HTTPException(503,"Blender is required for model normalization.")
-        job=jobs.add(Job.create(pid))
+        job=jobs.add(Job.create(pid, kind="asset.convert", target=payload.target_role))
         job_root=folder/"workspace_jobs"; job_root.mkdir(exist_ok=True)
         (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
         background.add_task(_run_asset_conversion,folder,asset_id,owner,payload.target_role,payload.max_faces,job.id,jobs)
