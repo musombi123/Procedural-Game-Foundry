@@ -1248,10 +1248,21 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
     def list_workspace_jobs(pid: str, request: Request):
         try: folder=manager.path_for(pid); manager.load(pid)
         except FileNotFoundError: raise HTTPException(404,"Project not found")
+        owner = _owner_id(request)
         _assert_owner(folder,request)
         records=[]
         matching = jobs.list_for_project(pid) if hasattr(jobs, "list_for_project") else []
         for job in matching:
+            # Job metadata can outlive project sessions; never expose a record
+            # created under a different account if a project was transferred
+            # through an explicitly authorized ownership workflow.
+            owner_path = folder/"workspace_jobs"/f"{job.id}.owner.json"
+            try:
+                owner_record = json.loads(owner_path.read_text(encoding="utf-8"))
+            except (OSError,ValueError):
+                continue
+            if str(owner_record.get("user_id") or "") != str(owner):
+                continue
             data=job.as_dict()
             state = job.state.value if hasattr(job.state, "value") else str(job.state)
             data["state"]=state.lower()
