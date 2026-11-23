@@ -565,9 +565,9 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     @router.post("/api/v1/desktop/projects/{pid}/assets/default-pack")
     def apply_default_asset_pack(pid: str, payload: DefaultAssetPackRequest, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
-        project_root = (folder / "game").resolve()
-        if folder.resolve() not in project_root.parents:
-            raise HTTPException(403, "Invalid Godot project directory.")
+        project_root = folder.resolve()
+        if project_root == folder.resolve().parent:
+            raise HTTPException(403, "Invalid project asset directory.")
         project_root.mkdir(parents=True, exist_ok=True)
         try:
             result = install_default_asset_pack(
@@ -626,32 +626,6 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             models[0], media_type="model/gltf-binary", filename=models[0].name,
             headers={"Cache-Control": "no-store", "X-NEXORA-Asset-Provider": "Poly Haven"},
         )
-
-    @router.get("/api/v1/desktop/assets/3d/search")
-    def search_3d_assets(request: FastAPIRequest, q: str = "", limit: int = 40):
-        _owner(request)
-        try:
-            return search_polyhaven_models(q, limit)
-        except PolyHavenError as exc:
-            raise HTTPException(502, str(exc)) from exc
-
-    @router.post("/api/v1/desktop/projects/{pid}/assets/3d/download")
-    def download_3d_asset(pid: str, payload: PolyHavenModelDownloadRequest, request: FastAPIRequest):
-        folder, definition, owner_id = _project(manager, pid, request)
-        project_root = (folder / "game").resolve()
-        if folder.resolve() not in project_root.parents:
-            raise HTTPException(403, "Invalid Godot project directory.")
-        project_root.mkdir(parents=True, exist_ok=True)
-        try:
-            result = download_polyhaven_model(project_root, payload.asset_id, payload.resolution)
-        except PolyHavenError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        return {
-            **result,
-            "project_id": definition.id,
-            "project_name": definition.project.name,
-            "owner_id": owner_id,
-        }
 
     @router.post("/api/v1/desktop/projects/import", status_code=201)
     def import_godot_folder(payload: DesktopImportRequest, request: FastAPIRequest):
