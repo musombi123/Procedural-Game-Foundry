@@ -735,6 +735,9 @@ class WorkspaceTaskPayload(BaseModel):
     due_date: str | None = Field(default=None,pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
+    # Job state follows the selected local project root, including workspace migrations.
+    if hasattr(jobs, "bind_manager"):
+        jobs.bind_manager(manager)
     router = APIRouter()
 
     @router.get("/api/v1/studio/templates")
@@ -1073,7 +1076,7 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         metadata["duration_seconds"]=round(duration,3)
         document.source_video=metadata
         store.save(document)
-        job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid))
+        job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid, kind=kind, target=target))
         job_root=folder/"workspace_jobs"; job_root.mkdir(exist_ok=True)
         (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
         background.add_task(_run_workspace_video_analysis,job.id,folder,jobs)
@@ -1247,12 +1250,17 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         except FileNotFoundError: raise HTTPException(404,"Project not found")
         _assert_owner(folder,request)
         records=[]
-        with jobs._lock:
-            matching=[job for job in jobs._jobs.values() if job.project_id==pid]
-        for job in sorted(matching,key=lambda item:item.created_at,reverse=True):
-            data=job.as_dict(); data["state"]=job.state.value.lower()
+        matching = jobs.list_for_project(pid) if hasattr(jobs, "list_for_project") else []
+        for job in matching:
+            data=job.as_dict()
+            state = job.state.value if hasattr(job.state, "value") else str(job.state)
+            data["state"]=state.lower()
             artifact_file=folder/"workspace_jobs"/f"{job.id}.json"
-            data["artifacts"]=json.loads(artifact_file.read_text(encoding="utf-8")).get("artifacts",[]) if artifact_file.is_file() else []
+            try:
+                artifact_data=json.loads(artifact_file.read_text(encoding="utf-8")) if artifact_file.is_file() else {}
+                data["artifacts"]=artifact_data.get("artifacts",[]) if isinstance(artifact_data,dict) else []
+            except (OSError,ValueError):
+                data["artifacts"]=[]
             records.append(data)
         return {"jobs":records}
 
