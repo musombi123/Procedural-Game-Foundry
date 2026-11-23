@@ -26,6 +26,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request as FastAPIRequ
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.asset_registry.registry import AssetRegistry
 from core.nexora_workspace.desktop_factory import _levels_path, validate_level_manifest, validate_monetization_manifest
 from core.nexora_workspace.local_factory import (
     _archive_project, _atomic_json, _ensure_project_layout, _project, _safe_extract,
@@ -565,10 +566,9 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     @router.post("/api/v1/desktop/projects/{pid}/assets/default-pack")
     def apply_default_asset_pack(pid: str, payload: DefaultAssetPackRequest, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
-        project_root = (folder / "game").resolve()
-        if folder.resolve() not in project_root.parents:
-            raise HTTPException(403, "Invalid Godot project directory.")
-        project_root.mkdir(parents=True, exist_ok=True)
+        project_root = folder.resolve()
+        if not project_root.is_dir():
+            raise HTTPException(404, "Project asset directory was not found.")
         try:
             result = install_default_asset_pack(
                 project_root, payload.pack_id, overwrite=payload.overwrite_existing
@@ -582,6 +582,25 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "owner_id": owner_id,
         }
 
+    @router.get("/api/v1/desktop/projects/{pid}/assets/library")
+    def list_desktop_project_asset_library(pid: str, request: FastAPIRequest):
+        folder, definition, owner_id = _project(manager, pid, request)
+        registry = AssetRegistry((folder / "assets").resolve())
+        assets = []
+        for record in registry.list():
+            relative_path = str(record.get("path") or "")
+            file_path = (registry.root / relative_path).resolve()
+            if registry.root not in file_path.parents or not file_path.is_file():
+                continue
+            assets.append({
+                **record,
+                "name": file_path.stem,
+                "type": file_path.suffix.lower().lstrip("."),
+                "size_bytes": file_path.stat().st_size,
+            })
+        return {"project_id": definition.id, "project_name": definition.project.name,
+                "owner_id": owner_id, "assets": assets, "count": len(assets)}
+
     @router.get("/api/v1/desktop/assets/3d/search")
     def search_3d_assets(request: FastAPIRequest, q: str = "", limit: int = 40):
         _owner(request)
@@ -593,12 +612,11 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     @router.post("/api/v1/desktop/projects/{pid}/assets/3d/download")
     def download_3d_asset(pid: str, payload: PolyHavenModelDownloadRequest, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
-        project_root = (folder / "game").resolve()
-        if folder.resolve() not in project_root.parents:
-            raise HTTPException(403, "Invalid Godot project directory.")
-        project_root.mkdir(parents=True, exist_ok=True)
+        project_root = folder.resolve()
+        if not project_root.is_dir():
+            raise HTTPException(404, "Project asset directory was not found.")
         try:
-            result = download_polyhaven_model(folder, payload.asset_id, payload.resolution)
+            result = download_polyhaven_model(project_root, payload.asset_id, payload.resolution)
         except PolyHavenError as exc:
             raise HTTPException(422, str(exc)) from exc
         return {
@@ -626,32 +644,6 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             models[0], media_type="model/gltf-binary", filename=models[0].name,
             headers={"Cache-Control": "no-store", "X-NEXORA-Asset-Provider": "Poly Haven"},
         )
-
-    @router.get("/api/v1/desktop/assets/3d/search")
-    def search_3d_assets(request: FastAPIRequest, q: str = "", limit: int = 40):
-        _owner(request)
-        try:
-            return search_polyhaven_models(q, limit)
-        except PolyHavenError as exc:
-            raise HTTPException(502, str(exc)) from exc
-
-    @router.post("/api/v1/desktop/projects/{pid}/assets/3d/download")
-    def download_3d_asset(pid: str, payload: PolyHavenModelDownloadRequest, request: FastAPIRequest):
-        folder, definition, owner_id = _project(manager, pid, request)
-        project_root = (folder / "game").resolve()
-        if folder.resolve() not in project_root.parents:
-            raise HTTPException(403, "Invalid Godot project directory.")
-        project_root.mkdir(parents=True, exist_ok=True)
-        try:
-            result = download_polyhaven_model(project_root, payload.asset_id, payload.resolution)
-        except PolyHavenError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        return {
-            **result,
-            "project_id": definition.id,
-            "project_name": definition.project.name,
-            "owner_id": owner_id,
-        }
 
     @router.post("/api/v1/desktop/projects/import", status_code=201)
     def import_godot_folder(payload: DesktopImportRequest, request: FastAPIRequest):
