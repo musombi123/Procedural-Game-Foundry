@@ -567,9 +567,8 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     def apply_default_asset_pack(pid: str, payload: DefaultAssetPackRequest, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
         project_root = folder.resolve()
-        if project_root == folder.resolve().parent:
-            raise HTTPException(403, "Invalid project asset directory.")
-        project_root.mkdir(parents=True, exist_ok=True)
+        if not project_root.is_dir():
+            raise HTTPException(404, "Project asset directory was not found.")
         try:
             result = install_default_asset_pack(
                 project_root, payload.pack_id, overwrite=payload.overwrite_existing
@@ -613,12 +612,11 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     @router.post("/api/v1/desktop/projects/{pid}/assets/3d/download")
     def download_3d_asset(pid: str, payload: PolyHavenModelDownloadRequest, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
-        project_root = (folder / "game").resolve()
-        if folder.resolve() not in project_root.parents:
-            raise HTTPException(403, "Invalid Godot project directory.")
-        project_root.mkdir(parents=True, exist_ok=True)
+        project_root = folder.resolve()
+        if not project_root.is_dir():
+            raise HTTPException(404, "Project asset directory was not found.")
         try:
-            result = download_polyhaven_model(folder, payload.asset_id, payload.resolution)
+            result = download_polyhaven_model(project_root, payload.asset_id, payload.resolution)
         except PolyHavenError as exc:
             raise HTTPException(422, str(exc)) from exc
         return {
