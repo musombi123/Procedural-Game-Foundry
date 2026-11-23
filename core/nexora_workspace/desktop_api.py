@@ -26,6 +26,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request as FastAPIRequ
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.asset_registry.registry import AssetRegistry
 from core.nexora_workspace.desktop_factory import _levels_path, validate_level_manifest, validate_monetization_manifest
 from core.nexora_workspace.local_factory import (
     _archive_project, _atomic_json, _ensure_project_layout, _project, _safe_extract,
@@ -581,6 +582,25 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
             "project_name": definition.project.name,
             "owner_id": owner_id,
         }
+
+    @router.get("/api/v1/desktop/projects/{pid}/assets/library")
+    def list_desktop_project_asset_library(pid: str, request: FastAPIRequest):
+        folder, definition, owner_id = _project(manager, pid, request)
+        registry = AssetRegistry((folder / "assets").resolve())
+        assets = []
+        for record in registry.list():
+            relative_path = str(record.get("path") or "")
+            file_path = (registry.root / relative_path).resolve()
+            if registry.root not in file_path.parents or not file_path.is_file():
+                continue
+            assets.append({
+                **record,
+                "name": file_path.stem,
+                "type": file_path.suffix.lower().lstrip("."),
+                "size_bytes": file_path.stat().st_size,
+            })
+        return {"project_id": definition.id, "project_name": definition.project.name,
+                "owner_id": owner_id, "assets": assets, "count": len(assets)}
 
     @router.get("/api/v1/desktop/assets/3d/search")
     def search_3d_assets(request: FastAPIRequest, q: str = "", limit: int = 40):
