@@ -1,12 +1,21 @@
-export type TourStep = { id: string; target: string; title: string; body: string; action?: boolean };
+export type TourStep = {
+  id: string;
+  title: string;
+  body: string;
+  target: string;
+  action?: string;
+};
+
+export const NEXORA_TOUR_VERSION = 1;
+
 export const NEXORA_TOUR: TourStep[] = [
-  { id: "welcome", target: "[data-tour='welcome']", title: "Welcome to NEXORA", body: "Turn your video or character into a playable game. This quick tour shows you where to start." },
-  { id: "pc", target: "[data-tour='pc-connect']", title: "Connect your PC", body: "Connect the NEXORA PC app to run heavy processing locally. Device access and readiness details appear when the desktop agent is available." },
-  { id: "video", target: "[data-tour='video-upload']", title: "Add your video or portrait", body: "Choose your source media from the production workflow. Files are handled by your connected local engine; confirm the PC connection before large uploads.", action: true },
-  { id: "assets", target: "[data-tour='assets']", title: "Character and assets", body: "Build or review the character and generated assets in the project collection. Assets are project-scoped and can be previewed here." },
-  { id: "pipeline", target: "[data-tour='pipeline']", title: "Generation pipeline", body: "Follow the review-gated stages. Review each output and approve it before moving on." },
-  { id: "preview", target: "[data-tour='preview']", title: "Preview and test", body: "Edit the world, inspect objects, and enter the live viewport to test your scene." },
-  { id: "levels", target: "[data-tour='levels']", title: "Build your levels", body: "Use the world and scene editor to shape gameplay. Create additional levels through the game engine workflow when supported." },
-  { id: "export", target: "[data-tour='export']", title: "Export and monetization", body: "Explore project monetization settings and export options. Export prices and platform availability are shown by the connected engine—not invented by this tour." },
-  { id: "help", target: "[data-tour='help']", title: "Plans and help", body: "Check account and plan information in the connected product, or replay this tour any time. Ready? Start your first project." }
+  { id: "welcome", title: "Welcome to NEXORA", body: "Turn your idea into a playable game. This short tour shows the current workspace and the path from source media to a build.", target: '[data-tour="workspace-home"]' },
+  { id: "connect", title: "Connect your PC", body: "NEXORA's Local Agent runs heavy processing on your computer. Connect the Local Agent before starting device-side work. Device access and hardware readiness are shown by the agent; no permission is granted silently.", target: '[data-tour="connect-pc"] .button.primary' },
+  { id: "video", title: "Add your video", body: "If you have not created a project, use the highlighted action first. Then choose a video in Movie → playable game. The selected file is sent to your connected local Foundry engine for processing.", target: '[data-tour="upload-video"]' },
+  { id: "assets", title: "Character and assets", body: "The production panels build your player, environment, actors and props. Generated and uploaded files are collected in Asset Collection Center.", target: '[data-tour="asset-center"]' },
+  { id: "pipeline", title: "Follow the pipeline", body: "Work through analysis, player, environment, actors and props, audio, gameplay, and assembly. Review-gated stages keep approvals visible.", target: '[data-tour="pipeline"]' },
+  { id: "preview", title: "Preview and test", body: "Open World Foundry or Scene Editor to inspect the 3D world, place objects, adjust terrain and enter the playable preview.", target: '[data-tour="world-nav"]' },
+  { id: "levels", title: "Build more levels", body: "The current frontend does not yet include a multi-level manager. World Foundry edits the current scene; Level 2 and later need a dedicated level workflow.", target: '[data-tour="levels"]' },
+  { id: "export", title: "Export and monetization", body: "The Export Center and Android/PC export selector are not yet exposed in this frontend. NEXORA's stated starting price is KES 499, but live quotes and checkout are not connected. Monetization Center stores configuration only; platform SDKs and billing are not active.", target: '[data-tour="monetization"]' },
+  { id: "help", title: "Plans, support and help", body: "Help & Shortcuts contains keyboard guidance and the tour replay action. Plan, payment and support links are not yet surfaced in this workspace. You can now start building.", target: '[data-tour="help-nav"]' }
 ];

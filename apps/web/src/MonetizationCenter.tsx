@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { localAgentBase } from "./localAgentFetch";
 
-const LOCAL_AGENT = (import.meta.env.VITE_NEXORA_LOCAL_AGENT ?? "http://127.0.0.1:8765").replace(/\/$/, "") + "/engine";
+const LOCAL_AGENT = localAgentBase(import.meta.env.VITE_NEXORA_LOCAL_AGENT) + "/engine";
 const ADDONS = [
   { id: "analytics", name: "Game analytics", description: "Prepare a privacy-conscious local event schema for sessions, progression and retention.", status: "Local event schema" },
   { id: "rewarded_ads", name: "Rewarded ads", description: "Configure opt-in rewarded placements. A platform SDK is required before ads can be served.", status: "AdMob SDK required" },
@@ -25,7 +26,7 @@ const emptyManifest: Manifest = {
 };
 
 export default function MonetizationCenter({ projectId, projectName }: { projectId: string; projectName: string }) {
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => sessionStorage.getItem("nexora:local-agent-token") ?? "");
   const [manifest, setManifest] = useState<Manifest>(emptyManifest);
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);

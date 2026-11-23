@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 import AvatarPreview from "./AvatarPreview";
 
 type Props={projectId:string;api:string;portraitReady:boolean;playerReady:boolean;onBuilt:()=>void};
@@ -9,7 +10,7 @@ export default function PlayerAvatarBuilder({projectId,api,portraitReady,playerR
  async function generate(){
   setBusy(true);
   try{
-   const r=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/player/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({proportions:{height,shoulder_width:shoulders,hip_width:hips,leg_ratio:legs,build,face_center_x:faceX,face_top:faceTop,face_width:faceWidth,face_height:faceHeight}})});
+   const r=await localAgentFetch(api+"/api/projects/"+projectId+"/movie-pipeline/player/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({proportions:{height,shoulder_width:shoulders,hip_width:hips,leg_ratio:legs,build,face_center_x:faceX,face_top:faceTop,face_width:faceWidth,face_height:faceHeight}})});
    const data=await r.json();if(!r.ok)throw new Error(data.detail??"Player generation failed");
    setAsset(data.glb_scene);setResult("Avatar generated with "+(data.stage?.output?.bone_count??"a humanoid")+" rig. Review the GLB before approving the Player stage.");onBuilt();
   }catch(e){setResult(e instanceof Error?e.message:"Player generation failed");}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 import AvatarPreview from "./AvatarPreview";
 
 type Asset = {
@@ -36,8 +37,8 @@ export default function AssetCollectionCenter({ projectId, api }: Props) {
     setBusy(true); setError("");
     try {
       const [assetResponse, worldResponse] = await Promise.all([
-        fetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets"),
-        fetch(api + "/api/projects/" + encodeURIComponent(projectId) + "/world")
+        localAgentFetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets"),
+        localAgentFetch(api + "/api/projects/" + encodeURIComponent(projectId) + "/world")
       ]);
       if (!assetResponse.ok) {
         const body = await assetResponse.json().catch(() => ({}));
@@ -78,7 +79,7 @@ export default function AssetCollectionCenter({ projectId, api }: Props) {
       data.append("kind", kind);
       data.append("license_name", "Creator confirms usage rights");
       data.append("source", "creator-upload");
-      const response = await fetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets", { method: "POST", body: data });
+      const response = await localAgentFetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets", { method: "POST", body: data });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail?.message || body.detail || "Upload failed with HTTP " + response.status);
       setNotice("Uploaded " + file.name + " and registered it in the project library.");
@@ -93,7 +94,7 @@ export default function AssetCollectionCenter({ projectId, api }: Props) {
     if (!window.confirm("Delete " + asset.filename + " from this project?")) return;
     setBusy(true);
     try {
-      const response = await fetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets/" + encodeURIComponent(asset.id), { method: "DELETE" });
+      const response = await localAgentFetch(api + "/api/v1/workspace/projects/" + encodeURIComponent(projectId) + "/assets/" + encodeURIComponent(asset.id), { method: "DELETE" });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail || "Asset deletion failed.");
       if (selected?.id === asset.id) setSelected(null);
@@ -105,7 +106,7 @@ export default function AssetCollectionCenter({ projectId, api }: Props) {
 
   const selectedUrl = selected ? fileUrl(api, projectId, selected.id) : "";
   const selectedType = selected?.content_type.toLowerCase() ?? "";
-  return <section style={{ marginTop: 22, padding: 18, border: "1px solid #2c4564", borderRadius: 14, background: "#0b1422", color: "#e7eefb" }}>
+  return <section data-tour="asset-center" style={{ marginTop: 22, padding: 18, border: "1px solid #2c4564", borderRadius: 14, background: "#0b1422", color: "#e7eefb" }}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
       <div><small style={{ color: "#8da9d2", letterSpacing: 1.4 }}>NEXORA STUDIO PRO · PROJECT LIBRARY</small><h2 style={{ margin: "6px 0", fontSize: 21 }}>Asset Collection Center</h2><p style={{ margin: 0, color: "#91a2bd", fontSize: 12 }}>One project library for generated characters, worlds, props, animation, textures and audio.</p></div>
       <div style={{ display: "flex", gap: 7 }}><button type="button" aria-pressed={viewMode === "grid"} onClick={() => setViewMode("grid")} style={{ padding: "9px 11px", border: "1px solid #3a5476", borderRadius: 8, background: viewMode === "grid" ? "#263f62" : "#101b2b", color: "#dce9ff" }}>Grid</button><button type="button" aria-pressed={viewMode === "list"} onClick={() => setViewMode("list")} style={{ padding: "9px 11px", border: "1px solid #3a5476", borderRadius: 8, background: viewMode === "list" ? "#263f62" : "#101b2b", color: "#dce9ff" }}>List</button><button disabled={busy} onClick={() => void refresh()} style={{ padding: "9px 13px", border: "1px solid #3a5476", borderRadius: 8, background: "#172943", color: "#dce9ff" }}>{busy ? "Scanning…" : "↻ Re-scan assets"}</button></div>

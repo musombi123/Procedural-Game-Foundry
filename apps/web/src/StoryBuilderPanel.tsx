@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 
 type Props = { projectId: string; api: string; onStorySaved?: () => void };
 type Brief = { mode: "story"|"movie"|"guided"; title: string; premise: string; player_role: string; setting: string; tone: string; instructions: string; ending: string; mission_count: number; world_scale: "small"|"medium"|"large" };
@@ -8,11 +9,11 @@ export default function StoryBuilderPanel({projectId,api,onStorySaved}:Props) {
   const [brief,setBrief]=useState<Brief>(empty);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("Write the story or instructions that define how your game should unfold.");
-  useEffect(()=>{ void (async()=>{ try { const r=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/story"); if(r.ok){const s=await r.json(); setBrief({mode:s.mode??empty.mode,title:s.title??empty.title,premise:s.premise??"",player_role:s.player_role??empty.player_role,setting:s.setting??"",tone:s.tone??"",instructions:s.instructions??"",ending:s.ending??"",mission_count:s.mission_count??5,world_scale:s.world_scale??"medium"});} } catch {} })(); },[api,projectId]);
+  useEffect(()=>{ void (async()=>{ try { const r=await localAgentFetch(api+"/api/projects/"+projectId+"/movie-pipeline/story"); if(r.ok){const s=await r.json(); setBrief({mode:s.mode??empty.mode,title:s.title??empty.title,premise:s.premise??"",player_role:s.player_role??empty.player_role,setting:s.setting??"",tone:s.tone??"",instructions:s.instructions??"",ending:s.ending??"",mission_count:s.mission_count??5,world_scale:s.world_scale??"medium"});} } catch {} })(); },[api,projectId]);
   const set=(key:keyof Brief,value:string|number)=>setBrief(current=>({...current,[key]:value}));
   async function save():Promise<boolean>{
     setBusy(true);
-    try { const r=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/story",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(brief)});
+    try { const r=await localAgentFetch(api+"/api/projects/"+projectId+"/movie-pipeline/story",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(brief)});
       const data=await r.json(); if(!r.ok) throw new Error(data.detail??"Could not save story"); setBrief({mode:data.story.mode??empty.mode,title:data.story.title??empty.title,premise:data.story.premise??"",player_role:data.story.player_role??empty.player_role,setting:data.story.setting??"",tone:data.story.tone??"",instructions:data.story.instructions??"",ending:data.story.ending??"",mission_count:data.story.mission_count??5,world_scale:data.story.world_scale??"medium"}); setMessage("Creator story saved. Portrait remains the player identity source."); onStorySaved?.(); return true;
     } catch(e){setMessage(e instanceof Error?e.message:"Story save failed"); return false;} finally{setBusy(false);}
   }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { localAgentFetch } from "./localAgentFetch";
 import AvatarPreview from "./AvatarPreview";
 
 type Props={projectId:string;api:string;ready:boolean;onBuilt:()=>void};
@@ -11,7 +12,7 @@ export default function ActorsPropsBuilder({projectId,api,ready,onBuilt}:Props){
  async function build(){
   setBusy(true);
   try{
-   const response=await fetch(api+"/api/projects/"+projectId+"/movie-pipeline/actors-props/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({actors,props})});
+   const response=await localAgentFetch(api+"/api/projects/"+projectId+"/movie-pipeline/actors-props/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({actors,props})});
    const data=await response.json();if(!response.ok)throw new Error(data.detail??"Actor and prop generation failed");
    setAsset(data.glb_scene);setMessage("Generated "+data.actor_count+" actors and "+data.prop_count+" props. Inspect and approve this stage.");onBuilt();
   }catch(e){setMessage(e instanceof Error?e.message:"Actor and prop generation failed");}
