@@ -1076,7 +1076,7 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
         metadata["duration_seconds"]=round(duration,3)
         document.source_video=metadata
         store.save(document)
-        job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid, kind=kind, target=target))
+        job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid, kind="video.analysis", target="video"))
         job_root=folder/"workspace_jobs"; job_root.mkdir(exist_ok=True)
         (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
         background.add_task(_run_workspace_video_analysis,job.id,folder,jobs)
@@ -1238,7 +1238,7 @@ def register_nexora_workspace_routes(app: Any, manager: Any, jobs: Any) -> None:
                 if missing: raise HTTPException(409,"Android release signing is not configured on the NEXORA worker.")
                 if not Path(os.environ["GODOT_ANDROID_KEYSTORE_RELEASE_PATH"]).is_file():
                     raise HTTPException(409,"The configured Android release keystore file is unavailable on the NEXORA worker.")
-        job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid))
+        job=jobs.add(__import__("core.orchestration.jobs",fromlist=["Job"]).Job.create(pid, kind=kind, target=target))
         job_root=folder/"workspace_jobs"; job_root.mkdir(exist_ok=True)
         (job_root/f"{job.id}.owner.json").write_text(json.dumps({"user_id":owner},indent=2),encoding="utf-8")
         background.add_task(_run_workspace_job,job.id,pid,kind,target,payload.get("android"),manager,jobs)
