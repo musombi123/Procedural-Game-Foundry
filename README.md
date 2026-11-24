@@ -90,3 +90,12 @@ Assembled games now receive Linux/X11 and Android export presets. A separate CI 
 ## Licence
 
 Original Foundry source and materials are proprietary and all rights are reserved. Third-party software and assets remain under their own licences; consult [LICENSES.md](LICENSES.md) and [LICENSE](LICENSE) before redistribution.
+
+## Repository governance
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Contributing](CONTRIBUTING.md)
+
+## Licence
+
+Original Nexora Foundry source and materials are proprietary and all rights reserved; see [LICENSE](LICENSE). Third-party software, media, models, fonts, and assets remain subject to their own licences. Use the project's asset/licence register for provenance and redistribution requirements.
