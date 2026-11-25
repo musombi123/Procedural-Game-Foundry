@@ -612,9 +612,9 @@ def register_desktop_factory_routes(app: Any, manager: Any) -> None:
     @router.post("/api/v1/desktop/projects/{pid}/assets/3d/download")
     def download_3d_asset(pid: str, payload: PolyHavenModelDownloadRequest, request: FastAPIRequest):
         folder, definition, owner_id = _project(manager, pid, request)
-        project_root = folder.resolve()
-        if not project_root.is_dir():
-            raise HTTPException(404, "Project asset directory was not found.")
+        # Poly Haven models live in the canonical project asset registry:
+        # <project>/assets/3d/polyhaven. The Godot game/ folder is not a
+        # second asset root and must not receive a duplicate copy.
         try:
             result = download_polyhaven_model(project_root, payload.asset_id, payload.resolution)
         except PolyHavenError as exc:
