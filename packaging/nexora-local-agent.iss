@@ -33,7 +33,6 @@ Name: "{localappdata}\NEXORA\Foundry"
 
 [Files]
 Source: "..\dist\NEXORA.LocalAgent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "NEXORA-Local-Agent-Task.xml"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\NEXORA Local Agent"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -50,64 +49,35 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExeName} /T /F"; Flags: 
 Type: filesandordirs; Name: "{app}"
 
 [Code]
-function XmlEscape(const Value: String): String;
-begin
-  Result := Value;
-  StringChangeEx(Result, '&', '&amp;', True);
-  StringChangeEx(Result, '<', '&lt;', True);
-  StringChangeEx(Result, '>', '&gt;', True);
-end;
-
 procedure RegisterManagedAgentTask;
 var
-  TaskLines: TArrayOfString;
-  TaskTemplate, TaskFile, AgentPath, AgentDirectory, UserId: String;
-  TaskUtf8: AnsiString;
-  ResultCode, I: Integer;
+  AgentPath: String;
+  ResultCode: Integer;
+  Parameters: String;
 begin
-  ExtractTemporaryFile('NEXORA-Local-Agent-Task.xml');
-  if not LoadStringsFromFile(ExpandConstant('{tmp}\\NEXORA-Local-Agent-Task.xml'), TaskLines) then
-  begin
-    Log('NEXORA scheduled-task template could not be loaded; Startup shortcut will be used.');
-    exit;
-  end;
-
-  TaskTemplate := '';
-  for I := 0 to GetArrayLength(TaskLines) - 1 do
-  begin
-    if I > 0 then
-      TaskTemplate := TaskTemplate + #13#10;
-    TaskTemplate := TaskTemplate + TaskLines[I];
-  end;
-
   AgentPath := ExpandConstant('{app}\\{#MyAppExeName}');
-  AgentDirectory := ExpandConstant('{app}');
-  UserId := GetUserNameString();
 
-  StringChangeEx(TaskTemplate, '__USER_ID__', XmlEscape(UserId), True);
-  StringChangeEx(TaskTemplate, '__AGENT_PATH__', XmlEscape(AgentPath), True);
-  StringChangeEx(TaskTemplate, '__AGENT_WORKING_DIRECTORY__', XmlEscape(AgentDirectory), True);
+  { The Startup shortcut starts the agent as soon as the user signs in.
+    This one-minute task is a lightweight supervisor: if the agent has
+    crashed, it starts it again. The executable's named mutex exits
+    immediately when an instance is already running. /IT keeps this
+    user-scoped task inside the signed-in interactive session. }
+  Parameters :=
+    '/Create /SC MINUTE /MO 1 /TN "NEXORA Local Agent" /TR "' +
+    AgentPath +
+    '" /RL LIMITED /IT /F';
 
-  TaskFile := ExpandConstant('{tmp}\\NEXORA-Local-Agent-Task.ready.xml');
-  TaskUtf8 := Utf8Encode(TaskTemplate);
-  if not SaveStringToFile(TaskFile, TaskUtf8, False) then
+  if Exec(ExpandConstant('{sys}\\schtasks.exe'), Parameters, '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
   begin
-    Log('NEXORA scheduled-task definition could not be written; Startup shortcut will be used.');
-    exit;
-  end;
-
-  if Exec(ExpandConstant('{sys}\\schtasks.exe'),
-    '/Create /TN "NEXORA Local Agent" /XML "' + TaskFile + '" /F',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
-  begin
-    Log('NEXORA Local Agent sign-in and crash-recovery task registered.');
+    Log('NEXORA Local Agent per-user supervisor task registered (every minute; single-instance mutex prevents duplicate workers).');
     Exec(ExpandConstant('{sys}\\schtasks.exe'),
       '/Run /TN "NEXORA Local Agent"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    DeleteFile(ExpandConstant('{userstartup}\\NEXORA Local Agent.lnk'));
   end
   else
   begin
-    Log('NEXORA scheduled task could not be registered; Startup shortcut remains the fallback.');
+    Log(Format('NEXORA Local Agent supervisor task was not registered (schtasks exit %d). The per-user Startup shortcut remains the sign-in fallback.',
+      [ResultCode]));
   end;
 end;
 
