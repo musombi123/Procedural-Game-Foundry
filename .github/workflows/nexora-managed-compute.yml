@@ -37,6 +37,9 @@ jobs:
       - run: pytest -q tests/test_workload_planner.py
 
   managed-image:
+    # Android SDK packages are licensed. Only run the image build after the
+    # organisation has explicitly accepted the terms and set this repo variable.
+    if: ${{ vars.NEXORA_ANDROID_SDK_LICENSES_ACCEPTED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
