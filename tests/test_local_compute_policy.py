@@ -44,29 +44,28 @@ def test_local_compute_block_response_is_machine_readable():
     assert "creator's paired" in payload["detail"]["message"]
 
 
-def test_pairing_code_is_one_time_and_token_is_revocable():
-    authority = PairingAuthority("12345678")
-    token, expires_at = authority.exchange("12345678")
+def test_pairing_issues_verified_account_session_and_token_is_revocable():
+    authority = PairingAuthority()
+    cloud_token = "verified-cloud-session-" + ("x" * 32)
+    token, expires_at = authority.issue("creator-123", cloud_token)
+
     assert expires_at > 0
-    assert authority.resolve(token) is not None
-    try:
-        authority.exchange("12345678")
-        assert False, "pairing code must only be exchanged once"
-    except ValueError:
-        pass
+    principal = authority.resolve(token)
+    assert principal is not None
+    assert principal.user_id == "creator-123"
+    assert principal.cloud_access_token == cloud_token
     assert authority.revoke(token) is True
     assert authority.resolve(token) is None
 
 
-def test_pairing_rejects_wrong_code_without_consuming_valid_code():
-    authority = PairingAuthority("87654321")
-    try:
-        authority.exchange("00000000")
-        assert False, "wrong pairing code should fail"
-    except ValueError:
-        pass
-    token, _ = authority.exchange("87654321")
-    assert authority.resolve(token) is not None
+def test_pairing_authority_rejects_missing_verified_account_material():
+    authority = PairingAuthority()
+
+    with pytest.raises(ValueError):
+        authority.issue("", "verified-cloud-session-" + ("x" * 32))
+
+    with pytest.raises(ValueError):
+        authority.issue("creator-123", "short")
 
 
 def test_2d_profile_does_not_require_a_dedicated_gpu():

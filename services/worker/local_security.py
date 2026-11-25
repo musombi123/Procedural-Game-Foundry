@@ -1,8 +1,8 @@
-"""Short-lived pairing and bearer-token authority for the NEXORA desktop agent.
+"""Short-lived bearer-token authority for the NEXORA desktop agent.
 
 Tokens exist only in process memory and are invalidated when the local agent
-restarts. The one-time pairing code is displayed in the local terminal and is
-never exposed by a read-only HTTP endpoint.
+restarts. A token is issued only after the signed-in NEXORA account is verified
+and the user explicitly approves connecting this computer.
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import time
 from dataclasses import dataclass
 
 
-PAIRING_CODE_TTL_SECONDS = 15 * 60
 ACCESS_TOKEN_TTL_SECONDS = 12 * 60 * 60
 
 
@@ -25,37 +24,26 @@ class LocalPrincipal:
 
 
 class PairingAuthority:
-    def __init__(self, pairing_code: str | None = None) -> None:
+    def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._pairing_code = pairing_code or f"{secrets.randbelow(100_000_000):08d}"
-        self._pairing_expires_at = time.time() + PAIRING_CODE_TTL_SECONDS
         self._tokens: dict[str, LocalPrincipal] = {}
 
-    @property
-    def pairing_code_for_terminal(self) -> str:
-        return self._pairing_code
-
-    @property
-    def pairing_expires_at(self) -> float:
-        return self._pairing_expires_at
-
-    def exchange(
+    def issue(
         self,
-        supplied_code: str,
-        user_id: str = "local-owner",
-        cloud_access_token: str | None = None,
+        user_id: str,
+        cloud_access_token: str,
     ) -> tuple[str, int]:
-        supplied = str(supplied_code or "")
+        """Issue a local session for an already verified, explicitly approved account."""
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id:
+            raise ValueError("A verified NEXORA account is required.")
+        if not isinstance(cloud_access_token, str) or len(cloud_access_token) < 20:
+            raise ValueError("A verified NEXORA account session is required.")
         with self._lock:
-            if not self._pairing_code or time.time() > self._pairing_expires_at:
-                raise ValueError("The one-time pairing code has expired. Restart the local agent.")
-            if not secrets.compare_digest(supplied, self._pairing_code):
-                raise ValueError("The pairing code is invalid.")
-            self._pairing_code = ""
             token = secrets.token_urlsafe(40)
             expires_at = time.time() + ACCESS_TOKEN_TTL_SECONDS
             self._tokens[self._digest(token)] = LocalPrincipal(
-                user_id=str(user_id),
+                user_id=normalized_user_id,
                 expires_at=expires_at,
                 cloud_access_token=cloud_access_token,
             )
