@@ -17,7 +17,8 @@ This is a separate private service, not the public RevelaCode Flask backend and 
 ## Provisioning in Render
 
 1. Create a private Render service from this repository using [the managed-compute Blueprint](render.nexora-compute.yaml). It uses the `4c-16g` private-service plan (4 CPU / 16 GB RAM). This is a paid, always-on compute allocation; confirm the plan and expected spend in Render before syncing the Blueprint.
-2. Set `NEXORA_MANAGED_COMPUTE_SECRET` to a strong secret on the private service.
+2. Before the image can install Android SDK packages, the NEXORA operator must review the current Android SDK licence terms and accept them on behalf of the organisation. Only after that acceptance, set the GitHub repository variable `NEXORA_ANDROID_SDK_LICENSES_ACCEPTED=true`. The Docker build deliberately fails closed while this variable is unset; it does not silently accept licence terms during an unattended build.
+3. Set `NEXORA_MANAGED_COMPUTE_SECRET` to a strong secret on the private service.
 3. In the existing `nexora-foundry-api` control-plane service, add:
    - `NEXORA_MANAGED_COMPUTE_URL=http://nexora-managed-compute:10000`
    - `NEXORA_MANAGED_COMPUTE_SECRET` with the same secret as the private worker
