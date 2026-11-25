@@ -40,7 +40,7 @@ Name: "{group}\NEXORA Local Agent"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Name: "{userstartup}\NEXORA Local Agent"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Start NEXORA Local Agent now"; Flags: postinstall nowait
+Filename: "{app}\{#MyAppExeName}"; Flags: runhidden nowait
 
 [UninstallRun]
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""NEXORA Local Agent"" /F"; Flags: runhidden; RunOnceId: "RemoveNexoraLocalAgentTask"
