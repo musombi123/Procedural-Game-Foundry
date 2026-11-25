@@ -30,7 +30,7 @@ VersionInfoCompany=NEXORA Interactive Studios
 VersionInfoDescription=NEXORA local compute companion
 VersionInfoProductName={#ProductName}
 VersionInfoProductVersion={#AppVersion}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}.0
 
 [Tasks]
 Name: "startonlogin"; Description: "Start NEXORA automatically when I sign in to Windows"; GroupDescription: "Startup options:"; Flags: checkedonce
