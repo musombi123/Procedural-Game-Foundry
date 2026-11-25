@@ -96,6 +96,7 @@ jobs:
           assert payload["execution_ready"] is False, payload
           assert payload["job_submission_enabled"] is False, payload
           assert "sdk_root" not in payload["profile"]["android"], payload["profile"]["android"]
-          assert payload["profile"]["android"]["sdk_configured"] is True, payload["profile"]["android"]
+          android_accepted = os.environ["NEXORA_ANDROID_SDK_LICENSES_ACCEPTED"].lower() == "true"
+          assert payload["profile"]["android"]["sdk_configured"] is android_accepted, payload["profile"]["android"]
           print("Managed NEXORA server toolchain is ready; persistence correctly reports unavailable outside Render.")
           PY
