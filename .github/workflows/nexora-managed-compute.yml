@@ -48,6 +48,8 @@ jobs:
           context: .
           file: deploy/Dockerfile.nexora-compute
           tags: nexora-managed-compute:ci
+          build-args: |
+            NEXORA_ANDROID_SDK_LICENSES_ACCEPTED=${{ vars.NEXORA_ANDROID_SDK_LICENSES_ACCEPTED || 'false' }}
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
