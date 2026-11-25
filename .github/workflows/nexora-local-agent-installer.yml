@@ -35,6 +35,7 @@ jobs:
         env:
           NEXORA_WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.NEXORA_WINDOWS_CODESIGN_PFX_BASE64 }}
           NEXORA_WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.NEXORA_WINDOWS_CODESIGN_PFX_PASSWORD }}
+          NEXORA_REQUIRE_CODESIGN: ${{ startsWith(github.ref, 'refs/tags/nexora-local-agent-v') }}
         run: |
           $version = "1.0.0"
           if ($env:GITHUB_REF -like "refs/tags/nexora-local-agent-v*") {
