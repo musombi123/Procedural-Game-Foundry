@@ -170,3 +170,34 @@ def test_managed_compute_private_http_requires_explicit_enablement(monkeypatch):
 
     assert error.value.status_code == 503
     assert "HTTPS" in error.value.detail
+
+
+def test_unconsented_placement_never_forwards_local_resources(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("NEXORA_MANAGED_COMPUTE_URL", "https://compute.example.test")
+    monkeypatch.setenv("NEXORA_MANAGED_COMPUTE_SECRET", "server-only-secret")
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit):
+            return json.dumps({"decision": "managed_server_candidate", "execution_location": "managed_server", "job_submission_enabled": False}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return Response()
+
+    monkeypatch.setattr(api_main, "urlopen", fake_urlopen)
+    result = api_main.managed_compute_plan(api_main.ManagedComputePlanRequest(
+        workload="procedural_3d",
+        local_profile={"machine": {"logical_cpu_count": 8, "ram_total_gib": 32}},
+        consent_to_share_hardware_metrics=False,
+    ))
+
+    assert captured["body"]["local_profile"] == {}
+    assert result["local_metrics_shared"] is False
+    assert result["execution_location"] == "managed_server"
