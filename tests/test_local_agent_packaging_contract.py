@@ -35,7 +35,7 @@ def test_packaging_workflow_builds_and_publishes_windows_installer():
 def test_user_setup_documentation_does_not_request_terminal_commands_or_pairing_pin():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     section = readme.split("## NEXORA production execution model", 1)[1].split("## Quick start", 1)[0]
-    assert "one-click Windows installer" in section.lower()
+    assert "one-click windows installer" in section.lower()
     assert "8-digit" not in section.lower()
     assert "powershell" not in section.lower()
     assert "github.com/musombi123/Procedural-Game-Foundry/releases/latest" in section
