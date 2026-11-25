@@ -146,7 +146,8 @@ def _workspace_storage_status() -> dict[str, Any]:
     free_bytes = 0
     try:
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
-        probe = DATA_ROOT / f".nexora-write-check-{os.getpid()}"
+        from uuid import uuid4
+        probe = DATA_ROOT / f".nexora-write-check-{os.getpid()}-{uuid4().hex}"
         with probe.open("xb") as handle:
             handle.write(b"nexora")
             handle.flush()
