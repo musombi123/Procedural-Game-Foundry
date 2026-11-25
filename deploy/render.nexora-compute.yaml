@@ -9,11 +9,17 @@ services:
     dockerfilePath: ./deploy/Dockerfile.nexora-compute
     dockerContext: .
     autoDeploy: true
+    disk:
+      name: nexora-compute-workspaces
+      mountPath: /var/data
+      sizeGB: 50
     envVars:
       - key: NEXORA_MANAGED_COMPUTE_SECRET
         sync: false
       - key: NEXORA_COMPUTE_WORKSPACE_ROOT
-        value: /tmp/nexora-compute
+        value: /var/data/nexora-compute
+      - key: NEXORA_COMPUTE_STORAGE_MOUNT
+        value: /var/data
       - key: NEXORA_AUTH_REQUIRED
         value: "true"
       - key: NEXORA_LOCAL_AGENT
