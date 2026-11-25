@@ -10,6 +10,7 @@ dependencies = ["fastapi>=0.110,<1","uvicorn[standard]>=0.27,<1","pydantic>=2.6,
 [project.optional-dependencies]
 dev = ["pytest>=8,<9","httpx>=0.27,<1"]
 publishing = ["google-auth>=2,<3","google-api-python-client>=2,<3"]
+local-agent = ["pyinstaller>=6.10,<7"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["core*","services*","generators*"]
