@@ -32,6 +32,9 @@ jobs:
 
       - name: Build the standalone Local Agent setup program
         shell: pwsh
+        env:
+          NEXORA_WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.NEXORA_WINDOWS_CODESIGN_PFX_BASE64 }}
+          NEXORA_WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.NEXORA_WINDOWS_CODESIGN_PFX_PASSWORD }}
         run: |
           $version = "1.0.0"
           if ($env:GITHUB_REF -like "refs/tags/nexora-local-agent-v*") {
