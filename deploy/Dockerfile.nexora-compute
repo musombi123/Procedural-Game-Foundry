@@ -6,6 +6,7 @@ ARG GODOT_VERSION=4.6.1
 ARG ANDROID_CMDLINE_TOOLS_VERSION=15859902
 ARG ANDROID_PLATFORM=35
 ARG ANDROID_BUILD_TOOLS=35.0.0
+ARG GODOT_LINUX_SHA256=cecd0cb6b55e931318a9d7237dc4197d69ea914966787a454808523626e2789f
 ARG GODOT_EXPORT_TEMPLATES_SHA256=e6d372afd4fdfaae9571eb5e3568afcd96ce6db9a569244034154faf0ac69875
 ARG ANDROID_CMDLINE_TOOLS_SHA256=4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583
 
@@ -28,14 +29,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Godot 4.6.1 plus matching export templates, both pinned and checksum-verified.
 RUN set -eux; \
     curl -fL --retry 4 --retry-delay 2 \
-      "https://github.com/godotengine/godot/releases/download/\${GODOT_VERSION}-stable/Godot_v\${GODOT_VERSION}-stable_linux.x86_64.zip" \
+      "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" \
       -o /tmp/godot.zip; \
+    echo "${GODOT_LINUX_SHA256}  /tmp/godot.zip" | sha256sum -c -; \
     unzip -q /tmp/godot.zip -d /tmp/godot; \
-    install -m 0755 "/tmp/godot/Godot_v\${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot; \
+    install -m 0755 "/tmp/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot; \
     curl -fL --retry 4 --retry-delay 2 \
-      "https://github.com/godotengine/godot/releases/download/\${GODOT_VERSION}-stable/Godot_v\${GODOT_VERSION}-stable_export_templates.tpz" \
+      "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz" \
       -o /tmp/godot-templates.tpz; \
-    echo "\${GODOT_EXPORT_TEMPLATES_SHA256}  /tmp/godot-templates.tpz" | sha256sum -c -; \
+    echo "${GODOT_EXPORT_TEMPLATES_SHA256}  /tmp/godot-templates.tpz" | sha256sum -c -; \
     mkdir -p /opt/nexora/godot-templates; \
     unzip -q /tmp/godot-templates.tpz -d /opt/nexora/godot-templates; \
     test -d /opt/nexora/godot-templates/templates; \
@@ -45,21 +47,21 @@ RUN set -eux; \
 # The emulator/NDK are excluded from the baseline worker and can be a separate
 # high-capacity build profile. Physical-device testing stays on the creator PC.
 RUN set -eux; \
-    mkdir -p "\${ANDROID_HOME}/cmdline-tools"; \
+    mkdir -p "${ANDROID_HOME}/cmdline-tools"; \
     curl -fL --retry 4 --retry-delay 2 \
-      "https://dl.google.com/android/repository/commandlinetools-linux-\${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
+      "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
       -o /tmp/android-cli.zip; \
-    echo "\${ANDROID_CMDLINE_TOOLS_SHA256}  /tmp/android-cli.zip" | sha256sum -c -; \
+    echo "${ANDROID_CMDLINE_TOOLS_SHA256}  /tmp/android-cli.zip" | sha256sum -c -; \
     unzip -q /tmp/android-cli.zip -d /tmp/android-cli; \
-    mkdir -p "\${ANDROID_HOME}/cmdline-tools/latest"; \
-    cp -a /tmp/android-cli/cmdline-tools/. "\${ANDROID_HOME}/cmdline-tools/latest/"; \
+    mkdir -p "${ANDROID_HOME}/cmdline-tools/latest"; \
+    cp -a /tmp/android-cli/cmdline-tools/. "${ANDROID_HOME}/cmdline-tools/latest/"; \
     rm -rf /tmp/android-cli /tmp/android-cli.zip; \
-    yes | "\${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="\${ANDROID_HOME}" --licenses >/dev/null; \
-    "\${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="\${ANDROID_HOME}" \
-      "platform-tools" "platforms;android-\${ANDROID_PLATFORM}" "build-tools;\${ANDROID_BUILD_TOOLS}"; \
-    chmod -R a+rX "\${ANDROID_HOME}"
+    yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_HOME}" --licenses >/dev/null; \
+    "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_HOME}" \
+      "platform-tools" "platforms;android-${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}"; \
+    chmod -R a+rX "${ANDROID_HOME}"
 
-ENV PATH="\${ANDROID_HOME}/platform-tools:\${ANDROID_HOME}/cmdline-tools/latest/bin:/usr/local/bin:\${PATH}" \
+ENV PATH="${ANDROID_HOME}/platform-tools:${ANDROID_HOME}/cmdline-tools/latest/bin:/usr/local/bin:${PATH}" \
     NEXORA_BLENDER_PATH=/usr/bin/blender \
     NEXORA_GODOT_PATH=/usr/local/bin/godot \
     NEXORA_FFMPEG_PATH=/usr/bin/ffmpeg \
@@ -85,8 +87,8 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 # Install Godot export templates for the non-root runtime account.
 RUN set -eux; \
     useradd --create-home --uid 10001 --shell /usr/sbin/nologin nexora; \
-    mkdir -p /home/nexora/.local/share/godot/export_templates/\${GODOT_VERSION}.stable; \
-    cp -a /opt/nexora/godot-templates/templates/. /home/nexora/.local/share/godot/export_templates/\${GODOT_VERSION}.stable/; \
+    mkdir -p /home/nexora/.local/share/godot/export_templates/${GODOT_VERSION}.stable; \
+    cp -a /opt/nexora/godot-templates/templates/. /home/nexora/.local/share/godot/export_templates/${GODOT_VERSION}.stable/; \
     mkdir -p /tmp/nexora-compute; \
     chown -R nexora:nexora /home/nexora /tmp/nexora-compute
 
