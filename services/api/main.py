@@ -4,7 +4,13 @@ import os
 import re
 import shutil
 import subprocess
+import math
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request as UrlRequest, urlopen
 from pathlib import Path
+from typing import Any
+from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
@@ -42,6 +48,164 @@ _origins = [item.strip() for item in os.environ.get("NEXORA_CORS_ORIGINS", "http
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","Accept","X-Revela-License","X-Nexora-Payment-Secret"])
 
 _PUBLIC_AUTH_PATHS = {"/api/v1/auth/register", "/api/v1/auth/login"}
+
+class ManagedComputePlanRequest(BaseModel):
+    workload: str = Field(min_length=1, max_length=40)
+    local_profile: dict[str, Any] = Field(default_factory=dict)
+    consent_to_share_hardware_metrics: bool = False
+
+
+def _safe_local_compute_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    """Allowlist only resource figures/tool readiness; never forward local paths."""
+    source_machine = profile.get("machine") if isinstance(profile.get("machine"), dict) else {}
+    source_tools = profile.get("tools") if isinstance(profile.get("tools"), dict) else {}
+    source_gpu = profile.get("gpu") if isinstance(profile.get("gpu"), dict) else {}
+    source_android = profile.get("android") if isinstance(profile.get("android"), dict) else {}
+
+    def numeric(source: dict[str, Any], key: str, integer: bool = False):
+        value = source.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        try:
+            converted = float(value)
+        except (OverflowError, ValueError):
+            return None
+        if not math.isfinite(converted):
+            return None
+        return int(converted) if integer else converted
+
+    machine = {
+        key: numeric(source_machine, key, integer=key == "logical_cpu_count")
+        for key in (
+            "logical_cpu_count",
+            "cpu_utilization_percent",
+            "cpu_available_cores",
+            "ram_total_gib",
+            "ram_available_gib",
+            "disk_free_gib",
+        )
+    }
+    machine = {key: value for key, value in machine.items() if value is not None}
+    allowed_tool_ids = {"blender", "godot", "ffmpeg", "ffprobe", "java", "adb", "python"}
+    tools = {}
+    for key in allowed_tool_ids:
+        row = source_tools.get(key)
+        tools[key] = {"available": bool(row.get("available")) if isinstance(row, dict) else False}
+    source_primary = source_gpu.get("primary") if isinstance(source_gpu.get("primary"), dict) else {}
+    primary = None
+    if source_primary:
+        primary = {
+            "vendor": str(source_primary.get("vendor") or "")[:24],
+            "memory_total_bytes": numeric(source_primary, "memory_total_bytes", integer=True) or 0,
+            "memory_free_bytes": numeric(source_primary, "memory_free_bytes", integer=True) or 0,
+        }
+    android_sdk_ready = bool(source_android.get("sdk_root") and source_android.get("build_tools_installed"))
+    return {
+        "machine": machine,
+        "tools": tools,
+        "gpu": {
+            "nvidia_cuda_available": bool(source_gpu.get("nvidia_cuda_available")),
+            "primary": primary,
+        },
+        "android": {
+            "sdk_root": "configured" if android_sdk_ready else None,
+            "build_tools_installed": android_sdk_ready,
+            "ready_to_verify_apk": bool(source_android.get("ready_to_verify_apk")),
+        },
+        "privacy": {
+            "sent_to_cloud": True,
+            "shared_fields": "CPU count/load, RAM totals/available, free storage, tool availability and GPU memory; no local paths or device identifiers.",
+        },
+    }
+
+
+def _managed_compute_request(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Call the private managed worker using a server-side secret only."""
+    base = os.environ.get("NEXORA_MANAGED_COMPUTE_URL", "").strip().rstrip("/")
+    secret = os.environ.get("NEXORA_MANAGED_COMPUTE_SECRET", "").strip()
+    if not base or not secret:
+        raise HTTPException(
+            503,
+            {
+                "code": "MANAGED_COMPUTE_NOT_CONFIGURED",
+                "message": "NEXORA managed compute is not connected to this account service yet.",
+            },
+        )
+    parsed = urlparse(base)
+    allow_internal_http = os.environ.get("NEXORA_MANAGED_COMPUTE_ALLOW_HTTP", "").lower() in {"1", "true", "yes"}
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and allow_internal_http):
+        raise HTTPException(503, "Managed compute must use HTTPS, or explicitly enabled private-network HTTP.")
+    if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise HTTPException(503, "Managed compute service URL is invalid.")
+
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = UrlRequest(
+        base + path,
+        data=body,
+        headers={
+            "X-NEXORA-COMPUTE-KEY": secret,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method="POST" if body is not None else "GET",
+    )
+    try:
+        with urlopen(request, timeout=18) as response:
+            decoded = json.loads(response.read(1024 * 1024).decode("utf-8"))
+            if not isinstance(decoded, dict):
+                raise ValueError("Managed compute returned an invalid response.")
+            return decoded
+    except HTTPError as exc:
+        raise HTTPException(503, f"Managed compute returned HTTP {exc.code}.") from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        raise HTTPException(503, "NEXORA managed compute is temporarily unreachable.") from exc
+
+
+@app.get("/api/compute/capabilities")
+def managed_compute_capabilities():
+    try:
+        return _managed_compute_request("/internal/capabilities")
+    except HTTPException as exc:
+        if exc.status_code == 503 and isinstance(exc.detail, dict):
+            return {
+                "available": False,
+                "toolchain_ready": False,
+                "execution_location": "managed_server",
+                "job_submission_enabled": False,
+                "message": exc.detail.get("message") or "Managed compute is not configured.",
+                "reason_code": exc.detail.get("code"),
+            }
+        raise
+
+
+@app.post("/api/compute/plan")
+def managed_compute_plan(payload: ManagedComputePlanRequest):
+    # Local resource measurements are optional. Without explicit consent, send
+    # no device profile at all; the planner treats local capacity as unknown
+    # and may select the managed worker only if that server passes preflight.
+    metrics_shared = payload.consent_to_share_hardware_metrics is True
+    safe_profile = _safe_local_compute_profile(payload.local_profile) if metrics_shared else {}
+    if metrics_shared and not safe_profile.get("machine", {}).get("logical_cpu_count"):
+        raise HTTPException(422, "A valid local hardware profile is required when sharing local resource metrics.")
+    try:
+        result = _managed_compute_request(
+            "/internal/plan",
+            {
+                "workload": payload.workload,
+                "local_profile": safe_profile,
+            },
+        )
+        result["local_metrics_shared"] = metrics_shared
+        result["local_metrics_policy"] = (
+            "user_consented_allowlisted_resource_summary"
+            if metrics_shared
+            else "not_shared_local_capacity_treated_as_unknown"
+        )
+        return result
+    except HTTPException:
+        raise
+
+
 
 def _local_device_profile_for_request(path: str) -> tuple[str, str | None] | None:
     """Map local production routes to the workload preflight they must pass."""
