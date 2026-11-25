@@ -99,8 +99,13 @@ jobs:
           $installer = Join-Path $PWD "artifacts\windows\NEXORA-Local-Agent-Setup.exe"
           Write-Host "Testing installer artifact: $installer"
           if (-not (Test-Path $installer)) { throw "The Windows setup artifact was not created at the expected path." }
-          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
-          if ($LASTEXITCODE -ne 0) { throw "NEXORA Local Agent setup failed in silent installation." }
+          $setupLog = Join-Path $env:RUNNER_TEMP "nexora-local-agent-setup.log"
+          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- "/LOG=$setupLog"
+          $setupExitCode = $LASTEXITCODE
+          if ($setupExitCode -ne 0) {
+            if (Test-Path $setupLog) { Get-Content $setupLog -Tail 160 | Write-Host }
+            throw "NEXORA Local Agent setup failed in silent installation (exit code $setupExitCode)."
+          }
 
           $agentRoot = Join-Path $env:LOCALAPPDATA "NEXORA"
           $installRoot = Join-Path $env:LOCALAPPDATA "Programs\NEXORA\Local Agent"
