@@ -100,7 +100,12 @@ jobs:
           Write-Host "Testing installer artifact: $installer"
           if (-not (Test-Path $installer)) { throw "The Windows setup artifact was not created at the expected path." }
           $setupLog = Join-Path $env:RUNNER_TEMP "nexora-local-agent-setup.log"
-          $setupProcess = Start-Process -FilePath $installer -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/LOG=$setupLog") -Wait -PassThru
+          $setupProcess = Start-Process -FilePath $installer -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/LOG=$setupLog") -PassThru
+          if (-not $setupProcess.WaitForExit(30000)) {
+            if (Test-Path $setupLog) { Get-Content $setupLog -Tail 160 | Write-Host }
+            throw "NEXORA Local Agent Setup did not finish within 30 seconds."
+          }
+          $setupProcess.Refresh()
           if ($setupProcess.ExitCode -ne 0) {
             if (Test-Path $setupLog) { Get-Content $setupLog -Tail 160 | Write-Host }
             throw "NEXORA Local Agent setup failed in silent installation (exit code $($setupProcess.ExitCode))."
