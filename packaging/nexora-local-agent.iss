@@ -76,8 +76,7 @@ begin
   end
   else
   begin
-    Log(Format('NEXORA Local Agent supervisor task was not registered (schtasks exit %d). The per-user Startup shortcut remains the sign-in fallback.',
-      [ResultCode]));
+    Log('NEXORA Local Agent supervisor task was not registered (schtasks exit ' + IntToStr(ResultCode) + '). The per-user Startup shortcut remains the sign-in fallback.');
   end;
 end;
 
