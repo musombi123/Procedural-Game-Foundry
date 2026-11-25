@@ -1,0 +1,191 @@
+name: NEXORA Local Agent Windows Installer
+
+on:
+  pull_request:
+    paths:
+      - "services/worker/**"
+      - "core/**"
+      - "generators/**"
+      - "blender/**"
+      - "runtime/**"
+      - "libraries/**"
+      - "gameplay/**"
+      - "simulation/**"
+      - "scripts/nexora_local_agent_entry.py"
+      - "scripts/package-nexora-local-agent.ps1"
+      - "packaging/**"
+      - "pyproject.toml"
+      - ".github/workflows/nexora-local-agent-windows.yml"
+  push:
+    branches: [main]
+    tags: ["local-agent-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build frozen Local Agent
+        shell: pwsh
+        run: ./scripts/package-nexora-local-agent.ps1
+
+      - name: Require a signing certificate for public releases
+        if: startsWith(github.ref, 'refs/tags/local-agent-v')
+        shell: pwsh
+        env:
+          NEXORA_WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.NEXORA_WINDOWS_SIGNING_CERT_BASE64 }}
+          NEXORA_WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.NEXORA_WINDOWS_SIGNING_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NEXORA_WINDOWS_SIGNING_CERT_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:NEXORA_WINDOWS_SIGNING_CERT_PASSWORD)) {
+            throw "A code-signing certificate is required before publishing a public NEXORA Local Agent release."
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "nexora-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:NEXORA_WINDOWS_SIGNING_CERT_BASE64))
+          $password = ConvertTo-SecureString $env:NEXORA_WINDOWS_SIGNING_CERT_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\My" -Password $password
+          if (-not $certificate -or -not $certificate[0].HasPrivateKey) {
+            throw "The configured PFX does not contain a usable private code-signing key."
+          }
+          "NEXORA_SIGNING_THUMBPRINT=$($certificate[0].Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Remove-Item $pfxPath -Force
+
+      - name: Sign Local Agent binaries for public releases
+        if: startsWith(github.ref, 'refs/tags/local-agent-v')
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path "${env:ProgramFiles(x86)}" "Windows Kits\10\bin"
+          $signtool = Get-ChildItem $sdkRoot -Filter signtool.exe -Recurse |
+            Where-Object { $_.FullName -like "*\x64\signtool.exe" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) { throw "Windows SDK SignTool was not found." }
+          $files = Get-ChildItem "dist\\NEXORA.LocalAgent" -Recurse -File |
+            Where-Object { $_.Extension -in @(".exe", ".dll") }
+          foreach ($file in $files) {
+            & $signtool.FullName sign /sha1 $env:NEXORA_SIGNING_THUMBPRINT /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Could not sign $($file.Name)." }
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Compile per-user Windows installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found." }
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME -replace "^local-agent-v", "" } else { "1.0.0" }
+          & $iscc "/DMyAppVersion=$version" "packaging\nexora-local-agent.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed to compile the installer." }          
+      - name: Smoke-test Windows install, health, auto-restart task and uninstall
+        shell: pwsh
+        run: |
+          $installer = Join-Path $PWD "artifacts\windows\NEXORA-Local-Agent-Setup.exe"
+          Write-Host "Testing installer artifact: $installer"
+          if (-not (Test-Path $installer)) { throw "The Windows setup artifact was not created at the expected path." }
+          $setupLog = Join-Path $env:RUNNER_TEMP "nexora-local-agent-setup.log"
+          $setupProcess = Start-Process -FilePath $installer -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/LOG=$setupLog") -PassThru
+          if (-not $setupProcess.WaitForExit(30000)) {
+            if (Test-Path $setupLog) { Get-Content $setupLog -Tail 160 | Write-Host }
+            throw "NEXORA Local Agent Setup did not finish within 30 seconds."
+          }
+          $setupProcess.Refresh()
+          if ($setupProcess.ExitCode -ne 0) {
+            if (Test-Path $setupLog) { Get-Content $setupLog -Tail 160 | Write-Host }
+            throw "NEXORA Local Agent setup failed in silent installation (exit code $($setupProcess.ExitCode))."
+          }
+
+          $agentRoot = Join-Path $env:LOCALAPPDATA "NEXORA"
+          $installRoot = Join-Path $env:LOCALAPPDATA "Programs\NEXORA\Local Agent"
+          $uninstaller = Join-Path $installRoot "unins000.exe"
+          $deadline = [DateTime]::UtcNow.AddSeconds(45)
+          $health = $null
+          while ([DateTime]::UtcNow -lt $deadline -and -not $health) {
+            try {
+              $health = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 2
+            } catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+          if (-not $health -or $health.status -ne "ready" -or $health.service -ne "NEXORA Local Compute Agent") {
+            throw "The installed NEXORA Local Agent did not become healthy on 127.0.0.1:8765."
+          }
+
+          $taskXml = & "$env:WINDIR\\System32\\schtasks.exe" /Query /TN "NEXORA Local Agent" /XML
+          if ($LASTEXITCODE -ne 0) { throw "The installer did not register the NEXORA automatic sign-in task." }
+          $taskXmlText = $taskXml -join [Environment]::NewLine
+          if ($taskXmlText -notmatch "<Interval>PT1M</Interval>") {
+            Write-Host "Windows Task Scheduler XML returned for the registered NEXORA supervisor:"
+            Write-Host $taskXmlText
+            throw "The NEXORA supervisor task is missing its one-minute crash-recovery interval."
+          }
+          if ($taskXmlText -notmatch "<Command>[^<]*NEXORA\\.LocalAgent\\.exe</Command>") {
+            Write-Host "Windows Task Scheduler XML returned for the registered NEXORA supervisor:"
+            Write-Host $taskXmlText
+            throw "The NEXORA supervisor task does not point to the installed Local Agent executable."
+          }
+
+          if (-not (Test-Path (Join-Path $agentRoot "Agent\logs"))) {
+            throw "The NEXORA Local Agent data/log directory was not created."
+          }
+          if (-not (Test-Path $uninstaller)) { throw "The NEXORA Local Agent uninstaller was not installed." }
+
+          & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          if ($LASTEXITCODE -ne 0) { throw "NEXORA Local Agent uninstall failed." }
+          Start-Sleep -Seconds 2
+
+          & "$env:WINDIR\System32\schtasks.exe" /Query /TN "NEXORA Local Agent" 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Uninstall left the NEXORA scheduled task registered." }
+          if (-not (Test-Path (Join-Path $agentRoot "Foundry"))) {
+            throw "Uninstall unexpectedly removed the user's Foundry project data."
+          }
+
+
+      - name: Sign Windows setup executable for public releases
+        if: startsWith(github.ref, 'refs/tags/local-agent-v')
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path "${env:ProgramFiles(x86)}" "Windows Kits\10\bin"
+          $signtool = Get-ChildItem $sdkRoot -Filter signtool.exe -Recurse |
+            Where-Object { $_.FullName -like "*\x64\signtool.exe" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) { throw "Windows SDK SignTool was not found." }
+          $installer = "artifacts\windows\NEXORA-Local-Agent-Setup.exe"
+          & $signtool.FullName sign /sha1 $env:NEXORA_SIGNING_THUMBPRINT /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $installer
+          if ($LASTEXITCODE -ne 0) { throw "Could not sign the NEXORA setup executable." }
+          & $signtool.FullName verify /pa /v $installer
+          if ($LASTEXITCODE -ne 0) { throw "The NEXORA setup executable did not pass Authenticode verification." }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEXORA-Local-Agent-Windows-Installer
+          path: artifacts/windows/NEXORA-Local-Agent-Setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish installer release
+        if: startsWith(github.ref, 'refs/tags/local-agent-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: NEXORA Local Agent ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/windows/NEXORA-Local-Agent-Setup.exe
+          fail_on_unmatched_files: true

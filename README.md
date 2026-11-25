@@ -27,29 +27,19 @@ PGF now includes a rights-gated, persisted seven-stage movie-to-game pipeline ma
 
 ## NEXORA production execution model
 
-## Managed server toolchain and workload placement
+NEXORA production compute runs on the creator's own computer. The hosted API is a control plane for account authentication, plans and billing; it does not accept projects, source media, raw assets, GPU jobs, Blender generation or Godot builds. Project/workspace routes on the cloud API are rejected with `LOCAL_COMPUTE_REQUIRED`.
 
-NEXORA adds a private managed compute runtime with Blender, Godot 4.6.1, FFmpeg/FFprobe and Java 17 as its core production toolchain. Android SDK/ADB are optional and are installed only after explicit organisation licence acceptance; their absence does not disable story, 3D or movie-processing capabilities. The Local Agent remains useful for project files, local hardware and physical Android devices; light work stays on the user's PC when its live CPU/RAM headroom is safe. Larger supported workloads can be planned for the private worker.
+The NEXORA Local Agent is a background companion for Windows users. It binds to `127.0.0.1:8765`, starts automatically after installation and at Windows sign-in, writes rotating diagnostics to the user's local NEXORA data folder, and prevents duplicate processes. It includes its own Python runtime; users do not need to install Python, Git, open PowerShell, clone a repository or paste commands.
 
-The first stage exposes server capabilities and a placement recommendation. The server workspace uses a Render persistent disk, while local resource figures are shared only if the user explicitly opts in. Without local-resource consent, the planner treats local capacity as unknown and selects the managed worker only when its measured toolchain and capacity pass preflight. The first stage does not upload project files or start remote jobs yet: remote execution remains disabled until the durable queue, per-job transfer approval, ownership controls, and artifact lifecycle are implemented. Heavy rendering and CUDA image-to-3D require separately provisioned higher-capacity/GPU workers.
+**Windows user setup:** download the one-click Windows installer from the [latest NEXORA Local Agent release](https://github.com/musombi123/Procedural-Game-Foundry/releases/latest). Run the installer once. It installs for the current Windows user without requiring administrator privileges, starts the background agent and registers it to start again at sign-in. When the agent is healthy, NEXORA Studio detects it automatically. The user then approves the signed-in NEXORA account once using **Allow & connect this computer**; no terminal pairing code is involved.
 
-See [the managed-compute deployment and safety guide](deploy/NEXORA_MANAGED_COMPUTE.md). Do not change the existing account API into a compute worker or set `NEXORA_LOCAL_AGENT=true` on Render.
+The local agent checks CPU/RAM/free storage/GPU VRAM and installed tools, and exposes the same Foundry engine beneath `/engine`. The web workspace sends project, asset, generation, job and export requests to that paired local engine. Android device installation uses the local ADB bridge. The agent accepts loopback requests only, checks the browser origin, verifies the NEXORA account before pairing and keeps the local pairing token in process memory.
 
+The installer does not silently install Blender, Godot 4, FFmpeg/FFprobe, Android SDK/ADB, Java or GPU drivers. These are optional workload tools; Device Lab detects which are available and reports missing requirements before a workload starts. User projects and local agent data are preserved when the application is uninstalled.
 
-NEXORA's production compute runs on the creator's own computer. The hosted API is a control plane for account authentication, plans and billing; it does not accept projects, source media, raw assets, GPU jobs, Blender generation or Godot builds. Project/workspace routes on the cloud API are rejected with `LOCAL_COMPUTE_REQUIRED`.
+**Developer packaging:** the Windows installer is built from the frozen entry point in `scripts/nexora_local_agent_entry.py`, the PyInstaller specification in `packaging/nexora-local-agent.spec`, and the Inno Setup definition in `packaging/nexora-local-agent.iss`. CI creates `NEXORA-Local-Agent-Setup.exe`; a `local-agent-v*` tag publishes the installer to GitHub Releases. These developer/CI steps are not instructions for end users.
 
-The local agent binds to `127.0.0.1:8765`, uses an expiring one-time pairing code, checks CPU/RAM/free storage/GPU VRAM and installed tools, and exposes the same Foundry engine beneath `/engine`. The web workspace sends project, asset, generation, job and export requests to that paired local engine. Android device installation uses the local ADB bridge.
-
-On Windows, from a cloned repository, run:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\install-nexora-local-environment.ps1
-```
-
-Python 3.11+ is installed into an isolated NEXORA virtual environment. Blender, Godot 4, FFmpeg/FFprobe, Android SDK/ADB, Java and GPU inference workers are detected separately; install only the tools required by the workload. See [the local compute and artifact hosting architecture](docs/architecture/local-compute-and-artifact-hosting.md).
-
-**Deployment status:** the local agent, local-only routing policy, hardware preflight and Windows source installer are implemented on the `nexora-local-compute-p0` feature branch. Durable public hosting of final APK/Web/desktop artifacts requires the separately configured object-storage publishing service and a physical-device acceptance run. Do not set `NEXORA_LOCAL_AGENT=true` on Render.
+**Platform scope:** the managed one-click installer in this release targets Windows x64. macOS and Linux need their own signed/notarized or package-manager installers before being presented as supported consumer installation paths. Do not set `NEXORA_LOCAL_AGENT=true` on Render.
 
 ## Quick start
 Python 3.11+:
