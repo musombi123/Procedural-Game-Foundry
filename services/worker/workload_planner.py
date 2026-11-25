@@ -19,7 +19,7 @@ POLICIES: dict[str, dict[str, Any]] = {
     "procedural_3d": {
         "label": "Procedural 3D assets and Godot scene production",
         "local": {"cpu": 2, "ram_total": 8, "ram_available": 4, "disk": 15, "tools": ("blender", "godot")},
-        "server": {"cpu": 4, "ram_total": 16, "ram_available": 4, "disk": 15, "tools": ("blender", "godot")},
+        "server": {"cpu": 4, "ram_total": 14, "ram_available": 4, "disk": 15, "tools": ("blender", "godot")},
         "remote_preferred": False,
     },
     "movie_processing": {
