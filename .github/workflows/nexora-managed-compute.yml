@@ -69,6 +69,7 @@ jobs:
           done
           python - <<'PY'
           import json
+          import os
           payload = json.load(open("/tmp/health.json", encoding="utf-8"))
           assert payload["toolchain_ready"], payload
           assert payload["core_toolchain_ready"], payload
@@ -92,6 +93,8 @@ jobs:
           assert payload["workspace_storage"]["writable"] is True, payload
           assert payload["workspace_storage"]["persistent_mount_detected"] is False, payload
           assert payload["workspace_storage"]["ready"] is False, payload
+          assert payload["execution_ready"] is False, payload
+          assert payload["job_submission_enabled"] is False, payload
           assert "sdk_root" not in payload["profile"]["android"], payload["profile"]["android"]
           assert payload["profile"]["android"]["sdk_configured"] is True, payload["profile"]["android"]
           print("Managed NEXORA server toolchain is ready; persistence correctly reports unavailable outside Render.")
