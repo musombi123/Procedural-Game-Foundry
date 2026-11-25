@@ -55,7 +55,7 @@ var
   ResultCode: Integer;
   Parameters: String;
 begin
-  AgentPath := ExpandConstant('{app}\\{#MyAppExeName}');
+  AgentPath := ExpandConstant('{app}\{#MyAppExeName}');
 
   { The Startup shortcut starts the agent as soon as the user signs in.
     This one-minute task is a lightweight supervisor: if the agent has
@@ -67,11 +67,11 @@ begin
     AgentPath +
     '" /RL LIMITED /IT /F';
 
-  if Exec(ExpandConstant('{sys}\\schtasks.exe'), Parameters, '',
+  if Exec(ExpandConstant('{sys}\schtasks.exe'), Parameters, '',
     SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
   begin
     Log('NEXORA Local Agent per-user supervisor task registered (every minute; single-instance mutex prevents duplicate workers).');
-    Exec(ExpandConstant('{sys}\\schtasks.exe'),
+    Exec(ExpandConstant('{sys}\schtasks.exe'),
       '/Run /TN "NEXORA Local Agent"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end
   else
