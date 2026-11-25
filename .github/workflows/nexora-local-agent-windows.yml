@@ -97,6 +97,8 @@ jobs:
         shell: pwsh
         run: |
           $installer = Join-Path $PWD "artifacts\windows\NEXORA-Local-Agent-Setup.exe"
+          Write-Host "Testing installer artifact: $installer"
+          if (-not (Test-Path $installer)) { throw "The Windows setup artifact was not created at the expected path." }
           & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
           if ($LASTEXITCODE -ne 0) { throw "NEXORA Local Agent setup failed in silent installation." }
 
