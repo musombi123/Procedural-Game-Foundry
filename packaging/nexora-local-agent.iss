@@ -62,10 +62,11 @@ begin
     crashed, it starts it again. The executable's named mutex exits
     immediately when an instance is already running. /IT keeps this
     user-scoped task inside the signed-in interactive session. }
+  { Keep the executable path quoted inside schtasks' /TR argument so
+    profile and install directories containing spaces remain intact. }
   Parameters :=
-    '/Create /SC MINUTE /MO 1 /TN "NEXORA Local Agent" /TR "' +
-    AgentPath +
-    '" /RL LIMITED /IT /F';
+    '/Create /SC MINUTE /MO 1 /TN "NEXORA Local Agent" /TR "' + #92 + '"' +
+    AgentPath + #92 + '"" /RL LIMITED /IT /F';
 
   if Exec(ExpandConstant('{sys}\schtasks.exe'), Parameters, '',
     SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
