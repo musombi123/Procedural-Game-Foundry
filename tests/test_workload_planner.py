@@ -20,11 +20,14 @@ def _profile(cpu, total, available, disk, tools=None, gpu=None, android=None):
 
 
 def _server():
-    return _profile(
-        4, 16, 12, 120,
-        tools=("blender", "godot", "ffmpeg", "ffprobe", "java", "adb"),
-        android={"sdk_root": "/opt/android-sdk", "build_tools_installed": True, "ready_to_verify_apk": True},
-    )
+    return {
+        **_profile(
+            4, 16, 12, 120,
+            tools=("blender", "godot", "ffmpeg", "ffprobe", "java", "adb"),
+            android={"sdk_root": "/opt/android-sdk", "build_tools_installed": True, "ready_to_verify_apk": True},
+        ),
+        "available": True,
+    }
 
 
 def test_lightweight_workspace_work_stays_on_creator_pc_with_modest_resources():
