@@ -54,20 +54,44 @@ def test_local_capacity_projection_excludes_paths_device_names_and_serials():
     assert "cpu_model" not in result["machine"]
 
 
-def test_managed_compute_plan_requires_explicit_hardware_metrics_consent(monkeypatch):
-    monkeypatch.delenv("NEXORA_MANAGED_COMPUTE_URL", raising=False)
-    monkeypatch.delenv("NEXORA_MANAGED_COMPUTE_SECRET", raising=False)
+def test_managed_compute_plan_without_metrics_consent_sends_no_local_profile(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("NEXORA_MANAGED_COMPUTE_URL", "https://compute.example.test")
+    monkeypatch.setenv("NEXORA_MANAGED_COMPUTE_SECRET", "server-only-secret")
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit):
+            return json.dumps({
+                "decision": "managed_server_candidate",
+                "execution_location": "managed_server",
+                "job_submission_enabled": False,
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return Response()
+
+    monkeypatch.setattr(api_main, "urlopen", fake_urlopen)
     payload = api_main.ManagedComputePlanRequest(
         workload="procedural_3d",
-        local_profile={"machine": {"logical_cpu_count": 4}},
+        local_profile={
+            "machine": {"logical_cpu_count": 4, "ram_total_gib": 7.9},
+            "tools": {"blender": {"available": False}},
+        },
         consent_to_share_hardware_metrics=False,
     )
+    result = api_main.managed_compute_plan(payload)
 
-    with pytest.raises(HTTPException) as error:
-        api_main.managed_compute_plan(payload)
-
-    assert error.value.status_code == 403
-    assert error.value.detail["code"] == "HARDWARE_METRICS_CONSENT_REQUIRED"
+    assert captured["body"]["local_profile"] == {}
+    assert result["local_metrics_shared"] is False
+    assert result["local_metrics_policy"] == "not_shared_local_capacity_treated_as_unknown"
+    assert result["execution_location"] == "managed_server"
 
 
 def test_managed_compute_capabilities_degrade_cleanly_when_not_provisioned(monkeypatch):
