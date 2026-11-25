@@ -1,6 +1,5 @@
 # PyInstaller specification for the NEXORA Windows Local Agent.
 from pathlib import Path
-from PyInstaller.building.datastruct import Tree
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parent
@@ -40,8 +39,13 @@ for package in (
 # Python modules, so include them beside the frozen application.
 for folder in ("blender", "runtime", "libraries", "gameplay", "simulation"):
     source = ROOT / folder
-    if source.is_dir():
-        datas += Tree(str(source), prefix=folder)
+    if not source.is_dir():
+        continue
+    for asset in source.rglob("*"):
+        if not asset.is_file() or "__pycache__" in asset.parts:
+            continue
+        destination = str(asset.relative_to(ROOT).parent)
+        datas.append((str(asset), destination))
 
 a = Analysis(
     [str(ROOT / "scripts" / "nexora_local_agent_entry.py")],
