@@ -124,7 +124,10 @@ def plan_execution(
         raise ValueError("Unknown NEXORA workload profile.")
 
     local = assess_capacity(local_profile or {}, policy["local"])
-    server_present = bool(managed_profile and managed_profile.get("available"))
+    server_present = bool(
+        managed_profile
+        and managed_profile.get("execution_ready", managed_profile.get("available"))
+    )
     server = assess_capacity(managed_profile or {}, policy["server"]) if server_present else {
         "ready": False,
         "failures": ["Managed compute worker is not configured or reachable."],
