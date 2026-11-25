@@ -35,15 +35,10 @@ End If
 Err.Clear
 On Error GoTo 0
 
-If Not fso.FolderExists(logRoot) Then
-  fso.CreateFolder logRoot
-End If
-If Not fso.FolderExists(dataRoot) Then
-  fso.CreateFolder dataRoot
-End If
-If Not fso.FolderExists(agentData) Then
-  fso.CreateFolder agentData
-End If
+EnsureFolder logRoot
+EnsureFolder dataRoot
+EnsureFolder agentData
+
 
 shell.CurrentDirectory = foundryRoot
 Set environment = shell.Environment("PROCESS")
@@ -60,3 +55,15 @@ environment("NEXORA_CORS_ORIGINS") = "https://revelacode.co.ke"
 command = """" & pythonExe & """ -m services.worker.local_agent >> """ & logFile & """ 2>&1"
 launcher = shell.ExpandEnvironmentStrings("%ComSpec%") & " /d /c """ & command & """"
 shell.Run launcher, 0, False
+
+Sub EnsureFolder(path)
+  Dim parent
+  If fso.FolderExists(path) Then Exit Sub
+  parent = fso.GetParentFolderName(path)
+  If Len(parent) > 0 And Not fso.FolderExists(parent) Then
+    EnsureFolder parent
+  End If
+  If Not fso.FolderExists(path) Then
+    fso.CreateFolder path
+  End If
+End Sub
