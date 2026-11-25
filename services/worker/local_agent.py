@@ -253,9 +253,11 @@ def _apk_package_id(path: Path) -> str:
 
 @app.on_event("startup")
 async def announce_agent_ready() -> None:
-    print("\\nNEXORA LOCAL COMPUTE AGENT is ready.")
+    print()
+    print("NEXORA LOCAL COMPUTE AGENT is ready.")
     print("Open NEXORA Studio on this computer and choose 'Allow & connect this computer'.")
-    print("No terminal code is needed. Agent binding: 127.0.0.1:8765\\n")
+    print("No terminal code is needed. Agent binding: 127.0.0.1:8765")
+    print()
 
 
 @app.get("/health")
