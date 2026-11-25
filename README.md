@@ -99,3 +99,7 @@ Original Foundry source and materials are proprietary and all rights are reserve
 ## Licence
 
 Original Nexora Foundry source and materials are proprietary and all rights reserved; see [LICENSE](LICENSE). Third-party software, media, models, fonts, and assets remain subject to their own licences. Use the project's asset/licence register for provenance and redistribution requirements.
+
+## NEXORA Foundry research library
+
+The engineering research library is in [`docs/research/`](docs/research/README.md). It documents system architecture, the production pipeline, technology choices, security boundaries, creator acceptance gates and open research questions.
