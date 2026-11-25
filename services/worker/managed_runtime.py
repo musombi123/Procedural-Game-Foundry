@@ -48,6 +48,12 @@ def _apply_container_limits(profile: dict[str, Any]) -> dict[str, Any]:
             if quota > 0 and period > 0:
                 cpu_limit = max(1, math.floor(quota / period))
                 machine["logical_cpu_count"] = min(int(machine.get("logical_cpu_count") or cpu_limit), cpu_limit)
+                utilization = machine.get("cpu_utilization_percent")
+                if utilization is not None:
+                    machine["cpu_available_cores"] = round(
+                        machine["logical_cpu_count"] * (1.0 - min(100.0, max(0.0, float(utilization))) / 100.0),
+                        2,
+                    )
         except ValueError:
             pass
 
