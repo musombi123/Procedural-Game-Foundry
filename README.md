@@ -27,20 +27,19 @@ PGF now includes a rights-gated, persisted seven-stage movie-to-game pipeline ma
 
 ## NEXORA production execution model
 
-NEXORA's production compute runs on the creator's own computer. The hosted API is a control plane for account authentication, plans and billing; it does not accept projects, source media, raw assets, GPU jobs, Blender generation or Godot builds. Project/workspace routes on the cloud API are rejected with `LOCAL_COMPUTE_REQUIRED`.
+NEXORA production compute runs on the creator's own computer. The hosted API is a control plane for account authentication, plans and billing; it does not accept projects, source media, raw assets, GPU jobs, Blender generation or Godot builds. Project/workspace routes on the cloud API are rejected with `LOCAL_COMPUTE_REQUIRED`.
 
-The local agent binds to `127.0.0.1:8765`, uses an expiring one-time pairing code, checks CPU/RAM/free storage/GPU VRAM and installed tools, and exposes the same Foundry engine beneath `/engine`. The web workspace sends project, asset, generation, job and export requests to that paired local engine. Android device installation uses the local ADB bridge.
+The NEXORA Local Agent is a background companion for Windows users. It binds to `127.0.0.1:8765`, starts automatically after installation and at Windows sign-in, writes rotating diagnostics to the user's local NEXORA data folder, and prevents duplicate processes. It includes its own Python runtime; users do not need to install Python, Git, open PowerShell, clone a repository or paste commands.
 
-On Windows, from a cloned repository, run:
+**Windows user setup:** download the one-click Windows installer from the [latest NEXORA Local Agent release](https://github.com/musombi123/Procedural-Game-Foundry/releases/latest). Run the installer once. It installs for the current Windows user without requiring administrator privileges, starts the background agent and registers it to start again at sign-in. When the agent is healthy, NEXORA Studio detects it automatically. The user then approves the signed-in NEXORA account once using **Allow & connect this computer**; no terminal pairing code is involved.
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\install-nexora-local-environment.ps1
-```
+The local agent checks CPU/RAM/free storage/GPU VRAM and installed tools, and exposes the same Foundry engine beneath `/engine`. The web workspace sends project, asset, generation, job and export requests to that paired local engine. Android device installation uses the local ADB bridge. The agent accepts loopback requests only, checks the browser origin, verifies the NEXORA account before pairing and keeps the local pairing token in process memory.
 
-Python 3.11+ is installed into an isolated NEXORA virtual environment. Blender, Godot 4, FFmpeg/FFprobe, Android SDK/ADB, Java and GPU inference workers are detected separately; install only the tools required by the workload. See [the local compute and artifact hosting architecture](docs/architecture/local-compute-and-artifact-hosting.md).
+The installer does not silently install Blender, Godot 4, FFmpeg/FFprobe, Android SDK/ADB, Java or GPU drivers. These are optional workload tools; Device Lab detects which are available and reports missing requirements before a workload starts. User projects and local agent data are preserved when the application is uninstalled.
 
-**Deployment status:** the local agent, local-only routing policy, hardware preflight and Windows source installer are implemented on the `nexora-local-compute-p0` feature branch. Durable public hosting of final APK/Web/desktop artifacts requires the separately configured object-storage publishing service and a physical-device acceptance run. Do not set `NEXORA_LOCAL_AGENT=true` on Render.
+**Developer packaging:** the Windows installer is built from the frozen entry point in `scripts/nexora_local_agent_entry.py`, the PyInstaller specification in `packaging/nexora-local-agent.spec`, and the Inno Setup definition in `packaging/nexora-local-agent.iss`. CI creates `NEXORA-Local-Agent-Setup.exe`; a `local-agent-v*` tag publishes the installer to GitHub Releases. These developer/CI steps are not instructions for end users.
+
+**Platform scope:** the managed one-click installer in this release targets Windows x64. macOS and Linux need their own signed/notarized or package-manager installers before being presented as supported consumer installation paths. Do not set `NEXORA_LOCAL_AGENT=true` on Render.
 
 ## Quick start
 Python 3.11+:
