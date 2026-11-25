@@ -199,6 +199,21 @@ def _gpu_adapters() -> list[dict[str, Any]]:
     return result
 
 
+def _cpu_utilization_percent() -> float | None:
+    """Sample system CPU utilization without starting any production workload."""
+    try:
+        import psutil
+
+        return round(float(psutil.cpu_percent(interval=0.15)), 1)
+    except (ImportError, OSError, RuntimeError):
+        try:
+            load_one, _, _ = os.getloadavg()
+            cpu_count = max(1, os.cpu_count() or 1)
+            return round(min(100.0, max(0.0, float(load_one) / cpu_count * 100.0)), 1)
+        except (AttributeError, OSError, ValueError):
+            return None
+
+
 def _android_sdk() -> dict[str, Any]:
     roots = [
         os.environ.get("ANDROID_SDK_ROOT", ""),
@@ -320,6 +335,12 @@ def _triposr_worker_status() -> dict[str, Any]:
 def collect_system_profile(data_root: str | Path | None = None) -> dict[str, Any]:
     """Return a bounded, privacy-conscious resource and toolchain inventory."""
     cpu_count = os.cpu_count() or 1
+    cpu_utilization_percent = _cpu_utilization_percent()
+    cpu_available_cores = (
+        round(cpu_count * (1.0 - min(100.0, max(0.0, cpu_utilization_percent)) / 100.0), 2)
+        if cpu_utilization_percent is not None
+        else float(cpu_count)
+    )
     ram_bytes = _memory_total_bytes()
     ram_available_bytes = _memory_available_bytes()
     root = Path(data_root or os.environ.get("PGF_DATA_DIR") or Path.home()).expanduser()
@@ -373,6 +394,8 @@ def collect_system_profile(data_root: str | Path | None = None) -> dict[str, Any
             "architecture": platform.machine(),
             "cpu_model": _cpu_model(),
             "logical_cpu_count": int(cpu_count),
+            "cpu_utilization_percent": cpu_utilization_percent,
+            "cpu_available_cores": cpu_available_cores,
             "ram_total_bytes": ram_bytes,
             "ram_total_gib": round(ram_bytes / GIB, 2) if ram_bytes else None,
             "ram_available_bytes": ram_available_bytes,
@@ -479,6 +502,27 @@ def check_requirements(profile_id: str, profile: dict[str, Any]) -> dict[str, An
 
     cpu = int(machine.get("logical_cpu_count") or 0)
     add("CPU", cpu >= requirements["min_cpu_cores"], f"{cpu} logical cores detected; {requirements['min_cpu_cores']} recommended minimum.")
+
+    # Total logical cores alone are not enough: avoid starting Blender, video
+    # processing or exports when other foreground work has consumed the CPU.
+    measured_available_cores = machine.get("cpu_available_cores")
+    try:
+        available_cores = float(measured_available_cores) if measured_available_cores is not None else float(cpu)
+    except (TypeError, ValueError):
+        available_cores = 0.0
+    minimum_available_cores = max(1.0, float(requirements["min_cpu_cores"]) * 0.45)
+    utilization = machine.get("cpu_utilization_percent")
+    utilization_note = (
+        f" Current system CPU utilization is {float(utilization):g}%."
+        if isinstance(utilization, (int, float)) and not isinstance(utilization, bool)
+        else ""
+    )
+    add(
+        "Available CPU capacity",
+        available_cores >= minimum_available_cores,
+        f"{available_cores:g} CPU cores estimated available; {minimum_available_cores:g} required before starting this workload.{utilization_note}",
+    )
+
     ram = float(machine.get("ram_total_gib") or 0)
     add("Memory", ram >= requirements["min_ram_gib"], f"{ram:g} GiB installed; {requirements['min_ram_gib']} GiB required.")
     available_ram = machine.get("ram_available_gib")

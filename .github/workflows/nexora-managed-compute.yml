@@ -1,0 +1,112 @@
+name: NEXORA Managed Compute Toolchain
+
+on:
+  push:
+    branches: [main, "feat/**"]
+    paths:
+      - "deploy/Dockerfile.nexora-compute"
+      - "deploy/render.nexora-compute.yaml"
+      - "services/worker/managed_runtime.py"
+      - "services/worker/workload_planner.py"
+      - "services/worker/system_profile.py"
+      - "pyproject.toml"
+      - ".github/workflows/nexora-managed-compute.yml"
+  pull_request:
+    paths:
+      - "deploy/Dockerfile.nexora-compute"
+      - "deploy/render.nexora-compute.yaml"
+      - "services/worker/managed_runtime.py"
+      - "services/worker/workload_planner.py"
+      - "services/worker/system_profile.py"
+      - "pyproject.toml"
+      - ".github/workflows/nexora-managed-compute.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  placement-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - run: pytest -q tests/test_workload_planner.py
+
+  managed-image:
+    # Build and verify core production tools on every run. Android SDK install
+    # is an optional layer enabled only after explicit organisation acceptance.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build managed NEXORA server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.nexora-compute
+          tags: nexora-managed-compute:ci
+          build-args: |
+            NEXORA_ANDROID_SDK_LICENSES_ACCEPTED=${{ vars.NEXORA_ANDROID_SDK_LICENSES_ACCEPTED || 'false' }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify the installed production toolchain in the container
+        env:
+          NEXORA_MANAGED_COMPUTE_SECRET: ci-managed-compute-secret
+          NEXORA_ANDROID_SDK_LICENSES_ACCEPTED: ${{ vars.NEXORA_ANDROID_SDK_LICENSES_ACCEPTED || 'false' }}
+        run: |
+          set -euo pipefail
+          docker run -d --name nexora-managed-compute-ci -p 10000:10000 -e NEXORA_MANAGED_COMPUTE_SECRET="$NEXORA_MANAGED_COMPUTE_SECRET" nexora-managed-compute:ci
+          trap 'docker rm -f nexora-managed-compute-ci >/dev/null 2>&1 || true' EXIT
+          health_ready=0
+          for attempt in $(seq 1 60); do
+            if curl --connect-timeout 2 --max-time 5 -fsS http://127.0.0.1:10000/health >/tmp/health.json 2>/dev/null; then
+              health_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$health_ready" != "1" ]; then
+            echo "Managed NEXORA container did not become healthy within 120 seconds."
+            docker logs nexora-managed-compute-ci || true
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          import os
+          payload = json.load(open("/tmp/health.json", encoding="utf-8"))
+          assert payload["toolchain_ready"], payload
+          assert payload["core_toolchain_ready"], payload
+          for name in ("blender", "godot", "ffmpeg", "ffprobe", "java"):
+              assert payload["toolchain"][name], payload
+          if os.environ["NEXORA_ANDROID_SDK_LICENSES_ACCEPTED"].lower() == "true":
+              assert payload["toolchain"]["android_sdk"], payload
+              assert payload["toolchain"]["adb"], payload
+          else:
+              assert payload["toolchain"]["android_sdk"] is False, payload
+          assert payload["workload_capabilities"]["procedural_3d"] is True
+          assert payload["workload_capabilities"]["movie_processing"] is True
+          assert payload["workload_capabilities"]["android_export"] is (os.environ["NEXORA_ANDROID_SDK_LICENSES_ACCEPTED"].lower() == "true")
+          PY
+          curl -fsS -H "X-NEXORA-COMPUTE-KEY: $NEXORA_MANAGED_COMPUTE_SECRET" http://127.0.0.1:10000/internal/capabilities >/tmp/capabilities.json
+          python - <<'PY'
+          import json
+          import os
+          payload = json.load(open("/tmp/capabilities.json", encoding="utf-8"))
+          assert payload["toolchain_ready"] is True, payload
+          assert payload["job_submission_enabled"] is False
+          assert payload["workspace_storage"]["writable"] is True, payload
+          assert payload["workspace_storage"]["persistent_mount_detected"] is False, payload
+          assert payload["workspace_storage"]["ready"] is False, payload
+          assert payload["execution_ready"] is False, payload
+          assert payload["job_submission_enabled"] is False, payload
+          assert "sdk_root" not in payload["profile"]["android"], payload["profile"]["android"]
+          android_accepted = os.environ["NEXORA_ANDROID_SDK_LICENSES_ACCEPTED"].lower() == "true"
+          assert payload["profile"]["android"]["sdk_configured"] is android_accepted, payload["profile"]["android"]
+          print("Managed NEXORA server toolchain is ready; persistence correctly reports unavailable outside Render.")
+          PY

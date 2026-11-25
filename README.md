@@ -27,6 +27,15 @@ PGF now includes a rights-gated, persisted seven-stage movie-to-game pipeline ma
 
 ## NEXORA production execution model
 
+## Managed server toolchain and workload placement
+
+NEXORA adds a private managed compute runtime with Blender, Godot 4.6.1, FFmpeg/FFprobe and Java 17 as its core production toolchain. Android SDK/ADB are optional and are installed only after explicit organisation licence acceptance; their absence does not disable story, 3D or movie-processing capabilities. The Local Agent remains useful for project files, local hardware and physical Android devices; light work stays on the user's PC when its live CPU/RAM headroom is safe. Larger supported workloads can be planned for the private worker.
+
+The first stage exposes server capabilities and a placement recommendation. The server workspace uses a Render persistent disk, while local resource figures are shared only if the user explicitly opts in. Without local-resource consent, the planner treats local capacity as unknown and selects the managed worker only when its measured toolchain and capacity pass preflight. The first stage does not upload project files or start remote jobs yet: remote execution remains disabled until the durable queue, per-job transfer approval, ownership controls, and artifact lifecycle are implemented. Heavy rendering and CUDA image-to-3D require separately provisioned higher-capacity/GPU workers.
+
+See [the managed-compute deployment and safety guide](deploy/NEXORA_MANAGED_COMPUTE.md). Do not change the existing account API into a compute worker or set `NEXORA_LOCAL_AGENT=true` on Render.
+
+
 NEXORA's production compute runs on the creator's own computer. The hosted API is a control plane for account authentication, plans and billing; it does not accept projects, source media, raw assets, GPU jobs, Blender generation or Godot builds. Project/workspace routes on the cloud API are rejected with `LOCAL_COMPUTE_REQUIRED`.
 
 The local agent binds to `127.0.0.1:8765`, uses an expiring one-time pairing code, checks CPU/RAM/free storage/GPU VRAM and installed tools, and exposes the same Foundry engine beneath `/engine`. The web workspace sends project, asset, generation, job and export requests to that paired local engine. Android device installation uses the local ADB bridge.

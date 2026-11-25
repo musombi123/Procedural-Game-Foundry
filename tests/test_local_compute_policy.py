@@ -159,3 +159,52 @@ def test_enabled_device_bond_is_attached_to_local_preflight(tmp_path, monkeypatc
     result = guard.require_device_profile("editor_2d")
     assert result["device_access_bond"]["enabled"] is True
     assert result["device_access_bond"]["limits"]["cpu_percent"] == 60
+
+
+def test_procedural_3d_is_blocked_when_cpu_is_busy_even_with_enough_total_cores():
+    profile = {
+        "machine": {
+            "logical_cpu_count": 8,
+            "cpu_utilization_percent": 90.0,
+            "cpu_available_cores": 0.8,
+            "ram_total_gib": 32,
+            "ram_available_gib": 16,
+            "disk_free_gib": 100,
+        },
+        "gpu": {"primary": None},
+        "tools": {
+            "blender": {"available": True},
+            "godot": {"available": True},
+        },
+    }
+
+    result = check_requirements("procedural_3d", profile)
+
+    assert result["ready"] is False
+    cpu_check = next(item for item in result["checks"] if item["name"] == "Available CPU capacity")
+    assert cpu_check["status"] == "fail"
+    assert "90%" in cpu_check["detail"]
+
+
+def test_procedural_3d_passes_cpu_preflight_when_live_headroom_is_sufficient():
+    profile = {
+        "machine": {
+            "logical_cpu_count": 8,
+            "cpu_utilization_percent": 40.0,
+            "cpu_available_cores": 4.8,
+            "ram_total_gib": 32,
+            "ram_available_gib": 16,
+            "disk_free_gib": 100,
+        },
+        "gpu": {"primary": None},
+        "tools": {
+            "blender": {"available": True},
+            "godot": {"available": True},
+        },
+    }
+
+    result = check_requirements("procedural_3d", profile)
+
+    assert result["ready"] is True
+    cpu_check = next(item for item in result["checks"] if item["name"] == "Available CPU capacity")
+    assert cpu_check["status"] == "pass"
