@@ -29,7 +29,7 @@ PGF now includes a rights-gated, persisted seven-stage movie-to-game pipeline ma
 
 ## Managed server toolchain and workload placement
 
-NEXORA adds a private managed compute runtime with preinstalled Blender, Godot 4.6.1, FFmpeg/FFprobe, Java 17 and Android SDK/ADB tools. The Local Agent remains useful for project files, local hardware and physical Android devices; light work stays on the user's PC when its live CPU/RAM headroom is safe. Larger supported workloads can be planned for the private worker.
+NEXORA adds a private managed compute runtime with Blender, Godot 4.6.1, FFmpeg/FFprobe and Java 17 as its core production toolchain. Android SDK/ADB are optional and are installed only after explicit organisation licence acceptance; their absence does not disable story, 3D or movie-processing capabilities. The Local Agent remains useful for project files, local hardware and physical Android devices; light work stays on the user's PC when its live CPU/RAM headroom is safe. Larger supported workloads can be planned for the private worker.
 
 The first stage exposes server capabilities and a placement recommendation. The server workspace uses a Render persistent disk, while local resource figures are shared only if the user explicitly opts in. Without local-resource consent, the planner treats local capacity as unknown and selects the managed worker only when its measured toolchain and capacity pass preflight. The first stage does not upload project files or start remote jobs yet: remote execution remains disabled until the durable queue, per-job transfer approval, ownership controls, and artifact lifecycle are implemented. Heavy rendering and CUDA image-to-3D require separately provisioned higher-capacity/GPU workers.
 
