@@ -60,6 +60,39 @@ def test_android_export_uses_server_sdk_without_requiring_local_adb():
     assert result["execution_location"] == "managed_server"
 
 
+def test_core_server_without_optional_android_sdk_still_accepts_3d_and_movie_candidates():
+    local = _profile(4, 7.9, 2.33, 356)
+    core_only_server = {
+        **_profile(
+            4, 16, 12, 120,
+            tools=("blender", "godot", "ffmpeg", "ffprobe", "java"),
+        ),
+        "available": True,
+        "execution_ready": True,
+    }
+
+    procedural = plan_execution("procedural_3d", local, core_only_server)
+    movie = plan_execution("movie_processing", local, core_only_server)
+    android = plan_execution("android_export", local, core_only_server)
+
+    assert procedural["execution_location"] == "managed_server"
+    assert movie["execution_location"] == "managed_server"
+    assert android["execution_location"] == "unavailable"
+    assert android["job_submission_enabled"] is False
+
+
+def test_server_without_persistent_workspace_is_not_selected_even_when_tools_exist():
+    local = _profile(4, 7.9, 2.33, 356)
+    server = {**_server(), "execution_ready": False}
+
+    result = plan_execution("movie_processing", local, server)
+
+    assert result["execution_location"] == "unavailable"
+    assert result["decision"] == "wait_for_capacity"
+    assert result["requires_remote_project_transfer"] is False
+    assert result["job_submission_enabled"] is False
+
+
 def test_heavy_render_is_not_routed_to_an_undersized_standard_worker():
     local = _profile(4, 7.9, 2.33, 356)
     result = plan_execution("heavy_3d_render", local, _server())
