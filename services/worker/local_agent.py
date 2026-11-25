@@ -1,8 +1,8 @@
 """NEXORA Local Compute Agent.
 
 This service is installed and run on the creator's computer. It binds to
-127.0.0.1 only, pairs by a one-time terminal code, reports device capability,
-and provides a narrowly allow-listed Android device bridge.
+127.0.0.1 only, pairs after explicit approval from a signed-in NEXORA user,
+reports device capability, and provides a narrowly allow-listed Android device bridge.
 
 The Foundry API is mounted under /engine and is enabled only when
 NEXORA_LOCAL_AGENT=true. It runs on this same user's machine, not on Render.
@@ -48,7 +48,6 @@ PORT = 8765
 MAX_APK_BYTES = 1024 * 1024 * 1024
 SERIAL_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 PACKAGE_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
-PAIR_CODE_RE = re.compile(r"^[0-9]{8}$")
 ORIGINS = {
     item.strip()
     for item in os.environ.get(
@@ -111,8 +110,8 @@ async def loopback_and_origin_guard(request: Request, call_next):
 
 
 class PairRequest(BaseModel):
-    code: str = Field(min_length=8, max_length=8, pattern=r"^[0-9]{8}$")
     account_access_token: str = Field(min_length=20, max_length=4096)
+    consent: bool = False
 
 
 class TourProgressRequest(BaseModel):
@@ -253,16 +252,10 @@ def _apk_package_id(path: Path) -> str:
 
 
 @app.on_event("startup")
-async def print_pairing_code() -> None:
-    authority = _authority()
-    code = authority.pairing_code_for_terminal
-    if code:
-        print("\n" + "=" * 64)
-        print("NEXORA LOCAL COMPUTE AGENT")
-        print(f"One-time browser pairing code: {code}")
-        print("Enter this code in NEXORA Studio. It expires after 15 minutes.")
-        print("Agent binding: 127.0.0.1:8765 (loopback only)")
-        print("=" * 64 + "\n")
+async def announce_agent_ready() -> None:
+    print("\\nNEXORA LOCAL COMPUTE AGENT is ready.")
+    print("Open NEXORA Studio on this computer and choose 'Allow & connect this computer'.")
+    print("No terminal code is needed. Agent binding: 127.0.0.1:8765\\n")
 
 
 @app.get("/health")
@@ -274,6 +267,7 @@ def health():
         "bound_to_loopback": True,
         "execution_location": "creator_device",
         "pairing_required": True,
+        "pairing_method": "explicit_user_approval",
     }
 
 
@@ -304,10 +298,14 @@ def _verify_cloud_account(token: str) -> dict[str, Any]:
 
 @app.post("/pair")
 def pair(payload: PairRequest):
+    if payload.consent is not True:
+        raise HTTPException(
+            403,
+            "Approve 'Allow & connect this computer' in NEXORA Studio before pairing.",
+        )
     account = _verify_cloud_account(payload.account_access_token)
     try:
-        token, expires_at = _authority().exchange(
-            payload.code,
+        token, expires_at = _authority().issue(
             user_id=str(account["id"]),
             cloud_access_token=payload.account_access_token,
         )
@@ -318,6 +316,7 @@ def pair(payload: PairRequest):
         "token_type": "Bearer",
         "expires_at_epoch": expires_at,
         "expires_in_seconds": 12 * 60 * 60,
+        "pairing_method": "explicit_user_approval",
         "storage_policy": "memory_only_until_agent_restart_or_expiry",
     }
 
