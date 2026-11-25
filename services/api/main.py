@@ -64,9 +64,15 @@ def _safe_local_compute_profile(profile: dict[str, Any]) -> dict[str, Any]:
 
     def numeric(source: dict[str, Any], key: str, integer: bool = False):
         value = source.get(key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
-        return int(value) if integer else float(value)
+        try:
+            converted = float(value)
+        except (OverflowError, ValueError):
+            return None
+        if not math.isfinite(converted):
+            return None
+        return int(converted) if integer else converted
 
     machine = {
         key: numeric(source_machine, key, integer=key == "logical_cpu_count")
@@ -81,10 +87,10 @@ def _safe_local_compute_profile(profile: dict[str, Any]) -> dict[str, Any]:
     }
     machine = {key: value for key, value in machine.items() if value is not None}
     allowed_tool_ids = {"blender", "godot", "ffmpeg", "ffprobe", "java", "adb", "python"}
-    tools = {
-        key: {"available": bool((source_tools.get(key) or {}).get("available"))}
-        for key in allowed_tool_ids
-    }
+    tools = {}
+    for key in allowed_tool_ids:
+        row = source_tools.get(key)
+        tools[key] = {"available": bool(row.get("available")) if isinstance(row, dict) else False}
     source_primary = source_gpu.get("primary") if isinstance(source_gpu.get("primary"), dict) else {}
     primary = None
     if source_primary:
