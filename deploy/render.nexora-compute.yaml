@@ -1,0 +1,21 @@
+# Sync this as a separate Render Blueprint. It does not modify the
+# existing RevelaCode account API or the NEXORA local-agent service.
+services:
+  - type: pserv
+    name: nexora-managed-compute
+    env: docker
+    region: oregon
+    plan: 4c-16g
+    dockerfilePath: ./deploy/Dockerfile.nexora-compute
+    dockerContext: .
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NEXORA_MANAGED_COMPUTE_SECRET
+        sync: false
+      - key: NEXORA_COMPUTE_WORKSPACE_ROOT
+        value: /tmp/nexora-compute
+      - key: NEXORA_AUTH_REQUIRED
+        value: "true"
+      - key: NEXORA_LOCAL_AGENT
+        value: "false"
