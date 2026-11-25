@@ -45,7 +45,9 @@ This first managed-runtime stage provisions and verifies the server toolchain, e
 
 A production job queue, durable project/object storage, explicit per-job remote-transfer approval, artifact download/retention policy, job ownership checks, cancellation and restart recovery must be completed before the UI may describe managed-server jobs as running. Until then, a managed-server placement is a candidate/preflight only; local jobs continue to use the paired Local Agent under its Device Access Bond and per-workload checks.
 
-The worker uses ephemeral `/tmp/nexora-compute` scratch only in this stage. Do not upload customer project data to it. Add the durable artifact store before enabling transfers or execution.
+The managed worker's workspace root is `/var/data/nexora-compute`, backed by a 50-GB Render persistent disk mounted at `/var/data`. The runtime reports separately whether that mount is actually present and writable. A local Docker CI smoke run can report the toolchain ready while reporting workspace persistence unavailable; the Render deployment must show both before it can accept any customer workspace.
+
+Render persistent disks are attached to one service instance only and prevent horizontal scaling and zero-downtime deploys. The managed compute worker is therefore deliberately configured as one instance. The disk is a persistent workspace volume, not a substitute for backups or a multi-region object store. Remote job submission remains disabled until the durable queue, upload/transfer approval, artifact retention and recovery workflow is implemented.
 
 ## Toolchain and resource verification
 
