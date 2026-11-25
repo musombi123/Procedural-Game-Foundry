@@ -37,5 +37,7 @@ def test_user_setup_documentation_does_not_request_terminal_commands_or_pairing_
     section = readme.split("## NEXORA production execution model", 1)[1].split("## Quick start", 1)[0]
     assert "one-click windows installer" in section.lower()
     assert "8-digit" not in section.lower()
-    assert "powershell" not in section.lower()
+    assert "no powershell" in section.lower()
+    assert "```powershell" not in section.lower()
+    assert "git clone" not in section.lower()
     assert "github.com/musombi123/Procedural-Game-Foundry/releases/latest" in section
