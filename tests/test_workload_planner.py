@@ -77,3 +77,15 @@ def test_unknown_workload_is_rejected():
     import pytest
     with pytest.raises(ValueError, match="Unknown NEXORA workload profile"):
         plan_execution("arbitrary_shell", {}, _server())
+
+
+def test_remote_candidate_requires_verified_persistent_execution_storage():
+    local = _profile(4, 7.9, 2.33, 356)
+    managed = {**_server(), "execution_ready": False}
+
+    result = plan_execution("procedural_3d", local, managed)
+
+    assert result["decision"] == "wait_for_capacity"
+    assert result["execution_location"] == "unavailable"
+    assert result["managed_server"]["ready"] is False
+    assert result["job_submission_enabled"] is False
