@@ -85,3 +85,17 @@ The Blender-to-Godot integration test runs the repository's actual Blender gener
 Assembled games now receive Linux/X11 and Android export presets. A separate CI quality gate attempts both native exports from the same generated game and retains the resulting desktop binary and Android debug APK as build artifacts. These CI exports are reproducibility checks, not a substitute for testing on a physical device or signing a production release.
 
 **Creator acceptance gates still required:** a real full-body portrait supplied with explicit consent; creator review of avatar proportions and face crop; a complete playthrough by a human tester; desktop launch/playtest; Android installation and touch-control playtest; and release signing/packaging. Do not describe the product as production-ready until these gates pass.
+
+
+## Licence
+
+Original Foundry source and materials are proprietary and all rights are reserved. Third-party software and assets remain under their own licences; consult [LICENSES.md](LICENSES.md) and [LICENSE](LICENSE) before redistribution.
+
+## Repository governance
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Contributing](CONTRIBUTING.md)
+
+## Licence
+
+Original Nexora Foundry source and materials are proprietary and all rights reserved; see [LICENSE](LICENSE). Third-party software, media, models, fonts, and assets remain subject to their own licences. Use the project's asset/licence register for provenance and redistribution requirements.
