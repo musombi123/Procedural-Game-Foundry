@@ -1,0 +1,41 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_windows_installer_is_a_per_user_background_install():
+    installer = (ROOT / "packaging" / "nexora-local-agent.iss").read_text(encoding="utf-8")
+    assert "PrivilegesRequired=lowest" in installer
+    assert "{userstartup}" in installer
+    assert "postinstall nowait" in installer
+    assert "NEXORA.LocalAgent.exe" in installer
+    assert "Python" not in installer
+
+
+def test_frozen_agent_entrypoint_owns_runtime_paths_and_single_instance():
+    entry = (ROOT / "scripts" / "nexora_local_agent_entry.py").read_text(encoding="utf-8")
+    assert "LOCALAPPDATA" in entry
+    assert "NEXORA_LOCAL_AGENT_DATA" in entry
+    assert "PGF_DATA_DIR" in entry
+    assert "NEXORA.LocalAgent.Singleton.v1" in entry
+    assert 'host="127.0.0.1"' in entry
+    assert "RotatingFileHandler" in entry
+
+
+def test_packaging_workflow_builds_and_publishes_windows_installer():
+    workflow = (ROOT / ".github" / "workflows" / "nexora-local-agent-windows.yml").read_text(encoding="utf-8")
+    assert "windows-latest" in workflow
+    assert "PyInstaller" in workflow
+    assert "Inno Setup" in workflow
+    assert "NEXORA-Local-Agent-Setup.exe" in workflow
+    assert "softprops/action-gh-release" in workflow
+
+
+def test_user_setup_documentation_does_not_request_terminal_commands_or_pairing_pin():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## NEXORA production execution model", 1)[1].split("## Quick start", 1)[0]
+    assert "one-click Windows installer" in section.lower()
+    assert "8-digit" not in section.lower()
+    assert "powershell" not in section.lower()
+    assert "github.com/musombi123/Procedural-Game-Foundry/releases/latest" in section
