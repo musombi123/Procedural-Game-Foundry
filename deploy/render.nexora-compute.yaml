@@ -3,13 +3,12 @@
 services:
   - type: pserv
     name: nexora-managed-compute
-    env: docker
+    runtime: docker
     region: oregon
     plan: 4c-16g
     dockerfilePath: ./deploy/Dockerfile.nexora-compute
     dockerContext: .
     autoDeploy: true
-    healthCheckPath: /health
     envVars:
       - key: NEXORA_MANAGED_COMPUTE_SECRET
         sync: false
