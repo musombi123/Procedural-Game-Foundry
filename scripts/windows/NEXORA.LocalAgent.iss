@@ -3,7 +3,7 @@
 #endif
 
 #define ProductName "NEXORA Local Agent"
-#define PayloadDir "build\agent-payload"
+#define PayloadDir "..\..\build\agent-payload"
 
 [Setup]
 AppId={{C41D6D5A-1C04-4BA6-BF33-7DDBF64A23C8}
@@ -16,7 +16,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
-OutputDir=dist
+OutputDir=..\..\dist
 OutputBaseFilename=NEXORA-Local-Agent-Setup
 SetupLogging=yes
 Compression=lzma2/ultra64
