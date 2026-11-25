@@ -33,6 +33,7 @@ Name: "{localappdata}\NEXORA\Foundry"
 
 [Files]
 Source: "..\dist\NEXORA.LocalAgent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "NEXORA-Local-Agent-Task.xml"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\NEXORA Local Agent"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -42,6 +43,7 @@ Name: "{userstartup}\NEXORA Local Agent"; Filename: "{app}\{#MyAppExeName}"; Wor
 Filename: "{app}\{#MyAppExeName}"; Description: "Start NEXORA Local Agent now"; Flags: postinstall nowait
 
 [UninstallRun]
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""NEXORA Local Agent"" /F"; Flags: runhidden; RunOnceId: "RemoveNexoraLocalAgentTask"
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExeName} /T /F"; Flags: runhidden; RunOnceId: "StopNexoraLocalAgent"
 
 [UninstallDelete]
@@ -62,13 +64,13 @@ var
   ResultCode: Integer;
 begin
   ExtractTemporaryFile('NEXORA-Local-Agent-Task.xml');
-  if not LoadStringFromFile(ExpandConstant('{tmp}\\NEXORA-Local-Agent-Task.xml'), TaskTemplate) then
+  if not LoadStringFromFile(ExpandConstant('{tmp}\NEXORA-Local-Agent-Task.xml'), TaskTemplate) then
   begin
     Log('NEXORA scheduled-task template could not be loaded; Startup shortcut will be used.');
     exit;
   end;
 
-  AgentPath := ExpandConstant('{app}\\{#MyAppExeName}');
+  AgentPath := ExpandConstant('{app}\{#MyAppExeName}');
   AgentDirectory := ExpandConstant('{app}');
   UserId := GetUserNameString();
 
@@ -76,21 +78,21 @@ begin
   StringChangeEx(TaskTemplate, '__AGENT_PATH__', XmlEscape(AgentPath), True);
   StringChangeEx(TaskTemplate, '__AGENT_WORKING_DIRECTORY__', XmlEscape(AgentDirectory), True);
 
-  TaskFile := ExpandConstant('{tmp}\\NEXORA-Local-Agent-Task.ready.xml');
+  TaskFile := ExpandConstant('{tmp}\NEXORA-Local-Agent-Task.ready.xml');
   if not SaveStringToFile(TaskFile, TaskTemplate, False) then
   begin
     Log('NEXORA scheduled-task definition could not be written; Startup shortcut will be used.');
     exit;
   end;
 
-  if Exec(ExpandConstant('{sys}\\schtasks.exe'),
+  if Exec(ExpandConstant('{sys}\schtasks.exe'),
     '/Create /TN "NEXORA Local Agent" /XML "' + TaskFile + '" /F',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
   begin
     Log('NEXORA Local Agent sign-in and crash-recovery task registered.');
-    Exec(ExpandConstant('{sys}\\schtasks.exe'),
+    Exec(ExpandConstant('{sys}\schtasks.exe'),
       '/Run /TN "NEXORA Local Agent"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    DeleteFile(ExpandConstant('{userstartup}\\NEXORA Local Agent.lnk'));
+    DeleteFile(ExpandConstant('{userstartup}\NEXORA Local Agent.lnk'));
   end
   else
   begin
