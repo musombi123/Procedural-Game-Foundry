@@ -52,6 +52,7 @@ def acquire_single_instance_lock(agent_data: Path):
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
     kernel32.CreateMutexW.restype = ctypes.c_void_p
+    ctypes.set_last_error(0)
     handle = kernel32.CreateMutexW(None, False, "Local\\NEXORA.LocalAgent.Singleton.v1")
     if not handle:
         raise OSError(ctypes.get_last_error(), "Could not create NEXORA Local Agent instance lock.")
