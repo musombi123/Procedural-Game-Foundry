@@ -13,6 +13,20 @@ def test_windows_installer_is_a_per_user_background_install():
     assert "Python" not in installer
 
 
+def test_windows_installer_registers_hidden_logon_task_with_crash_recovery():
+    installer = (ROOT / "packaging" / "nexora-local-agent.iss").read_text(encoding="utf-8")
+    task = (ROOT / "packaging" / "NEXORA-Local-Agent-Task.xml").read_text(encoding="utf-8")
+    assert "RegisterManagedAgentTask" in installer
+    assert "schtasks.exe" in installer
+    assert "__AGENT_PATH__" in installer
+    assert "<LogonTrigger>" in task
+    assert "<LogonType>InteractiveToken</LogonType>" in task
+    assert "<RestartOnFailure>" in task
+    assert "<Interval>PT1M</Interval>" in task
+    assert "<Count>999</Count>" in task
+    assert "<RunLevel>LeastPrivilege</RunLevel>" in task
+
+
 def test_frozen_agent_entrypoint_owns_runtime_paths_and_single_instance():
     entry = (ROOT / "scripts" / "nexora_local_agent_entry.py").read_text(encoding="utf-8")
     assert "LOCALAPPDATA" in entry
