@@ -50,6 +50,7 @@ environment("NEXORA_ENV") = "local"
 environment("NEXORA_CLOUD_API_URL") = "https://nexora-foundry-api.onrender.com"
 environment("NEXORA_LOCAL_ALLOWED_ORIGINS") = "https://revelacode.co.ke"
 environment("NEXORA_CORS_ORIGINS") = "https://revelacode.co.ke"
+environment("SSL_CERT_FILE") = fso.BuildPath(root, "Lib\site-packages\certifi\cacert.pem")
 
 ' Run headless in the background and retain a bounded diagnostic log for support.
 command = """" & pythonExe & """ -m services.worker.local_agent >> """ & logFile & """ 2>&1"
