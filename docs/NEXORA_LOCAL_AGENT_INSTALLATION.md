@@ -41,4 +41,6 @@ NEXORA Studio downloads the first asset from the latest GitHub Release. A releas
 
 ## Important release note
 
-The current setup executable is built by CI but is not Authenticode-signed unless a publisher certificate is configured in the repository's protected CI secrets. The SHA-256 file detects accidental or malicious asset changes only when the checksum is obtained through a trusted channel; it does not replace publisher signing. Configure Windows code signing before broad public distribution.
+The current setup executable is not Authenticode-signed unless a publisher certificate is configured in the repository's protected CI secrets. To enable signing, store the base64-encoded PFX as `NEXORA_WINDOWS_CODESIGN_PFX_BASE64` and its password as `NEXORA_WINDOWS_CODESIGN_PFX_PASSWORD`. The build signs and verifies the executable before calculating its checksum. Without these secrets, CI emits an unsigned setup executable and logs a warning; Windows may show an unknown-publisher warning.
+
+The SHA-256 file detects accidental or malicious asset changes only when the checksum is obtained through a trusted channel; it does not replace publisher signing. Configure a valid organization-controlled Authenticode certificate before broad public distribution.
