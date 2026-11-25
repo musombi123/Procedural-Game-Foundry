@@ -1,0 +1,83 @@
+name: NEXORA Managed Compute Toolchain
+
+on:
+  push:
+    branches: [main, "feat/**"]
+    paths:
+      - "deploy/Dockerfile.nexora-compute"
+      - "deploy/render.nexora-compute.yaml"
+      - "services/worker/managed_runtime.py"
+      - "services/worker/workload_planner.py"
+      - "services/worker/system_profile.py"
+      - "pyproject.toml"
+      - ".github/workflows/nexora-managed-compute.yml"
+  pull_request:
+    paths:
+      - "deploy/Dockerfile.nexora-compute"
+      - "deploy/render.nexora-compute.yaml"
+      - "services/worker/managed_runtime.py"
+      - "services/worker/workload_planner.py"
+      - "services/worker/system_profile.py"
+      - "pyproject.toml"
+      - ".github/workflows/nexora-managed-compute.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  placement-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - run: pytest -q tests/test_workload_planner.py
+
+  managed-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build managed NEXORA server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.nexora-compute
+          tags: nexora-managed-compute:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify the installed production toolchain in the container
+        env:
+          NEXORA_MANAGED_COMPUTE_SECRET: ci-managed-compute-secret
+        run: |
+          set -euo pipefail
+          docker run -d --name nexora-managed-compute-ci -p 10000:10000 -e NEXORA_MANAGED_COMPUTE_SECRET="$NEXORA_MANAGED_COMPUTE_SECRET" nexora-managed-compute:ci
+          trap 'docker rm -f nexora-managed-compute-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:10000/health >/tmp/health.json; then break; fi
+            sleep 2
+          done
+          python - <<'PY'
+          import json
+          payload = json.load(open("/tmp/health.json", encoding="utf-8"))
+          assert payload["toolchain_ready"], payload
+          assert payload["toolchain"]["blender"]
+          assert payload["toolchain"]["godot"]
+          assert payload["toolchain"]["ffmpeg"]
+          assert payload["toolchain"]["ffprobe"]
+          assert payload["toolchain"]["java"]
+          assert payload["toolchain"]["adb"]
+          PY
+          curl -fsS -H "X-NEXORA-COMPUTE-KEY: $NEXORA_MANAGED_COMPUTE_SECRET" http://127.0.0.1:10000/internal/capabilities >/tmp/capabilities.json
+          python - <<'PY'
+          import json
+          payload = json.load(open("/tmp/capabilities.json", encoding="utf-8"))
+          assert payload["toolchain_ready"] is True, payload
+          assert payload["job_submission_enabled"] is False
+          print("Managed NEXORA server toolchain is ready.")
+          PY
