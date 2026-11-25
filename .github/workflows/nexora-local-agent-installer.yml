@@ -1,0 +1,78 @@
+name: NEXORA Local Agent Windows Installer
+
+on:
+  pull_request:
+    paths:
+      - "services/**"
+      - "core/**"
+      - "generators/**"
+      - "scripts/windows/**"
+      - "pyproject.toml"
+      - ".github/workflows/nexora-local-agent-installer.yml"
+  push:
+    branches: [main, "fix/nexora-polyhaven-route-test-fastapi-lazy-router"]
+    tags: ["nexora-local-agent-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build the standalone Local Agent setup program
+        shell: pwsh
+        run: |
+          $version = "1.0.0"
+          if ($env:GITHUB_REF -like "refs/tags/nexora-local-agent-v*") {
+            $version = $env:GITHUB_REF_NAME -replace "^nexora-local-agent-v", ""
+          }
+          & .\scripts\windows\build-local-agent-installer.ps1 -Version $version
+
+      - name: Verify installer and checksum were produced
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ".\dist\NEXORA-Local-Agent-Setup.exe")) {
+            throw "Windows installer output is missing."
+          }
+          if (-not (Test-Path ".\dist\NEXORA-Local-Agent-Setup.exe.sha256")) {
+            throw "Installer checksum is missing."
+          }
+          Get-Item ".\dist\NEXORA-Local-Agent-Setup.exe" | Select-Object Name, Length
+          Get-Content ".\dist\NEXORA-Local-Agent-Setup.exe.sha256"
+
+      - name: Upload installer build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEXORA-Local-Agent-Windows-Installer
+          path: |
+            dist/NEXORA-Local-Agent-Setup.exe
+            dist/NEXORA-Local-Agent-Setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create versioned GitHub Release
+        if: startsWith(github.ref, 'refs/tags/nexora-local-agent-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag --title "NEXORA Local Agent $tag" --generate-notes
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not create the NEXORA Local Agent release."
+          }
+          gh release upload $tag "dist/NEXORA-Local-Agent-Setup.exe" "dist/NEXORA-Local-Agent-Setup.exe.sha256" --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not upload the NEXORA Local Agent installer assets."
+          }
