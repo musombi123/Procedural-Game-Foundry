@@ -60,6 +60,45 @@ def test_android_export_uses_server_sdk_without_requiring_local_adb():
     assert result["execution_location"] == "managed_server"
 
 
+def test_procedural_3d_stays_on_user_pc_when_live_cpu_ram_storage_and_tools_are_sufficient():
+    local = _profile(
+        8, 32, 20, 100,
+        tools=("blender", "godot", "ffmpeg", "ffprobe"),
+    )
+
+    result = plan_execution("procedural_3d", local, _server())
+
+    assert result["decision"] == "run_locally"
+    assert result["execution_location"] == "creator_device"
+    assert result["requires_remote_project_transfer"] is False
+
+
+def test_busy_user_cpu_causes_managed_candidate_when_server_is_ready():
+    local = _profile(
+        8, 32, 20, 100,
+        tools=("blender", "godot"),
+    )
+    local["machine"]["cpu_available_cores"] = 0.5
+
+    result = plan_execution("procedural_3d", local, _server())
+
+    assert result["execution_location"] == "managed_server"
+    assert any("CPU is currently busy" in item for item in result["local"]["failures"])
+
+
+def test_low_available_user_ram_causes_managed_candidate_even_with_large_installed_ram():
+    local = _profile(
+        8, 32, 100, 100,
+        tools=("blender", "godot"),
+    )
+    local["machine"]["ram_available_gib"] = 1.5
+
+    result = plan_execution("procedural_3d", local, _server())
+
+    assert result["execution_location"] == "managed_server"
+    assert any("Available RAM" in item for item in result["local"]["failures"])
+
+
 def test_core_server_without_optional_android_sdk_still_accepts_3d_and_movie_candidates():
     local = _profile(4, 7.9, 2.33, 356)
     core_only_server = {
