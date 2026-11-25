@@ -247,7 +247,7 @@ def capabilities(x_nexora_compute_key: str | None = Header(default=None)):
         "workload_capabilities": _workload_toolchain_capabilities(tool_state),
         "profile": _public_profile(profile),
         "workspace_storage": storage,
-        "execution_ready": storage["ready"],
+        "execution_ready": core_ready and storage["ready"],
         "execution_location": "managed_server",
         "job_submission_enabled": False,
         "note": "Core production tools are reported separately from optional Android tooling and persistent execution storage. Job transfer/queue execution is not enabled by this runtime-only service.",
