@@ -85,6 +85,33 @@ finally {
 
 $Installer = Join-Path $DistRoot "NEXORA-Local-Agent-Setup.exe"
 if (-not (Test-Path $Installer)) { throw "The installer output was not created." }
+
+$SigningPfx = $env:NEXORA_WINDOWS_CODESIGN_PFX_BASE64
+$SigningPassword = $env:NEXORA_WINDOWS_CODESIGN_PFX_PASSWORD
+if ($SigningPfx -and $SigningPassword) {
+    $PfxPath = Join-Path $env:RUNNER_TEMP "nexora-windows-code-signing.pfx"
+    try {
+        [IO.File]::WriteAllBytes($PfxPath, [Convert]::FromBase64String($SigningPfx))
+        $WindowsKits = Join-Path ([Environment]::GetEnvironmentVariable("ProgramFiles(x86)")) "Windows Kits\10\bin"
+        $SignTool = Get-ChildItem -Path $WindowsKits -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+        if (-not $SignTool) { throw "Windows SignTool was not found. Cannot produce the requested signed installer." }
+        & $SignTool sign /f $PfxPath /p $SigningPassword /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $Installer
+        if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed." }
+        & $SignTool verify /pa /v $Installer
+        if ($LASTEXITCODE -ne 0) { throw "Authenticode signature verification failed." }
+        Write-Host "Installer has a verified Authenticode signature." -ForegroundColor Green
+    }
+    finally {
+        if (Test-Path $PfxPath) { Remove-Item $PfxPath -Force }
+    }
+}
+else {
+    Write-Warning "No Windows code-signing certificate is configured. The installer will be unsigned and Windows may show an unknown-publisher warning."
+}
+
 $Hash = (Get-FileHash -Path $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -Path "$Installer.sha256" -Value "$Hash  NEXORA-Local-Agent-Setup.exe" -Encoding Ascii
 
