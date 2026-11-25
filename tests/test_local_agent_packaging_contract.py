@@ -8,7 +8,7 @@ def test_windows_installer_is_a_per_user_background_install():
     installer = (ROOT / "packaging" / "nexora-local-agent.iss").read_text(encoding="utf-8")
     assert "PrivilegesRequired=lowest" in installer
     assert "{userstartup}" in installer
-    assert "postinstall nowait" in installer
+    assert "runhidden nowait" in installer
     assert "NEXORA.LocalAgent.exe" in installer
     assert "Python" not in installer
 
@@ -49,6 +49,15 @@ def test_packaging_workflow_builds_and_publishes_windows_installer():
     assert "Inno Setup" in workflow
     assert "NEXORA-Local-Agent-Setup.exe" in workflow
     assert "softprops/action-gh-release" in workflow
+
+
+def test_windows_workflow_runs_real_install_health_task_and_uninstall_smoke_test():
+    workflow = (ROOT / ".github" / "workflows" / "nexora-local-agent-windows.yml").read_text(encoding="utf-8")
+    assert "Smoke-test Windows install, health, auto-restart task and uninstall" in workflow
+    assert "127.0.0.1:8765/health" in workflow
+    assert "<RestartOnFailure>" in workflow
+    assert "Uninstall left the NEXORA scheduled task registered." in workflow
+    assert "Uninstall unexpectedly removed the user's Foundry project data." in workflow
 
 
 def test_public_releases_require_authenticode_signing():
