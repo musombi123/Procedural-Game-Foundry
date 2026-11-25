@@ -9,7 +9,7 @@
 AppId={{C41D6D5A-1C04-4BA6-BF33-7DDBF64A23C8}
 AppName={#ProductName}
 AppVersion={#AppVersion}
-AppPublisher=RevelaCode
+AppPublisher=NEXORA Interactive Studios
 DefaultDirName={localappdata}\Programs\NEXORA\Local Agent
 DefaultGroupName=NEXORA
 DisableProgramGroupPage=yes
@@ -26,7 +26,7 @@ CloseApplications=yes
 RestartApplications=no
 Uninstallable=yes
 UninstallDisplayName={#ProductName}
-VersionInfoCompany=RevelaCode
+VersionInfoCompany=NEXORA Interactive Studios
 VersionInfoDescription=NEXORA local compute companion
 VersionInfoProductName={#ProductName}
 VersionInfoProductVersion={#AppVersion}
