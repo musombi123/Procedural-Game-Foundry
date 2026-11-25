@@ -180,25 +180,28 @@ def managed_compute_capabilities():
 
 @app.post("/api/compute/plan")
 def managed_compute_plan(payload: ManagedComputePlanRequest):
-    if payload.consent_to_share_hardware_metrics is not True:
-        raise HTTPException(
-            403,
-            {
-                "code": "HARDWARE_METRICS_CONSENT_REQUIRED",
-                "message": "Approve sharing anonymous CPU, RAM, storage, tool-readiness and GPU-memory measurements for workload placement.",
-            },
-        )
-    safe_profile = _safe_local_compute_profile(payload.local_profile)
-    if not safe_profile.get("machine", {}).get("logical_cpu_count"):
-        raise HTTPException(422, "A valid local hardware profile is required for workload placement.")
+    # Local resource measurements are optional. Without explicit consent, send
+    # no device profile at all; the planner treats local capacity as unknown
+    # and may select the managed worker only if that server passes preflight.
+    metrics_shared = payload.consent_to_share_hardware_metrics is True
+    safe_profile = _safe_local_compute_profile(payload.local_profile) if metrics_shared else {}
+    if metrics_shared and not safe_profile.get("machine", {}).get("logical_cpu_count"):
+        raise HTTPException(422, "A valid local hardware profile is required when sharing local resource metrics.")
     try:
-        return _managed_compute_request(
+        result = _managed_compute_request(
             "/internal/plan",
             {
                 "workload": payload.workload,
                 "local_profile": safe_profile,
             },
         )
+        result["local_metrics_shared"] = metrics_shared
+        result["local_metrics_policy"] = (
+            "user_consented_allowlisted_resource_summary"
+            if metrics_shared
+            else "not_shared_local_capacity_treated_as_unknown"
+        )
+        return result
     except HTTPException:
         raise
 
