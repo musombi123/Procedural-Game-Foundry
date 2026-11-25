@@ -6,6 +6,7 @@ ARG GODOT_VERSION=4.6.1
 ARG ANDROID_CMDLINE_TOOLS_VERSION=15859902
 ARG ANDROID_PLATFORM=35
 ARG ANDROID_BUILD_TOOLS=35.0.0
+ARG NEXORA_ANDROID_SDK_LICENSES_ACCEPTED=false
 ARG GODOT_LINUX_SHA256=cecd0cb6b55e931318a9d7237dc4197d69ea914966787a454808523626e2789f
 ARG GODOT_EXPORT_TEMPLATES_SHA256=e6d372afd4fdfaae9571eb5e3568afcd96ce6db9a569244034154faf0ac69875
 ARG ANDROID_CMDLINE_TOOLS_SHA256=4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583
@@ -46,6 +47,15 @@ RUN set -eux; \
 # Android command-line tools, platform-tools (ADB), platform and build-tools.
 # The emulator/NDK are excluded from the baseline worker and can be a separate
 # high-capacity build profile. Physical-device testing stays on the creator PC.
+# Building the managed image installs Android SDK packages. The organisation
+# must first review and accept the current Android SDK licence terms. This
+# argument is an explicit deployment gate; the image must not accept terms
+# silently during an unattended build.
+RUN test "${NEXORA_ANDROID_SDK_LICENSES_ACCEPTED}" = "true" || { \
+      echo "Set NEXORA_ANDROID_SDK_LICENSES_ACCEPTED=true only after the NEXORA operator has reviewed and accepted the Android SDK licence terms." >&2; \
+      exit 1; \
+    }
+
 RUN set -eux; \
     mkdir -p "${ANDROID_HOME}/cmdline-tools"; \
     curl -fL --retry 4 --retry-delay 2 \
