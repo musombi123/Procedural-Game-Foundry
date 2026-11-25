@@ -79,5 +79,10 @@ jobs:
           payload = json.load(open("/tmp/capabilities.json", encoding="utf-8"))
           assert payload["toolchain_ready"] is True, payload
           assert payload["job_submission_enabled"] is False
-          print("Managed NEXORA server toolchain is ready.")
+          assert payload["workspace_storage"]["writable"] is True, payload
+          assert payload["workspace_storage"]["persistent_mount_detected"] is False, payload
+          assert payload["workspace_storage"]["ready"] is False, payload
+          assert "sdk_root" not in payload["profile"]["android"], payload["profile"]["android"]
+          assert payload["profile"]["android"]["sdk_configured"] is True, payload["profile"]["android"]
+          print("Managed NEXORA server toolchain is ready; persistence correctly reports unavailable outside Render.")
           PY
