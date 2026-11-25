@@ -27,7 +27,7 @@ if (Test-Path $DistRoot) { Remove-Item $DistRoot -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $PayloadRoot, $SitePackages, $FoundryRoot, $DistRoot | Out-Null
 
 Write-Host "Installing the Local Agent runtime into the portable package..."
-& python -m pip install --disable-pip-version-check --no-warn-script-location --target $SitePackages $RepoRoot
+& python -m pip install --disable-pip-version-check --no-warn-script-location --target $SitePackages $RepoRoot certifi
 if ($LASTEXITCODE -ne 0) { throw "Could not package the Local Agent dependencies." }
 
 Write-Host "Bundling the Foundry runtime and its local assets..."
@@ -108,8 +108,11 @@ if ($SigningPfx -and $SigningPassword) {
         if (Test-Path $PfxPath) { Remove-Item $PfxPath -Force }
     }
 }
+elseif ($env:NEXORA_REQUIRE_CODESIGN -eq "true") {
+    throw "A publisher Authenticode certificate is required before a public versioned release can be published."
+}
 else {
-    Write-Warning "No Windows code-signing certificate is configured. The installer will be unsigned and Windows may show an unknown-publisher warning."
+    Write-Warning "No Windows code-signing certificate is configured. The pull-request installer artifact will be unsigned and Windows may show an unknown-publisher warning."
 }
 
 $Hash = (Get-FileHash -Path $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
