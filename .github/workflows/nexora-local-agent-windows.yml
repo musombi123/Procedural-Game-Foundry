@@ -127,15 +127,18 @@ jobs:
             throw "The installed NEXORA Local Agent did not become healthy on 127.0.0.1:8765."
           }
 
-          $taskXml = & "$env:WINDIR\System32\schtasks.exe" /Query /TN "NEXORA Local Agent" /XML
+          $taskXml = & "$env:WINDIR\\System32\\schtasks.exe" /Query /TN "NEXORA Local Agent" /XML
           if ($LASTEXITCODE -ne 0) { throw "The installer did not register the NEXORA automatic sign-in task." }
-          if ($taskXml -notmatch "<Interval>PT1M</Interval>") {
+          $taskXmlText = $taskXml -join [Environment]::NewLine
+          if ($taskXmlText -notmatch "<Interval>PT1M</Interval>") {
             Write-Host "Windows Task Scheduler XML returned for the registered NEXORA supervisor:"
-            Write-Host ($taskXml -join [Environment]::NewLine)
+            Write-Host $taskXmlText
             throw "The NEXORA supervisor task is missing its one-minute crash-recovery interval."
           }
-          if ($taskXml -notmatch "NEXORA.LocalAgent.exe") {
-            throw "The NEXORA supervisor task does not point to the installed Local Agent."
+          if ($taskXmlText -notmatch "<Command>[^<]*NEXORA\\.LocalAgent\\.exe</Command>") {
+            Write-Host "Windows Task Scheduler XML returned for the registered NEXORA supervisor:"
+            Write-Host $taskXmlText
+            throw "The NEXORA supervisor task does not point to the installed Local Agent executable."
           }
 
           if (-not (Test-Path (Join-Path $agentRoot "Agent\logs"))) {
