@@ -43,6 +43,44 @@ jobs:
         shell: pwsh
         run: ./scripts/package-nexora-local-agent.ps1
 
+      - name: Require a signing certificate for public releases
+        if: startsWith(github.ref, 'refs/tags/local-agent-v')
+        shell: pwsh
+        env:
+          NEXORA_WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.NEXORA_WINDOWS_SIGNING_CERT_BASE64 }}
+          NEXORA_WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.NEXORA_WINDOWS_SIGNING_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NEXORA_WINDOWS_SIGNING_CERT_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:NEXORA_WINDOWS_SIGNING_CERT_PASSWORD)) {
+            throw "A code-signing certificate is required before publishing a public NEXORA Local Agent release."
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "nexora-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:NEXORA_WINDOWS_SIGNING_CERT_BASE64))
+          $password = ConvertTo-SecureString $env:NEXORA_WINDOWS_SIGNING_CERT_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\\CurrentUser\\My" -Password $password
+          if (-not $certificate -or -not $certificate[0].HasPrivateKey) {
+            throw "The configured PFX does not contain a usable private code-signing key."
+          }
+          "NEXORA_SIGNING_THUMBPRINT=$($certificate[0].Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Remove-Item $pfxPath -Force
+
+      - name: Sign Local Agent binaries for public releases
+        if: startsWith(github.ref, 'refs/tags/local-agent-v')
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path "${env:ProgramFiles(x86)}" "Windows Kits\\10\\bin"
+          $signtool = Get-ChildItem $sdkRoot -Filter signtool.exe -Recurse |
+            Where-Object { $_.FullName -match "\\\\x64\\signtool.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) { throw "Windows SDK SignTool was not found." }
+          $files = Get-ChildItem "dist\\NEXORA.LocalAgent" -Recurse -File |
+            Where-Object { $_.Extension -in @(".exe", ".dll") }
+          foreach ($file in $files) {
+            & $signtool.FullName sign /sha1 $env:NEXORA_SIGNING_THUMBPRINT /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Could not sign $($file.Name)." }
+          }
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
@@ -55,6 +93,22 @@ jobs:
           $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME -replace "^local-agent-v", "" } else { "1.0.0" }
           & $iscc "/DMyAppVersion=$version" "packaging\nexora-local-agent.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed to compile the installer." }
+
+      - name: Sign Windows setup executable for public releases
+        if: startsWith(github.ref, 'refs/tags/local-agent-v')
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path "${env:ProgramFiles(x86)}" "Windows Kits\\10\\bin"
+          $signtool = Get-ChildItem $sdkRoot -Filter signtool.exe -Recurse |
+            Where-Object { $_.FullName -match "\\\\x64\\signtool.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) { throw "Windows SDK SignTool was not found." }
+          $installer = "artifacts\\windows\\NEXORA-Local-Agent-Setup.exe"
+          & $signtool.FullName sign /sha1 $env:NEXORA_SIGNING_THUMBPRINT /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $installer
+          if ($LASTEXITCODE -ne 0) { throw "Could not sign the NEXORA setup executable." }
+          & $signtool.FullName verify /pa /v $installer
+          if ($LASTEXITCODE -ne 0) { throw "The NEXORA setup executable did not pass Authenticode verification." }
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
