@@ -13,23 +13,16 @@ def test_windows_installer_is_a_per_user_background_install():
     assert "Python" not in installer
 
 
-def test_windows_installer_registers_hidden_logon_task_with_crash_recovery():
+def test_windows_installer_registers_per_user_sign_in_and_crash_recovery_supervisor():
     installer = (ROOT / "packaging" / "nexora-local-agent.iss").read_text(encoding="utf-8")
-    task = (ROOT / "packaging" / "NEXORA-Local-Agent-Task.xml").read_text(encoding="utf-8")
     assert "RegisterManagedAgentTask" in installer
     assert "schtasks.exe" in installer
-    assert "__AGENT_PATH__" in task
-    assert 'Source: "NEXORA-Local-Agent-Task.xml"; Flags: dontcopy' in installer
-    assert "ExtractTemporaryFile('NEXORA-Local-Agent-Task.xml')" in installer
-    assert "LoadStringsFromFile" in installer
-    assert "Utf8Encode(TaskTemplate)" in installer
+    assert "/Create /SC MINUTE /MO 1" in installer
+    assert '/RL LIMITED /IT /F' in installer
+    assert "single-instance mutex prevents duplicate workers" in installer
+    assert "per-user Startup shortcut remains the sign-in fallback" in installer
     assert '/Delete /TN ""NEXORA Local Agent"" /F' in installer
-    assert "<LogonTrigger>" in task
-    assert "<LogonType>InteractiveToken</LogonType>" in task
-    assert "<RestartOnFailure>" in task
-    assert "<Interval>PT1M</Interval>" in task
-    assert "<Count>999</Count>" in task
-    assert "<RunLevel>LeastPrivilege</RunLevel>" in task
+    assert 'Name: "{userstartup}\\NEXORA Local Agent"' in installer
 
 
 def test_frozen_agent_entrypoint_owns_runtime_paths_and_single_instance():
@@ -55,7 +48,7 @@ def test_windows_workflow_runs_real_install_health_task_and_uninstall_smoke_test
     workflow = (ROOT / ".github" / "workflows" / "nexora-local-agent-windows.yml").read_text(encoding="utf-8")
     assert "Smoke-test Windows install, health, auto-restart task and uninstall" in workflow
     assert "127.0.0.1:8765/health" in workflow
-    assert "<RestartOnFailure>" in workflow
+    assert "<Interval>PT1M</Interval>" in workflow
     assert "Uninstall left the NEXORA scheduled task registered." in workflow
     assert "Uninstall unexpectedly removed the user's Foundry project data." in workflow
 
