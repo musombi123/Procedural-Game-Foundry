@@ -92,7 +92,51 @@ jobs:
           if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found." }
           $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME -replace "^local-agent-v", "" } else { "1.0.0" }
           & $iscc "/DMyAppVersion=$version" "packaging\nexora-local-agent.iss"
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed to compile the installer." }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed to compile the installer." }          
+      - name: Smoke-test Windows install, health, auto-restart task and uninstall
+        shell: pwsh
+        run: |
+          $installer = "artifacts\windows\NEXORA-Local-Agent-Setup.exe"
+          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+          if ($LASTEXITCODE -ne 0) { throw "NEXORA Local Agent setup failed in silent installation." }
+
+          $agentRoot = Join-Path $env:LOCALAPPDATA "NEXORA"
+          $installRoot = Join-Path $env:LOCALAPPDATA "Programs\NEXORA\Local Agent"
+          $uninstaller = Join-Path $installRoot "unins000.exe"
+          $deadline = [DateTime]::UtcNow.AddSeconds(45)
+          $health = $null
+          while ([DateTime]::UtcNow -lt $deadline -and -not $health) {
+            try {
+              $health = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 2
+            } catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+          if (-not $health -or $health.status -ne "ready" -or $health.service -ne "NEXORA Local Compute Agent") {
+            throw "The installed NEXORA Local Agent did not become healthy on 127.0.0.1:8765."
+          }
+
+          $taskXml = & "$env:WINDIR\System32\schtasks.exe" /Query /TN "NEXORA Local Agent" /XML
+          if ($LASTEXITCODE -ne 0) { throw "The installer did not register the NEXORA automatic sign-in task." }
+          if ($taskXml -notmatch "<LogonTrigger>" -or $taskXml -notmatch "<RestartOnFailure>") {
+            throw "The NEXORA scheduled task is missing its sign-in or crash-recovery settings."
+          }
+
+          if (-not (Test-Path (Join-Path $agentRoot "Agent\logs"))) {
+            throw "The NEXORA Local Agent data/log directory was not created."
+          }
+          if (-not (Test-Path $uninstaller)) { throw "The NEXORA Local Agent uninstaller was not installed." }
+
+          & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          if ($LASTEXITCODE -ne 0) { throw "NEXORA Local Agent uninstall failed." }
+          Start-Sleep -Seconds 2
+
+          & "$env:WINDIR\System32\schtasks.exe" /Query /TN "NEXORA Local Agent" 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Uninstall left the NEXORA scheduled task registered." }
+          if (-not (Test-Path (Join-Path $agentRoot "Foundry"))) {
+            throw "Uninstall unexpectedly removed the user's Foundry project data."
+          }
+
 
       - name: Sign Windows setup executable for public releases
         if: startsWith(github.ref, 'refs/tags/local-agent-v')
