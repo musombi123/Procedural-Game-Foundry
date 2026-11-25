@@ -96,7 +96,7 @@ jobs:
       - name: Smoke-test Windows install, health, auto-restart task and uninstall
         shell: pwsh
         run: |
-          $installer = "artifacts\windows\NEXORA-Local-Agent-Setup.exe"
+          $installer = Join-Path $PWD "artifacts\windows\NEXORA-Local-Agent-Setup.exe"
           & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
           if ($LASTEXITCODE -ne 0) { throw "NEXORA Local Agent setup failed in silent installation." }
 
