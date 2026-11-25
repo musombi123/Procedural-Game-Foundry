@@ -129,8 +129,11 @@ jobs:
 
           $taskXml = & "$env:WINDIR\System32\schtasks.exe" /Query /TN "NEXORA Local Agent" /XML
           if ($LASTEXITCODE -ne 0) { throw "The installer did not register the NEXORA automatic sign-in task." }
-          if ($taskXml -notmatch "<LogonTrigger>" -or $taskXml -notmatch "<RestartOnFailure>") {
-            throw "The NEXORA scheduled task is missing its sign-in or crash-recovery settings."
+          if ($taskXml -notmatch "<Interval>PT1M</Interval>") {
+            throw "The NEXORA supervisor task is missing its one-minute crash-recovery interval."
+          }
+          if ($taskXml -notmatch "NEXORA.LocalAgent.exe") {
+            throw "The NEXORA supervisor task does not point to the installed Local Agent."
           }
 
           if (-not (Test-Path (Join-Path $agentRoot "Agent\logs"))) {
