@@ -20,7 +20,8 @@ from services.worker.system_profile import collect_system_profile
 from services.worker.workload_planner import plan_execution
 
 
-DATA_ROOT = Path(os.environ.get("NEXORA_COMPUTE_WORKSPACE_ROOT", "/tmp/nexora-compute"))
+DATA_ROOT = Path(os.environ.get("NEXORA_COMPUTE_WORKSPACE_ROOT", "/var/data/nexora-compute"))
+STORAGE_MOUNT = Path(os.environ.get("NEXORA_COMPUTE_STORAGE_MOUNT", "/var/data"))
 SERVICE_KEY = os.environ.get("NEXORA_MANAGED_COMPUTE_SECRET", "").strip()
 GIB = 1024 ** 3
 
@@ -72,8 +73,9 @@ def _apply_container_limits(profile: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             pass
 
-    # Job scratch is ephemeral. Customer projects and long-lived artifacts are
-    # never persisted to the container image layer.
+    # The runtime reports free space from the configured workspace root. The
+    # separate storage status endpoint verifies whether that root is backed by
+    # the persistent Render disk rather than the container's ephemeral layer.
     try:
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
         disk = os.statvfs(DATA_ROOT)
@@ -131,10 +133,48 @@ def _public_profile(profile: dict[str, Any]) -> dict[str, Any]:
             for key, value in (profile.get("tools") or {}).items()
         },
         "android": {
-            "sdk_root": (profile.get("android") or {}).get("sdk_root"),
+            "sdk_configured": bool((profile.get("android") or {}).get("sdk_root")),
             "build_tools_installed": bool((profile.get("android") or {}).get("build_tools_installed")),
             "ready_to_verify_apk": bool((profile.get("android") or {}).get("ready_to_verify_apk")),
         },
+    }
+
+
+def _workspace_storage_status() -> dict[str, Any]:
+    """Verify the configured workspace is writable and backed by its disk mount."""
+    writable = False
+    free_bytes = 0
+    try:
+        DATA_ROOT.mkdir(parents=True, exist_ok=True)
+        probe = DATA_ROOT / f".nexora-write-check-{os.getpid()}"
+        with probe.open("xb") as handle:
+            handle.write(b"nexora")
+            handle.flush()
+            os.fsync(handle.fileno())
+        probe.unlink()
+        disk = os.statvfs(DATA_ROOT)
+        free_bytes = int(disk.f_bavail * disk.f_frsize)
+        writable = True
+    except OSError:
+        writable = False
+
+    mount_detected = False
+    try:
+        mount_detected = os.path.ismount(STORAGE_MOUNT)
+    except OSError:
+        mount_detected = False
+
+    return {
+        "writable": writable,
+        "persistent_mount_detected": mount_detected,
+        "ready": writable and mount_detected,
+        "available_gib": round(free_bytes / GIB, 2),
+        "job_submission_enabled": False,
+        "note": (
+            "Persistent workspace disk is mounted and writable."
+            if writable and mount_detected
+            else "Workspace disk is not yet confirmed as a persistent writable mount."
+        ),
     }
 
 
@@ -154,11 +194,14 @@ class PlanRequest(BaseModel):
 def health():
     profile = _profile()
     required = _required_tool_state(profile)
+    storage = _workspace_storage_status()
     return {
         "status": "ready" if all(required.values()) else "degraded",
         "service": "NEXORA Managed Compute Runtime",
         "toolchain": required,
         "toolchain_ready": all(required.values()),
+        "workspace_storage": storage,
+        "workspace_persistence_ready": storage["ready"],
         "execution_location": "managed_server",
         "job_submission_enabled": False,
     }
@@ -175,9 +218,10 @@ def capabilities(x_nexora_compute_key: str | None = Header(default=None)):
         "toolchain_ready": all(required.values()),
         "toolchain": required,
         "profile": _public_profile(profile),
+        "workspace_storage": _workspace_storage_status(),
         "execution_location": "managed_server",
         "job_submission_enabled": False,
-        "note": "Server-side toolchain is installed. Job transfer/queue execution is not enabled by this runtime-only service.",
+        "note": "Server-side toolchain and workspace storage are reported separately. Job transfer/queue execution is not enabled by this runtime-only service.",
     }
 
 
