@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
-    NEXORA_COMPUTE_WORKSPACE_ROOT=/tmp/nexora-compute \
+    NEXORA_COMPUTE_WORKSPACE_ROOT=/var/data/nexora-compute \
     NEXORA_LOCAL_AGENT=false \
     NEXORA_AUTH_REQUIRED=true
 
@@ -89,8 +89,8 @@ RUN set -eux; \
     useradd --create-home --uid 10001 --shell /usr/sbin/nologin nexora; \
     mkdir -p /home/nexora/.local/share/godot/export_templates/${GODOT_VERSION}.stable; \
     cp -a /opt/nexora/godot-templates/templates/. /home/nexora/.local/share/godot/export_templates/${GODOT_VERSION}.stable/; \
-    mkdir -p /tmp/nexora-compute; \
-    chown -R nexora:nexora /home/nexora /tmp/nexora-compute
+    mkdir -p /var/data/nexora-compute; \
+    chown -R nexora:nexora /home/nexora /var/data/nexora-compute
 
 ENV HOME=/home/nexora
 EXPOSE 10000
