@@ -63,10 +63,19 @@ jobs:
           set -euo pipefail
           docker run -d --name nexora-managed-compute-ci -p 10000:10000 -e NEXORA_MANAGED_COMPUTE_SECRET="$NEXORA_MANAGED_COMPUTE_SECRET" nexora-managed-compute:ci
           trap 'docker rm -f nexora-managed-compute-ci >/dev/null 2>&1 || true' EXIT
-          for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:10000/health >/tmp/health.json; then break; fi
+          health_ready=0
+          for attempt in $(seq 1 60); do
+            if curl --connect-timeout 2 --max-time 5 -fsS http://127.0.0.1:10000/health >/tmp/health.json 2>/dev/null; then
+              health_ready=1
+              break
+            fi
             sleep 2
           done
+          if [ "$health_ready" != "1" ]; then
+            echo "Managed NEXORA container did not become healthy within 120 seconds."
+            docker logs nexora-managed-compute-ci || true
+            exit 1
+          fi
           python - <<'PY'
           import json
           import os
@@ -87,6 +96,7 @@ jobs:
           curl -fsS -H "X-NEXORA-COMPUTE-KEY: $NEXORA_MANAGED_COMPUTE_SECRET" http://127.0.0.1:10000/internal/capabilities >/tmp/capabilities.json
           python - <<'PY'
           import json
+          import os
           payload = json.load(open("/tmp/capabilities.json", encoding="utf-8"))
           assert payload["toolchain_ready"] is True, payload
           assert payload["job_submission_enabled"] is False
