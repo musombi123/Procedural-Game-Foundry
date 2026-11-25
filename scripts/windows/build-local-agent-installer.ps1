@@ -51,8 +51,8 @@ if (-not (Test-Path $PthFile)) {
 $PthContents = @(
     "python311.zip",
     ".",
-    "Lib\site-packages",
     "foundry",
+    "Lib\site-packages",
     "import site"
 ) -join [Environment]::NewLine
 Set-Content -Path $PthFile -Value $PthContents -Encoding Ascii
