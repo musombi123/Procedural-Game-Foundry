@@ -502,6 +502,27 @@ def check_requirements(profile_id: str, profile: dict[str, Any]) -> dict[str, An
 
     cpu = int(machine.get("logical_cpu_count") or 0)
     add("CPU", cpu >= requirements["min_cpu_cores"], f"{cpu} logical cores detected; {requirements['min_cpu_cores']} recommended minimum.")
+
+    # Total logical cores alone are not enough: avoid starting Blender, video
+    # processing or exports when other foreground work has consumed the CPU.
+    measured_available_cores = machine.get("cpu_available_cores")
+    try:
+        available_cores = float(measured_available_cores) if measured_available_cores is not None else float(cpu)
+    except (TypeError, ValueError):
+        available_cores = 0.0
+    minimum_available_cores = max(1.0, float(requirements["min_cpu_cores"]) * 0.45)
+    utilization = machine.get("cpu_utilization_percent")
+    utilization_note = (
+        f" Current system CPU utilization is {float(utilization):g}%."
+        if isinstance(utilization, (int, float)) and not isinstance(utilization, bool)
+        else ""
+    )
+    add(
+        "Available CPU capacity",
+        available_cores >= minimum_available_cores,
+        f"{available_cores:g} CPU cores estimated available; {minimum_available_cores:g} required before starting this workload.{utilization_note}",
+    )
+
     ram = float(machine.get("ram_total_gib") or 0)
     add("Memory", ram >= requirements["min_ram_gib"], f"{ram:g} GiB installed; {requirements['min_ram_gib']} GiB required.")
     available_ram = machine.get("ram_available_gib")

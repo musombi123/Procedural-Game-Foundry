@@ -108,6 +108,25 @@ def _required_tool_state(profile: dict[str, Any]) -> dict[str, bool]:
     }
 
 
+def _core_toolchain_ready(tool_state: dict[str, bool]) -> bool:
+    """Core production readiness excludes optional Android export tooling."""
+    return all(tool_state.get(name, False) for name in ("blender", "godot", "ffmpeg", "ffprobe"))
+
+
+def _workload_toolchain_capabilities(tool_state: dict[str, bool]) -> dict[str, bool]:
+    """Report only workloads whose exact executable dependencies are present."""
+    return {
+        "workspace_editing": True,
+        "procedural_3d": bool(tool_state.get("blender") and tool_state.get("godot")),
+        "movie_processing": bool(tool_state.get("ffmpeg") and tool_state.get("ffprobe")),
+        "android_export": bool(
+            tool_state.get("godot")
+            and tool_state.get("java")
+            and tool_state.get("android_sdk")
+        ),
+    }
+
+
 def _public_profile(profile: dict[str, Any]) -> dict[str, Any]:
     machine = profile.get("machine") or {}
     return {
@@ -194,15 +213,19 @@ class PlanRequest(BaseModel):
 @app.get("/health")
 def health():
     profile = _profile()
-    required = _required_tool_state(profile)
+    tool_state = _required_tool_state(profile)
+    core_ready = _core_toolchain_ready(tool_state)
     storage = _workspace_storage_status()
     return {
-        "status": "ready" if all(required.values()) else "degraded",
+        "status": "ready" if core_ready else "degraded",
         "service": "NEXORA Managed Compute Runtime",
-        "toolchain": required,
-        "toolchain_ready": all(required.values()),
+        "toolchain": tool_state,
+        "toolchain_ready": core_ready,
+        "core_toolchain_ready": core_ready,
+        "workload_capabilities": _workload_toolchain_capabilities(tool_state),
         "workspace_storage": storage,
         "workspace_persistence_ready": storage["ready"],
+        "execution_ready": core_ready and storage["ready"],
         "execution_location": "managed_server",
         "job_submission_enabled": False,
     }
@@ -212,17 +235,22 @@ def health():
 def capabilities(x_nexora_compute_key: str | None = Header(default=None)):
     _authorize(x_nexora_compute_key)
     profile = _profile()
-    required = _required_tool_state(profile)
+    tool_state = _required_tool_state(profile)
+    core_ready = _core_toolchain_ready(tool_state)
+    storage = _workspace_storage_status()
     return {
         "available": True,
         "service": "NEXORA Managed Compute Runtime",
-        "toolchain_ready": all(required.values()),
-        "toolchain": required,
+        "toolchain_ready": core_ready,
+        "core_toolchain_ready": core_ready,
+        "toolchain": tool_state,
+        "workload_capabilities": _workload_toolchain_capabilities(tool_state),
         "profile": _public_profile(profile),
-        "workspace_storage": _workspace_storage_status(),
+        "workspace_storage": storage,
+        "execution_ready": core_ready and storage["ready"],
         "execution_location": "managed_server",
         "job_submission_enabled": False,
-        "note": "Server-side toolchain and workspace storage are reported separately. Job transfer/queue execution is not enabled by this runtime-only service.",
+        "note": "Core production tools are reported separately from optional Android tooling and persistent execution storage. Job transfer/queue execution is not enabled by this runtime-only service.",
     }
 
 
@@ -230,9 +258,10 @@ def capabilities(x_nexora_compute_key: str | None = Header(default=None)):
 def plan(payload: PlanRequest, x_nexora_compute_key: str | None = Header(default=None)):
     _authorize(x_nexora_compute_key)
     server_profile = _profile()
-    required = _required_tool_state(server_profile)
+    storage = _workspace_storage_status()
     managed = {
         **server_profile,
-        "available": all(required.values()),
+        "available": True,
+        "execution_ready": storage["ready"],
     }
     return plan_execution(payload.workload, payload.local_profile, managed)

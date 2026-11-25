@@ -44,32 +44,28 @@ RUN set -eux; \
     test -d /opt/nexora/godot-templates/templates; \
     rm -rf /tmp/godot /tmp/godot.zip /tmp/godot-templates.tpz
 
-# Android command-line tools, platform-tools (ADB), platform and build-tools.
-# The emulator/NDK are excluded from the baseline worker and can be a separate
-# high-capacity build profile. Physical-device testing stays on the creator PC.
-# Building the managed image installs Android SDK packages. The organisation
-# must first review and accept the current Android SDK licence terms. This
-# argument is an explicit deployment gate; the image must not accept terms
-# silently during an unattended build.
-RUN test "${NEXORA_ANDROID_SDK_LICENSES_ACCEPTED}" = "true" || { \
-      echo "Set NEXORA_ANDROID_SDK_LICENSES_ACCEPTED=true only after the NEXORA operator has reviewed and accepted the Android SDK licence terms." >&2; \
-      exit 1; \
-    }
-
+# Android command-line tools are an optional, separately licensed capability.
+# The core image (Blender, Godot, FFmpeg/FFprobe and Java) must remain buildable
+# without requiring the operator to accept Android SDK terms. Set the explicit
+# build argument only after the organisation has reviewed those terms.
 RUN set -eux; \
-    mkdir -p "${ANDROID_HOME}/cmdline-tools"; \
-    curl -fL --retry 4 --retry-delay 2 \
-      "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
-      -o /tmp/android-cli.zip; \
-    echo "${ANDROID_CMDLINE_TOOLS_SHA256}  /tmp/android-cli.zip" | sha256sum -c -; \
-    unzip -q /tmp/android-cli.zip -d /tmp/android-cli; \
-    mkdir -p "${ANDROID_HOME}/cmdline-tools/latest"; \
-    cp -a /tmp/android-cli/cmdline-tools/. "${ANDROID_HOME}/cmdline-tools/latest/"; \
-    rm -rf /tmp/android-cli /tmp/android-cli.zip; \
-    yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_HOME}" --licenses >/dev/null; \
-    "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_HOME}" \
-      "platform-tools" "platforms;android-${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}"; \
-    chmod -R a+rX "${ANDROID_HOME}"
+    if [ "${NEXORA_ANDROID_SDK_LICENSES_ACCEPTED}" = "true" ]; then \
+      mkdir -p "${ANDROID_HOME}/cmdline-tools"; \
+      curl -fL --retry 4 --retry-delay 2 \
+        "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
+        -o /tmp/android-cli.zip; \
+      echo "${ANDROID_CMDLINE_TOOLS_SHA256}  /tmp/android-cli.zip" | sha256sum -c -; \
+      unzip -q /tmp/android-cli.zip -d /tmp/android-cli; \
+      mkdir -p "${ANDROID_HOME}/cmdline-tools/latest"; \
+      cp -a /tmp/android-cli/cmdline-tools/. "${ANDROID_HOME}/cmdline-tools/latest/"; \
+      rm -rf /tmp/android-cli /tmp/android-cli.zip; \
+      yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_HOME}" --licenses >/dev/null; \
+      "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_HOME}" \
+        "platform-tools" "platforms;android-${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}"; \
+      chmod -R a+rX "${ANDROID_HOME}"; \
+    else \
+      echo "Android SDK installation skipped: organisation licence acceptance has not been recorded."; \
+    fi
 
 ENV PATH="${ANDROID_HOME}/platform-tools:${ANDROID_HOME}/cmdline-tools/latest/bin:/usr/local/bin:${PATH}" \
     NEXORA_BLENDER_PATH=/usr/bin/blender \
