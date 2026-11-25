@@ -32,6 +32,15 @@ def test_packaging_workflow_builds_and_publishes_windows_installer():
     assert "softprops/action-gh-release" in workflow
 
 
+def test_public_releases_require_authenticode_signing():
+    workflow = (ROOT / ".github" / "workflows" / "nexora-local-agent-windows.yml").read_text(encoding="utf-8")
+    assert "NEXORA_WINDOWS_SIGNING_CERT_BASE64" in workflow
+    assert "NEXORA_WINDOWS_SIGNING_CERT_PASSWORD" in workflow
+    assert "Require a signing certificate for public releases" in workflow
+    assert "Authenticode verification" in workflow
+    assert "refs/tags/local-agent-v" in workflow
+
+
 def test_user_setup_documentation_does_not_request_terminal_commands_or_pairing_pin():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     section = readme.split("## NEXORA production execution model", 1)[1].split("## Quick start", 1)[0]
