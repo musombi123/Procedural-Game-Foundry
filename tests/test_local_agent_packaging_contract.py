@@ -21,7 +21,8 @@ def test_windows_installer_registers_hidden_logon_task_with_crash_recovery():
     assert "__AGENT_PATH__" in task
     assert 'Source: "NEXORA-Local-Agent-Task.xml"; Flags: dontcopy' in installer
     assert "ExtractTemporaryFile('NEXORA-Local-Agent-Task.xml')" in installer
-    assert "LoadStringFromFile" in installer
+    assert "LoadStringsFromFile" in installer
+    assert "Utf8Encode(TaskTemplate)" in installer
     assert '/Delete /TN ""NEXORA Local Agent"" /F' in installer
     assert "<LogonTrigger>" in task
     assert "<LogonType>InteractiveToken</LogonType>" in task
