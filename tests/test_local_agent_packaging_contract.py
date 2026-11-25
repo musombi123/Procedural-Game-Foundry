@@ -26,7 +26,7 @@ def test_frozen_agent_entrypoint_owns_runtime_paths_and_single_instance():
 def test_packaging_workflow_builds_and_publishes_windows_installer():
     workflow = (ROOT / ".github" / "workflows" / "nexora-local-agent-windows.yml").read_text(encoding="utf-8")
     assert "windows-latest" in workflow
-    assert "PyInstaller" in workflow
+    assert "package-nexora-local-agent.ps1" in workflow
     assert "Inno Setup" in workflow
     assert "NEXORA-Local-Agent-Setup.exe" in workflow
     assert "softprops/action-gh-release" in workflow
